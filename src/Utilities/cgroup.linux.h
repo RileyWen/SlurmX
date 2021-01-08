@@ -6,15 +6,17 @@
  * it provides some simple initialization and RAII wrappers.
  *
  */
+#pragma once
 
 #include <fmt/format.h>
 #include <fmt/printf.h>
 #include <pthread.h>
 
 #include <array>
-#include <boost/utility.hpp>
+#include <boost/move/move.hpp>
 #include <cassert>
 #include <map>
+#include <optional>
 #include <string_view>
 
 #include "libcgroup.h"
@@ -35,8 +37,13 @@ enum class Controller : uint64_t {
 
 enum class ControllerFile : uint64_t {
   CPU_SHARES = 0,
+  CPU_CFS_PERIOD_US,
+  CPU_CFS_QUOTA_US,
+
   MEMORY_LIMIT_BYTES,
+  MEMORY_MEMSW_LIMIT_IN_BYTES,
   MEMORY_SOFT_LIMIT_BYTES,
+
   BLOCKIO_WEIGHT,
 
   ControllerFileCount
@@ -54,8 +61,13 @@ constexpr std::array<std::string_view,
                      static_cast<size_t>(ControllerFile::ControllerFileCount)>
     ControllerFileStringView{
         "cpu.shares",
+        "cpu.cfs_period_us",
+        "cpu.cfs_quota_us",
+
         "memory.limit_in_bytes",
+        "memory.memsw.limit_in_bytes",
         "memory.soft_limit_in_bytes",
+
         "blkio.weight",
     };
 }  // namespace Internal
@@ -74,79 +86,114 @@ constexpr std::string_view GetControllerFileStringView(
 
 class ControllerFlags {
  public:
-  ControllerFlags() : m_flags_(0u) {}
+  ControllerFlags() noexcept : m_flags_(0u) {}
 
-  explicit ControllerFlags(CgroupConstant::Controller controller)
+  explicit ControllerFlags(CgroupConstant::Controller controller) noexcept
       : m_flags_(1u << static_cast<uint64_t>(controller)) {}
 
-  ControllerFlags(const ControllerFlags &val) = default;
+  ControllerFlags(const ControllerFlags &val) noexcept = default;
 
-  ControllerFlags operator|=(const ControllerFlags &rhs) {
+  ControllerFlags operator|=(const ControllerFlags &rhs) noexcept {
     m_flags_ |= rhs.m_flags_;
     return *this;
   }
 
-  ControllerFlags operator&=(const ControllerFlags &rhs) {
+  ControllerFlags operator&=(const ControllerFlags &rhs) noexcept {
     m_flags_ &= rhs.m_flags_;
     return *this;
   }
 
-  operator bool() const { return static_cast<bool>(m_flags_); }
+  operator bool() const noexcept { return static_cast<bool>(m_flags_); }
+
+  ControllerFlags operator~() const noexcept {
+    ControllerFlags cf;
+    cf.m_flags_ = ~m_flags_;
+    return cf;
+  }
 
  private:
   friend ControllerFlags operator|(const ControllerFlags &lhs,
-                                   const ControllerFlags &rhs);
+                                   const ControllerFlags &rhs) noexcept;
   friend ControllerFlags operator&(const ControllerFlags &lhs,
-                                   const ControllerFlags &rhs);
-  friend ControllerFlags operator|(const ControllerFlags &lhs,
-                                   const CgroupConstant::Controller &rhs);
-  friend ControllerFlags operator&(const ControllerFlags &lhs,
-                                   const CgroupConstant::Controller &rhs);
-  friend ControllerFlags operator|(const CgroupConstant::Controller &lhs,
-                                   const CgroupConstant::Controller &rhs);
+                                   const ControllerFlags &rhs) noexcept;
+  friend ControllerFlags operator|(
+      const ControllerFlags &lhs,
+      const CgroupConstant::Controller &rhs) noexcept;
+  friend ControllerFlags operator&(
+      const ControllerFlags &lhs,
+      const CgroupConstant::Controller &rhs) noexcept;
+  friend ControllerFlags operator|(
+      const CgroupConstant::Controller &lhs,
+      const CgroupConstant::Controller &rhs) noexcept;
   uint64_t m_flags_;
 };
 
 inline ControllerFlags operator|(const ControllerFlags &lhs,
-                                 const ControllerFlags &rhs) {
+                                 const ControllerFlags &rhs) noexcept {
   ControllerFlags flags;
   flags.m_flags_ = lhs.m_flags_ | rhs.m_flags_;
   return flags;
 }
 
 inline ControllerFlags operator&(const ControllerFlags &lhs,
-                                 const ControllerFlags &rhs) {
+                                 const ControllerFlags &rhs) noexcept {
   ControllerFlags flags;
   flags.m_flags_ = lhs.m_flags_ & rhs.m_flags_;
   return flags;
 }
 
-inline ControllerFlags operator|(const ControllerFlags &lhs,
-                                 const CgroupConstant::Controller &rhs) {
+inline ControllerFlags operator|(
+    const ControllerFlags &lhs,
+    const CgroupConstant::Controller &rhs) noexcept {
   ControllerFlags flags;
   flags.m_flags_ = lhs.m_flags_ | (1u << static_cast<uint64_t>(rhs));
   return flags;
 }
 
-inline ControllerFlags operator&(const ControllerFlags &lhs,
-                                 const CgroupConstant::Controller &rhs) {
+inline ControllerFlags operator&(
+    const ControllerFlags &lhs,
+    const CgroupConstant::Controller &rhs) noexcept {
   ControllerFlags flags;
   flags.m_flags_ = lhs.m_flags_ & (1u << static_cast<uint64_t>(rhs));
   return flags;
 }
 
-inline ControllerFlags operator|(const CgroupConstant::Controller &lhs,
-                                 const CgroupConstant::Controller &rhs) {
+inline ControllerFlags operator|(
+    const CgroupConstant::Controller &lhs,
+    const CgroupConstant::Controller &rhs) noexcept {
   ControllerFlags flags;
   flags.m_flags_ =
       (1u << static_cast<uint64_t>(lhs)) | (1u << static_cast<uint64_t>(rhs));
   return flags;
 }
 
+const ControllerFlags NO_CONTROLLER_FLAG{};
+
+// In many distributions, 'cpu' and 'cpuacct' are mounted together. 'cpu'
+//  and 'cpuacct' both point to a single 'cpu,cpuacct' account. libcgroup
+//  handles this for us and no additional care needs to be take.
+const ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
+
 class Cgroup;  // Forward decl
 
 class CgroupManager {
+ private:
+  struct CgroupInfo {
+    CgroupInfo() : ref_cnt(0){};
+
+    CgroupInfo(CgroupInfo &&) = default;
+    CgroupInfo &operator=(CgroupInfo &&) = default;
+
+    int ref_cnt;
+    std::unique_ptr<Cgroup> cgroup_ptr;
+
+   private:
+    BOOST_MOVABLE_BUT_NOT_COPYABLE(CgroupInfo);
+  };
+
  public:
+  using CgroupInfoCRefWrapper = std::reference_wrapper<const CgroupInfo>;
+
   static CgroupManager &getInstance();
 
   [[nodiscard]] bool isMounted(CgroupConstant::Controller controller) const {
@@ -154,9 +201,12 @@ class CgroupManager {
   }
 
   bool create_or_open(const std::string &cgroup_string,
-             ControllerFlags preferred_controllers,
-             ControllerFlags required_controllers, bool retrieve);
+                      ControllerFlags preferred_controllers,
+                      ControllerFlags required_controllers, bool retrieve);
   bool destroy(const std::string &cgroup_path);
+
+  std::optional<CgroupInfoCRefWrapper> find_cgroup(
+      const std::string &cgroup_path);
 
   bool migrate_proc_to_cgroup(pid_t pid, const std::string &cgroup_path);
 
@@ -177,12 +227,6 @@ class CgroupManager {
   ControllerFlags m_mounted_controllers_;
 
   static CgroupManager *m_singleton;
-
-  struct CgroupInfo : boost::noncopyable {
-    int ref_cnt;
-    std::unique_ptr<Cgroup> cgroup_ptr;
-  };
-  // Ref-counting
   std::map<std::string, CgroupInfo> m_cgroup_info_;
 
   class MutexGuard {

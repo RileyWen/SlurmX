@@ -34,6 +34,8 @@ int CgroupManager::initialize() {
   fmt::fprintf(stderr, "Initializing cgroup library.\n");
   cgroup_init();
 
+  // cgroup_set_loglevel(CGROUP_LOG_DEBUG);
+
   void *handle = nullptr;
   controller_data info{};
 
@@ -234,7 +236,7 @@ bool CgroupManager::create_or_open(const std::string &cgroup_string,
       // Only record at D_ALWAYS if any cgroup mounts are available.
       fmt::fprintf(stderr,
                    "Unable to create cgroup %s."
-                   "  Cgroup functionality will not work: %s\n",
+                   " Cgroup functionality will not work: %s\n",
                    cgroup_string.c_str(), cgroup_strerror(err));
       return false;
     } else {
@@ -274,6 +276,9 @@ bool CgroupManager::create_or_open(const std::string &cgroup_string,
   // Finally, fill in the Cgroup object's state:
   cg_info.cgroup_ptr->setCgroupString(cgroup_string);
   cg_info.cgroup_ptr->setCgroup(*cgroupp);
+  cg_info.ref_cnt = 1;
+
+  m_cgroup_info_[cgroup_string] = std::move(cg_info);
 
   return true;
 }
@@ -300,17 +305,22 @@ bool CgroupManager::destroy(const std::string &cgroup_path) {
     if ((err = cgroup_get_cgroup(dcg))) {
       fmt::fprintf(stderr, "Unable to read cgroup %s for deletion: %u %s\n",
                    cgroup_path.c_str(), err, cgroup_strerror(err));
+      cgroup_free(&dcg);
       return false;
     }
 
-    if ((err = cgroup_delete_cgroup(
-             dcg, CGFLAG_DELETE_RECURSIVE | CGFLAG_DELETE_IGNORE_MIGRATION))) {
-      fmt::fprintf(stderr, "Unable to completely remove cgroup %s for. %u %s\n",
+    // CGFLAG_DELETE_EMPTY_ONLY is set to avoid libgroup from finding parent
+    // cgroup, which is usually the mount point of root cgroup and will cause
+    // ENOENT error.
+    //
+    // Todo: Test this part when cgroup is not empty!
+    if ((err = cgroup_delete_cgroup_ext(
+             dcg, CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
+      fmt::fprintf(stderr, "Unable to completely remove cgroup %s: %u %s\n",
                    cgroup_path.c_str(), err, cgroup_strerror(err));
-      return false;
+    } else {
+      fmt::fprintf(stderr, "Deleted cgroup %s.\n", cgroup_path.c_str());
     }
-
-    fmt::fprintf(stderr, "Deleted cgroup %s.\n", cgroup_path.c_str());
 
     // Notice the cgroup struct freed here is not the one held by Cgroup class.
     cgroup_free(&dcg);
@@ -490,4 +500,11 @@ after_restore:
     free(orig_cgroup_path);
   }
   return err;
+}
+std::optional<CgroupManager::CgroupInfoCRefWrapper> CgroupManager::find_cgroup(
+    const std::string &cgroup_path) {
+  auto iter = m_cgroup_info_.find(cgroup_path);
+  if (iter == m_cgroup_info_.end()) return std::nullopt;
+
+  return iter->second;
 }

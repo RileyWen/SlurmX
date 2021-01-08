@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 # Find third-party libraries
 set(THIRD_PARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
+find_package(Threads REQUIRED)
 find_package(fmt 7.1.3 REQUIRED HINTS ${THIRD_PARTY_DIR}/fmt)
 find_package(Boost 1.71 REQUIRED)
 
@@ -25,7 +26,7 @@ target_link_libraries(slurmxd
 file(GLOB_RECURSE CGROUP_UTILITY_SRC src/Utilities/*.cpp src/Utilities/*.h)
 add_library(cgroup_utility ${CGROUP_UTILITY_SRC})
 target_include_directories(cgroup_utility PUBLIC src/Utilities)
-target_link_libraries(cgroup_utility PRIVATE fmt::fmt boost)
+target_link_libraries(cgroup_utility PRIVATE fmt::fmt Boost::boost)
 
 # Tests
 add_executable(test_server test/grpc_server_test.cpp)
@@ -37,9 +38,10 @@ target_link_libraries(test_client ${THIRD_PARTY_LIBS})
 add_executable(test_io_redirect test/io_redirect_test.cpp)
 target_link_libraries(test_io_redirect fmt::fmt)
 
+add_executable(test_cgroup_limit test/cgroup_limit_test.cpp)
+target_link_libraries(test_cgroup_limit fmt::fmt PkgConfig::libcgroup cgroup_utility Threads::Threads)
 
 # Generate proto files
-find_package(Threads REQUIRED)
 find_package(Protobuf CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/grpc)
 find_package(gRPC CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/grpc)
 
