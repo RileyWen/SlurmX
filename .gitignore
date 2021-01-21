@@ -1,4 +1,9 @@
 .idea
-third_party/*
+
 generated
 cmake-build-*
+
+third_party/*
+
+# Header only
+!third_party/concurrentqueue

@@ -1,4 +1,3 @@
-#include <fmt/format.h>
 #include <libcgroup.h>
 #include <unistd.h>
 
@@ -7,7 +6,6 @@
 #include <vector>
 
 int main() {
-
 
   return 0;
 }

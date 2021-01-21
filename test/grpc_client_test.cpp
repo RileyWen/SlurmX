@@ -1,12 +1,12 @@
+#include <grpc++/grpc++.h>
+#include <spdlog/fmt/bundled/core.h>
+
 #include <iostream>
 #include <memory>
 #include <string>
 
-#include <grpc++/grpc++.h>
-#include <fmt/format.h>
-
-#include "protos/test_grpc.pb.h"
 #include "protos/test_grpc.grpc.pb.h"
+#include "protos/test_grpc.pb.h"
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -51,16 +51,16 @@ class GreeterClient {
   std::unique_ptr<Greeter::Stub> stub_;
 };
 
-int main(int argc, char** argv) {
-  // Instantiate the client. It requires a channel, out of which the actual RPCs
-  // are created. This channel models a connection to an endpoint (in this case,
-  // localhost at port 50051). We indicate that the channel isn't authenticated
-  // (use of InsecureChannelCredentials()).
-  GreeterClient greeter(grpc::CreateChannel(
-      "localhost:50051", grpc::InsecureChannelCredentials()));
-  std::string user("world");
-  std::string reply = greeter.SayHello(user);
-  fmt::print("Greeter received: {}", reply);
-
-  return 0;
-}
+//int main(int argc, char** argv) {
+//  // Instantiate the client. It requires a channel, out of which the actual RPCs
+//  // are created. This channel models a connection to an endpoint (in this case,
+//  // localhost at port 50051). We indicate that the channel isn't authenticated
+//  // (use of InsecureChannelCredentials()).
+//  GreeterClient greeter(grpc::CreateChannel(
+//      "localhost:50051", grpc::InsecureChannelCredentials()));
+//  std::string user("world");
+//  std::string reply = greeter.SayHello(user);
+//  fmt::print("Greeter received: {}", reply);
+//
+//  return 0;
+//}

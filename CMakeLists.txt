@@ -1,8 +1,7 @@
-cmake_minimum_required(VERSION 3.17)
+cmake_minimum_required(VERSION 3.16)
 project(SlurmX)
 
 set(CMAKE_CXX_STANDARD 17)
-
 
 # Find third-party libraries
 set(THIRD_PARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
@@ -10,36 +9,39 @@ set(THIRD_PARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 find_package(Threads REQUIRED)
 find_package(fmt 7.1.3 REQUIRED HINTS ${THIRD_PARTY_DIR}/fmt)
 find_package(Boost 1.71 REQUIRED)
+find_package(GTest CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/google-test)
+find_package(spdlog 1.8.2 REQUIRED HINTS ${THIRD_PARTY_DIR}/spdlog)
+find_package(Libevent REQUIRED HINTS ${THIRD_PARTY_DIR}/libevent)
 
 find_package(PkgConfig REQUIRED)
+
 pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
+
+list(APPEND CMAKE_PREFIX_PATH "${THIRD_PARTY_DIR}/libuv")
+pkg_check_modules(libuv REQUIRED IMPORTED_TARGET libuv>=1.40.0)
+
+# concurrent queue has no cmake config files. Add it manually as a header-only library.
+add_library(concurrentqueue INTERFACE)
+target_include_directories(concurrentqueue INTERFACE ${THIRD_PARTY_DIR}/concurrentqueue/include)
 
 LIST(APPEND THIRD_PARTY_LIBS proto fmt::fmt)
 
-file(GLOB_RECURSE SLURMXD_SRC src/SlurmXd/*.cpp src/SlurmXd/*.h)
+add_subdirectory(src/Utilities)
+
+file(GLOB_RECURSE SLURMXD_SRC
+        src/SlurmXd/*.cpp src/SlurmXd/*.h
+        src/SlurmXd/**/*.cpp src/SlurmXd/**/*.h)
 add_executable(slurmxd ${SLURMXD_SRC})
 target_link_libraries(slurmxd
-        fmt::fmt
-        PkgConfig::libcgroup
+        PkgConfig::libuv
+        spdlog::spdlog
+        concurrentqueue
+        Utility_AnonymousPipe
+        Utility_cgroup
         )
 
-file(GLOB_RECURSE CGROUP_UTILITY_SRC src/Utilities/*.cpp src/Utilities/*.h)
-add_library(cgroup_utility ${CGROUP_UTILITY_SRC})
-target_include_directories(cgroup_utility PUBLIC src/Utilities)
-target_link_libraries(cgroup_utility PRIVATE fmt::fmt Boost::boost)
-
 # Tests
-add_executable(test_server test/grpc_server_test.cpp)
-target_link_libraries(test_server ${THIRD_PARTY_LIBS})
-
-add_executable(test_client test/grpc_client_test.cpp)
-target_link_libraries(test_client ${THIRD_PARTY_LIBS})
-
-add_executable(test_io_redirect test/io_redirect_test.cpp)
-target_link_libraries(test_io_redirect fmt::fmt)
-
-add_executable(test_cgroup_limit test/cgroup_limit_test.cpp)
-target_link_libraries(test_cgroup_limit fmt::fmt PkgConfig::libcgroup cgroup_utility Threads::Threads)
+add_subdirectory(test)
 
 # Generate proto files
 find_package(Protobuf CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/grpc)

@@ -44,8 +44,8 @@ void RunServer() {
   server->Wait();
 }
 
-int main(int argc, char** argv) {
-  RunServer();
-
-  return 0;
-}
+//int main(int argc, char** argv) {
+//  RunServer();
+//
+//  return 0;
+//}

@@ -8,9 +8,8 @@
  */
 #pragma once
 
-#include <fmt/format.h>
-#include <fmt/printf.h>
 #include <pthread.h>
+#include <spdlog/spdlog.h>
 
 #include <array>
 #include <boost/move/move.hpp>
@@ -22,6 +21,8 @@
 #include "libcgroup.h"
 
 static pthread_mutex_t g_cgroups_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+class CgroupManager; // Forward Declaration
 
 namespace CgroupConstant {
 
@@ -174,7 +175,73 @@ const ControllerFlags NO_CONTROLLER_FLAG{};
 //  handles this for us and no additional care needs to be take.
 const ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 
+
+// '0' means that the entry is not set.
+struct CgroupLimit {
+  uint64_t memory_limit_bytes = 0;
+  uint64_t memory_sw_limit_bytes = 0;
+  uint64_t memory_soft_limit_bytes = 0;
+  uint64_t cpu_core_limit = 0;
+  uint64_t cpu_shares = 0;
+  uint64_t blockio_weight = 0;
+};
+
+namespace Internal {
+
 class Cgroup;  // Forward decl
+
+class CgroupManipulator {
+ public:
+  explicit CgroupManipulator(const Cgroup &);
+
+  bool set_memory_limit_bytes(uint64_t memory_bytes);
+  bool set_memory_sw_limit_bytes(uint64_t mem_bytes);
+  bool set_memory_soft_limit_bytes(uint64_t memory_bytes);
+  bool set_cpu_core_limit(uint64_t core_num);
+  bool set_cpu_shares(uint64_t share);
+  bool set_blockio_weight(uint64_t weight);
+
+ private:
+  bool set_controller_value_(CgroupConstant::Controller controller,
+                             CgroupConstant::ControllerFile controller_file,
+                             uint64_t value);
+
+  const Cgroup &m_cgroup_;
+};
+
+class Cgroup {
+ public:
+  Cgroup() : m_cgroup_(nullptr) {}
+  ~Cgroup();
+
+  void destroy();
+
+  struct cgroup &getCgroup() const {
+    if (isValid()) {
+      return *m_cgroup_;
+    }
+    spdlog::warn("Accessing invalid cgroup.");
+    return *m_cgroup_;
+  }
+  const std::string &getCgroupString() const { return m_cgroup_path_; };
+
+  // Using the zombie object pattern as exceptions are not available.
+  bool isValid() const{ return m_cgroup_ != NULL; }
+
+ private:
+  std::string m_cgroup_path_;
+  mutable struct cgroup *m_cgroup_;
+
+ protected:
+  void setCgroupString(const std::string &cgroup_string) {
+    m_cgroup_path_ = cgroup_string;
+  };
+  void setCgroup(struct cgroup &cgroup);
+
+  friend class ::CgroupManager;
+};
+
+}  // namespace Internal
 
 class CgroupManager {
  private:
@@ -185,7 +252,7 @@ class CgroupManager {
     CgroupInfo &operator=(CgroupInfo &&) = default;
 
     int ref_cnt;
-    std::unique_ptr<Cgroup> cgroup_ptr;
+    std::unique_ptr<Internal::Cgroup> cgroup_ptr;
 
    private:
     BOOST_MOVABLE_BUT_NOT_COPYABLE(CgroupInfo);
@@ -222,11 +289,12 @@ class CgroupManager {
                             bool required, bool has_cgroup,
                             bool &changed_cgroup) const;
 
-  // ControllerFlags m_cgroup_mounts;
+  bool set_cgroup_limit(const Internal::Cgroup &cg, const CgroupLimit &cg_limit);
 
   ControllerFlags m_mounted_controllers_;
 
-  static CgroupManager *m_singleton;
+  static CgroupManager *m_singleton_;
+
   std::map<std::string, CgroupInfo> m_cgroup_info_;
 
   class MutexGuard {
@@ -243,34 +311,3 @@ class CgroupManager {
   static MutexGuard getGuard() { return MutexGuard(g_cgroups_mutex); }
 };
 
-class Cgroup {
- public:
-  Cgroup() : m_cgroup(nullptr) {}
-  ~Cgroup();
-
-  void destroy();
-
-  struct cgroup &getCgroup() {
-    if (isValid()) {
-      return *m_cgroup;
-    }
-    fmt::print(stderr, "Accessing invalid cgroup.");
-    return *m_cgroup;
-  }
-  const std::string &getCgroupString() { return m_cgroup_string; };
-
-  // Using the zombie object pattern as exceptions are not available.
-  bool isValid() { return m_cgroup != NULL; }
-
- private:
-  std::string m_cgroup_string;
-  struct cgroup *m_cgroup;
-
- protected:
-  void setCgroupString(const std::string &cgroup_string) {
-    m_cgroup_string = cgroup_string;
-  };
-  void setCgroup(struct cgroup &cgroup);
-
-  friend class CgroupManager;
-};
