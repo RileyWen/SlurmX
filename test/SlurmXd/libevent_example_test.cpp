@@ -41,14 +41,18 @@ static STATIC_FUNC static_func_();
 
 // NOTICE: The test result indicates that this handler
 // must be installed before any fork().
-// TODO: Creating child process cause SIGCHLD?
 static void sigchld_handler(int sig) {
-  spdlog::info("SIGCHLD received too early.");
+  pid_t pid;
+  int child_status;
+  pid = wait(&child_status);
+  if (pid < 0) {
+    spdlog::error("SIGCHLD received too early. Error:{}", strerror(errno));
+  } else
+    spdlog::info("SIGCHLD received too early. PID: {}", pid);
 }
 
-struct EVSketchTest : testing::Test {
-  EVSketchTest()
-      : m_ev_sigchld_(nullptr), m_ev_base_(nullptr), testing::Test() {}
+struct LibEvent : testing::Test {
+  LibEvent() : m_ev_sigchld_(nullptr), m_ev_base_(nullptr), testing::Test() {}
 
   void SetUp() override {
     signal(SIGCHLD, sigchld_handler);
@@ -72,7 +76,7 @@ struct EVSketchTest : testing::Test {
   }
 
   static void read_uv_stream(struct bufferevent *bev, void *user_data) {
-    auto *this_ = reinterpret_cast<EVSketchTest *>(user_data);
+    auto *this_ = reinterpret_cast<LibEvent *>(user_data);
 
     size_t buf_len = evbuffer_get_length(bev->input);
     spdlog::info("Trying to read buffer(len: {})...", buf_len);
@@ -89,7 +93,7 @@ struct EVSketchTest : testing::Test {
 
   static void sigchld_handler_func(evutil_socket_t sig, short events,
                                    void *user_data) {
-    auto *this_ = reinterpret_cast<EVSketchTest *>(user_data);
+    auto *this_ = reinterpret_cast<LibEvent *>(user_data);
 
     spdlog::info("SIGCHLD received...");
     int status;
@@ -108,7 +112,7 @@ struct EVSketchTest : testing::Test {
   std::string m_expected_str_;
 };
 
-TEST_F(EVSketchTest, IoRedirectAndDynamicTaskAdding) {
+TEST_F(LibEvent, IoRedirectAndDynamicTaskAdding) {
   std::string test_prog_path = "/tmp/slurmxd_test_" + RandomFileNameStr();
   std::string prog_text =
       "#include <iostream>\\n"

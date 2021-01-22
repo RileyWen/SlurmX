@@ -279,7 +279,7 @@ bool CgroupManager::create_or_open(const std::string &cgroup_string,
 
 /*
  * Delete the cgroup in the OS.
- * Returns 0 on success, -1 on failure;
+ * Returns true on success, false on failure;
  */
 bool CgroupManager::destroy(const std::string &cgroup_path) {
   MutexGuard guard = getGuard();
@@ -381,6 +381,9 @@ bool CgroupManager::migrate_proc_to_cgroup(pid_t pid,
              orig_cgroup,
              GetControllerStringView(Controller::MEMORY_CONTROLLER).data())) ==
         nullptr) {
+      spdlog::warn(
+          "Unable to get memory controller of cgroup {}. Error {}: {}\n",
+          orig_cgroup_path, err, cgroup_strerror(err));
       cgroup_free(&orig_cgroup);
       goto after_migrate;
     }
@@ -468,7 +471,7 @@ after_restore:
   if (orig_cgroup_path != nullptr) {
     free(orig_cgroup_path);
   }
-  return err;
+  return err == 0 ? true : false;
 }
 
 std::optional<CgroupManager::CgroupInfoCRefWrapper> CgroupManager::find_cgroup(
@@ -487,17 +490,19 @@ bool CgroupManager::set_cgroup_limit(const Internal::Cgroup &cg,
   if (cg_limit.cpu_core_limit != 0)
     ret &= cg_manipulator.set_cpu_core_limit(cg_limit.cpu_core_limit);
 
-  if (cg_limit.cpu_shares !=0)
+  if (cg_limit.cpu_shares != 0)
     ret &= cg_manipulator.set_cpu_shares(cg_limit.cpu_shares);
 
-  if (cg_limit.memory_limit_bytes !=0)
+  if (cg_limit.memory_limit_bytes != 0)
     ret &= cg_manipulator.set_memory_limit_bytes(cg_limit.memory_limit_bytes);
 
   if (cg_limit.memory_sw_limit_bytes != 0)
-    ret &= cg_manipulator.set_memory_sw_limit_bytes(cg_limit.memory_sw_limit_bytes);
+    ret &= cg_manipulator.set_memory_sw_limit_bytes(
+        cg_limit.memory_sw_limit_bytes);
 
   if (cg_limit.memory_soft_limit_bytes != 0)
-    ret &= cg_manipulator.set_memory_soft_limit_bytes(cg_limit.memory_soft_limit_bytes);
+    ret &= cg_manipulator.set_memory_soft_limit_bytes(
+        cg_limit.memory_soft_limit_bytes);
 
   if (cg_limit.blockio_weight != 0)
     ret &= cg_manipulator.set_blockio_weight(cg_limit.blockio_weight);
@@ -526,7 +531,6 @@ void Cgroup::destroy() {
     m_cgroup_ = nullptr;
   }
 }
-
 
 CgroupManipulator::CgroupManipulator(const Cgroup &cg) : m_cgroup_(cg) {}
 

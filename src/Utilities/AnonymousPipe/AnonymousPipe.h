@@ -15,10 +15,7 @@ class AnonymousPipe {
     }
   }
 
-  ~AnonymousPipe() noexcept {
-    CloseParentEnd();
-    CloseChildEnd();
-  }
+  ~AnonymousPipe() noexcept = default;
 
   template <typename Integer>
   [[nodiscard]] bool WriteIntegerToParent(Integer val) {
