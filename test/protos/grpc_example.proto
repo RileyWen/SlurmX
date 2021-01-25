@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package test_grpc;
+package grpc_example;
 
 // The greeting service definition.
 service Greeter {
@@ -16,4 +16,17 @@ message HelloRequest {
 // The response message containing the greetings
 message HelloReply {
   string message = 1;
+}
+
+service Math {
+  rpc Max (stream Request) returns (stream Response) {}
+}
+
+message Request {
+  int32 a = 1;
+  int32 b = 2;
+}
+
+message Response {
+  int32 result = 1;
 }

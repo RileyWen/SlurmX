@@ -313,6 +313,8 @@ void TaskManager::ev_sigint_cb_(int sig, short events, void* user_data) {
 
   spdlog::info("Caught an interrupt signal; exiting cleanly ...");
 
+  // Todo: Terminate and clean all task here
+
   event_base_loopexit(this_->m_ev_base_, &delay);
 }
 

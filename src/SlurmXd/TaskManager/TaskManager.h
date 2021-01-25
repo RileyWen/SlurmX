@@ -51,8 +51,7 @@ struct grpc_req_t {
 };
 
 class TaskManager {
-  // TODO: 1. Add SIGCHLD handling
-  //       2. Add process group supporting.
+  // TODO: 1. Add process group supporting.
  public:
   static TaskManager& GetInstance() {
     static TaskManager singleton;

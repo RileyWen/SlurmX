@@ -3,6 +3,8 @@ project(SlurmX)
 
 set(CMAKE_CXX_STANDARD 17)
 
+#set(CMAKE_VERBOSE_MAKEFILE ON)
+
 # Find third-party libraries
 set(THIRD_PARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
@@ -12,6 +14,10 @@ find_package(Boost 1.71 REQUIRED)
 find_package(GTest CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/google-test)
 find_package(spdlog 1.8.2 REQUIRED HINTS ${THIRD_PARTY_DIR}/spdlog)
 find_package(Libevent REQUIRED HINTS ${THIRD_PARTY_DIR}/libevent)
+
+find_package(Protobuf CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/grpc)
+find_package(gRPC CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/grpc)
+get_target_property(GRPC_CPP_PLUGIN_LOCATION gRPC::grpc_cpp_plugin LOCATION)
 
 find_package(PkgConfig REQUIRED)
 
@@ -44,11 +50,6 @@ target_link_libraries(slurmxd
 add_subdirectory(test)
 
 # Generate proto files
-find_package(Protobuf CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/grpc)
-find_package(gRPC CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/grpc)
-
-get_target_property(grpc_cpp_plugin_location gRPC::grpc_cpp_plugin LOCATION)
-
 set(PROTO_SRC_DIR protos)
 file(GLOB_RECURSE PROTO_SRCS ${PROTO_SRC_DIR}/*.proto)
 
@@ -77,6 +78,6 @@ protobuf_generate(
         TARGET proto
         LANGUAGE grpc
         PROTOC_OUT_DIR ${GENERATED_FILE_PATH}
-        PLUGIN "protoc-gen-grpc=${grpc_cpp_plugin_location}"
+        PLUGIN "protoc-gen-grpc=${GRPC_CPP_PLUGIN_LOCATION}"
         GENERATE_EXTENSIONS .grpc.pb.h .grpc.pb.cc
 )
