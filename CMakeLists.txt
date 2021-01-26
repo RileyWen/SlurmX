@@ -41,30 +41,17 @@ LIST(APPEND THIRD_PARTY_LIBS proto fmt::fmt)
 add_subdirectory(src)
 #opt parse
 add_library(optparse_lib STATIC
-        src/opt_parse/opt_parse.cpp
+        src/srun_X/srun_X.cpp
 )
 target_link_libraries(optparse_lib
         ${THIRD_PARTY_LIBS}
 )
 target_include_directories(optparse_lib
         PUBLIC
-            ${PROJECT_SOURCE_DIR}/src/opt_parse
+        ${PROJECT_SOURCE_DIR}/src/srun_X
            # ${THIRD_PARTY_DIR}/grpc/include
 )
 
-add_executable( opt_test
-        test/opt_parse/opt_test.cpp
-)
-target_link_libraries( opt_test
-        PRIVATE
-            optparse_lib
-)
-add_executable( opt_server_test
-        test/opt_parse/opt_server_test.cpp
-)
-target_link_libraries( opt_server_test
-        ${THIRD_PARTY_LIBS}
-)
 
 # Tests
 add_subdirectory(test)

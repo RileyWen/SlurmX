@@ -49,3 +49,18 @@ protobuf_generate(
         PLUGIN "protoc-gen-grpc=${GRPC_CPP_PLUGIN_LOCATION}"
         GENERATE_EXTENSIONS .grpc.pb.h .grpc.pb.cc
 )
+
+
+add_executable( srun_test
+        srun_X/srun_test.cpp
+        )
+target_link_libraries( srun_test
+        PRIVATE
+        optparse_lib
+        )
+add_executable( opt_server_test
+        srun_X/opt_server_test.cpp
+        )
+target_link_libraries( opt_server_test
+        ${THIRD_PARTY_LIBS}
+        )
