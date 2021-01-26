@@ -19,14 +19,14 @@ message HelloReply {
 }
 
 service Math {
-  rpc Max (stream Request) returns (stream Response) {}
+  rpc Max (stream MaxRequest) returns (stream MaxResponse) {}
 }
 
-message Request {
+message MaxRequest {
   int32 a = 1;
   int32 b = 2;
 }
 
-message Response {
+message MaxResponse {
   int32 result = 1;
 }
