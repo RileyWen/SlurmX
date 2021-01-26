@@ -1,4 +1,5 @@
-#include"../../src/opt_parse/opt_parse.cpp"
+#include"../../src/opt_parse/opt_parse.h"
+
 int main(int argc, const char* argv[])
 {
     Command_parse comand_parse;    
