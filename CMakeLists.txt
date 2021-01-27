@@ -42,7 +42,7 @@ add_subdirectory(src)
 #opt parse
 add_library(optparse_lib STATIC
         src/srun_X/srun_X.cpp
-)
+        src/srun_X/srun_async_X.cpp )
 target_link_libraries(optparse_lib
         ${THIRD_PARTY_LIBS}
 )
