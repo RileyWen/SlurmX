@@ -18,6 +18,19 @@ target_link_libraries(slurmx_test
         )
 add_test(NAME slurm_test COMMAND test/slurmx_test)
 
+#google test on srun
+add_executable(srun_test
+        ${CMAKE_SOURCE_DIR}/test/srun_X/srun_test.cpp)
+target_link_libraries(srun_test
+        optparse_lib
+        GTest::gtest
+        GTest::gtest_main
+        proto
+        test_proto
+)
+add_test(NAME srun_test COMMAND test/srun_test)
+
+
 set(PROTO_SRC_DIR ${CMAKE_SOURCE_DIR}/test/protos)
 file(GLOB_RECURSE PROTO_SRCS ${PROTO_SRC_DIR}/*.proto)
 
