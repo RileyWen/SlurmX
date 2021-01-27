@@ -5,6 +5,7 @@
 #include <queue>
 #include <thread>
 
+#include "concurrentqueue/concurrentqueue.h"
 #include "gtest/gtest.h"
 #include "protos/grpc_example.grpc.pb.h"
 #include "protos/grpc_example.pb.h"
@@ -130,29 +131,37 @@ class AsyncBidiMathServer {
     m_server_cq_ = builder.AddCompletionQueue();
     m_server_ = builder.BuildAndStart();
 
-    m_new_call_cq_thread_ = std::make_unique<std::thread>(
-        &AsyncBidiMathServer::m_new_call_cq_func_, this);
+    // Call RequestMax in the constructor.
+    auto new_conn = std::make_unique<ClientConn>(
+        &m_async_serv_, m_server_cq_.get(), m_next_client_index_,
+        &m_to_reap_conn_queue_);
+    m_client_conns_.emplace(m_next_client_index_, std::move(new_conn));
+    m_next_client_index_++;
 
-    m_server_cq_thread_ = std::make_unique<std::thread>(
-        &AsyncBidiMathServer::m_server_cq_func_, this);
+    m_server_cq_thread_ =
+        std::thread(&AsyncBidiMathServer::m_server_cq_func_, this);
+
+    m_conn_reaping_thread_ =
+        std::thread(&AsyncBidiMathServer::m_conn_reap_func_, this);
   }
 
   void WaitStop() {
+    m_thread_should_stop_.store(true, std::memory_order_release);
+
     m_server_->Shutdown();
 
     // Always shutdown the completion queue after the server.
     m_server_cq_->Shutdown();
-    m_new_call_cq_.Shutdown();
 
-    m_new_call_cq_thread_->join();
-    m_server_cq_thread_->join();
+    m_server_cq_thread_.join();
+    m_conn_reaping_thread_.join();
   }
 
   enum class cq_tag_t : uint8_t {
     NEW_RPC_ESTAB = 0,
     WRITE,
     READ,
-    DONE,
+    SHUTDOWN,
   };
 
  private:
@@ -160,79 +169,19 @@ class AsyncBidiMathServer {
 
   static constexpr size_t cq_tag_n_bit = 3;
 
-  void m_new_call_cq_func_() {
-    spdlog::info("m_new_call_cq_func_ started.");
-
-    // Call RequestMax in the constructor.
-    auto new_conn =
-        std::make_unique<ClientConn>(&m_async_serv_, &m_new_call_cq_,
-                                     m_server_cq_.get(), m_next_client_index_);
-    m_next_client_index_++;
-
-    m_client_conns_.emplace(m_next_client_index_ - 1, std::move(new_conn));
-
-    while (true) {
-      void* got_tag = nullptr;
-      bool ok = false;
-      if (!m_new_call_cq_.Next(&got_tag, &ok)) {
-        spdlog::info(
-            "Completion Queue for new calls closed. Thread for handling new "
-            "calls is ending...");
-        break;
-      }
-
-      if (ok) {
-        uint64_t index = index_from_tag(got_tag);
-        cq_tag_t status = status_from_tag(got_tag);
-
-        spdlog::info(
-            "[NewCallCq] Client {} | Status: {}", index,
-            (status == cq_tag_t::READ)
-                ? "READ"
-                : ((status == cq_tag_t::WRITE)
-                       ? "WRITE"
-                       : (status == cq_tag_t::NEW_RPC_ESTAB ? "NEW_RPC_ESTAB"
-                                                            : "DONE")));
-
-        auto iter = m_client_conns_.find(index);
-        if (GPR_UNLIKELY(iter == m_client_conns_.end())) {
-          spdlog::error("[NewCallCq] Client {} doesn't exist!", index);
-        } else {
-          ClientConn* conn = iter->second.get();
-
-          if (status == cq_tag_t::READ) {
-            const MaxRequest& req = conn->GetRequest();
-
-            if (req.a() != 0 || req.b() != 0) {
-              spdlog::info(
-                  "[NewCallCq] Receive Request MAX({},{}) from client {}",
-                  req.a(), req.b(), index);
-
-              MaxResponse resp;
-              resp.set_result(std::max(req.a(), req.b()));
-
-              conn->RequestWrite(resp);
-
-              // Todo: Here should thread pool to handle request!
-
-              // Request Next Read.
-              conn->RequestRead();
-            } else {
-              conn->EndConn();
-            }
-          } else if (status == cq_tag_t::WRITE) {
-            spdlog::info(
-                "[NewCallCq] Write response to Client {} successfully.");
-            conn->WriteFinished();
-          } else {
-            spdlog::error("[NewCallCq] Unexpected status {} of Client {}!",
-                          status, index);
-          }
-        }
-      } else {
-        spdlog::error("[NewCallCq] server_cq_.Next() returned with ok false!");
+  void m_conn_reap_func_() {
+    spdlog::info("[Server] reap thread started.");
+    uint64_t index;
+    while (!m_thread_should_stop_.load(std::memory_order_acquire)) {
+      if (!m_to_reap_conn_queue_.try_dequeue(index))
+        std::this_thread::yield();
+      else {
+        spdlog::info("[Server] Reaping conn: {}", index);
+        std::lock_guard<std::mutex> guard(m_conn_map_lock_);
+        m_client_conns_.erase(index);
       }
     }
+    spdlog::info("[Server] reap thread ended.");
   }
 
   void m_server_cq_func_() {
@@ -263,7 +212,7 @@ class AsyncBidiMathServer {
                                                             : "DONE")));
 
         GPR_ASSERT(status == cq_tag_t::WRITE || status == cq_tag_t::READ ||
-                   status == cq_tag_t::DONE ||
+                   status == cq_tag_t::SHUTDOWN ||
                    status == cq_tag_t::NEW_RPC_ESTAB);
 
         auto iter = m_client_conns_.find(index);
@@ -272,12 +221,7 @@ class AsyncBidiMathServer {
         } else {
           ClientConn* conn = iter->second.get();
 
-          if (status == cq_tag_t::DONE) {
-            spdlog::info(
-                "[ServerCq] Client {}'s RPC has ended. Removing it...");
-
-            m_client_conns_.erase(index);
-          } else if (status == cq_tag_t::NEW_RPC_ESTAB) {
+          if (status == cq_tag_t::NEW_RPC_ESTAB) {
             GPR_ASSERT(index_from_tag(got_tag) == m_next_client_index_ - 1);
             GPR_ASSERT(status_from_tag(got_tag) == cq_tag_t::NEW_RPC_ESTAB);
 
@@ -285,15 +229,20 @@ class AsyncBidiMathServer {
                 "[ServerCq] RPC for client {} established. Requesting read...",
                 m_next_client_index_ - 1);
             conn->RequestRead();
+            conn->ConnEstablished();
 
             // Prepare next incoming RPC.
             auto new_conn = std::make_unique<ClientConn>(
-                &m_async_serv_, &m_new_call_cq_, m_server_cq_.get(),
-                m_next_client_index_);
-            m_next_client_index_++;
+                &m_async_serv_, m_server_cq_.get(), m_next_client_index_,
+                &m_to_reap_conn_queue_);
 
-            m_client_conns_.emplace(m_next_client_index_ - 1,
-                                    std::move(new_conn));
+            {
+              std::lock_guard<std::mutex> guard(m_conn_map_lock_);
+              m_client_conns_.emplace(m_next_client_index_,
+                                      std::move(new_conn));
+            }
+
+            m_next_client_index_++;
           } else {
             spdlog::error("[ServerCq] Unexpected status {} of Client {}!",
                           status, index);
@@ -307,17 +256,19 @@ class AsyncBidiMathServer {
 
   Math::AsyncService m_async_serv_ = {};
 
-  CompletionQueue m_new_call_cq_;
-
   std::unique_ptr<ServerCompletionQueue> m_server_cq_;
   std::unique_ptr<Server> m_server_;
 
+  std::mutex m_conn_map_lock_;
   std::unordered_map<uint64_t, std::unique_ptr<ClientConn>> m_client_conns_;
 
-  std::unique_ptr<std::thread> m_new_call_cq_thread_;
-  std::unique_ptr<std::thread> m_server_cq_thread_;
+  std::thread m_server_cq_thread_;
 
-  std::atomic_bool m_should_stop_ = false;
+  moodycamel::ConcurrentQueue<uint64_t> m_to_reap_conn_queue_;
+
+  std::thread m_conn_reaping_thread_;
+
+  std::atomic_bool m_thread_should_stop_ = false;
 
   uint64_t m_next_client_index_ = 0;
 
@@ -355,62 +306,174 @@ class AsyncBidiMathServer {
     // Take in the "service" instance (in this case representing an asynchronous
     // server) and the completion queue "cq" used for asynchronous communication
     // with the gRPC runtime.
-    ClientConn(Math::AsyncService* service, CompletionQueue* new_call_cq,
-               ServerCompletionQueue* server_cq, uint64_t index)
-        : m_stream_(&m_rpc_ctx_), m_index_(index) {
-      // As part of the initial CREATE state, we *request* that the system
-      // start processing SayHello requests. In this request, "this" acts are
-      // the tag uniquely identifying the request (so that different CallData
-      // instances can serve different requests concurrently), in this case
-      // the memory address of this CallData instance.
+    ClientConn(Math::AsyncService* service, ServerCompletionQueue* server_cq,
+               uint64_t index,
+               moodycamel::ConcurrentQueue<uint64_t>* to_reap_conn_queue_)
+        : m_stream_(&m_rpc_ctx_),
+          m_index_(index),
+          m_to_reap_conn_queue_(to_reap_conn_queue_),
+          m_initialized(false) {
       service->RequestMax(
-          &m_rpc_ctx_, &m_stream_, new_call_cq, server_cq,
+          &m_rpc_ctx_, &m_stream_, &m_conn_cq_, server_cq,
           tag_from_index_status(index, cq_tag_t::NEW_RPC_ESTAB));
 
       // This is important as the server should know when the client is done.
       m_rpc_ctx_.AsyncNotifyWhenDone(
-          tag_from_index_status(index, cq_tag_t::DONE));
+          tag_from_index_status(index, cq_tag_t::SHUTDOWN));
+
+      m_conn_cq_thread_ = std::thread(&ClientConn::m_conn_cq_func_, this);
     }
 
+    ~ClientConn() {
+      // For those who has established the connection with the client, exit only
+      // after all the pending writes have flushed.
+      // For those who hasn't established the connection, shutdown the
+      // completion queue directly (m_stream is still not associated with the
+      // completion queue)
+      if (m_initialized) {
+        MarkConnEnd();
+        while (m_is_writing_) {
+          // Wait for pending writes to be flushed.
+          std::this_thread::yield();
+        }
+
+        MaxResponse resp;
+        if (m_write_queue_.try_dequeue(resp)) {
+          // Flush the possible trailing pending writes. See WriteFinished().
+          m_stream_.Write(resp,
+                          tag_from_index_status(m_index_, cq_tag_t::WRITE));
+          m_is_writing_ = true;
+        }
+        while (m_is_writing_) {
+          // Wait for pending writes to be flushed.
+          std::this_thread::yield();
+        }
+
+        // Inform the conn_cq_thread_ to shutdown the queue.
+        m_stream_.Finish(Status::OK,
+                         tag_from_index_status(m_index_, cq_tag_t::SHUTDOWN));
+      } else {
+        m_conn_cq_.Shutdown();
+      }
+      m_conn_cq_thread_.join();
+    }
+
+    void ConnEstablished() { m_initialized = true; }
+
     void RequestRead() {
-      m_stream_.Read(&m_req_, tag_from_index_status(m_index_, cq_tag_t::READ));
+      if (!m_end_conn_)
+        m_stream_.Read(&m_req_,
+                       tag_from_index_status(m_index_, cq_tag_t::READ));
     }
 
     const MaxRequest& GetRequest() const { return m_req_; }
 
-    void RequestWrite(const MaxResponse& resp) {
-      if (m_is_writing_) {
-        m_write_queue_.push(resp);
-      } else {
-        m_is_writing_ = true;
-        m_stream_.Write(resp, tag_from_index_status(m_index_, cq_tag_t::WRITE));
-      }
-    }
-
-    void WriteFinished() {
-      if (m_write_queue_.empty()) {
-        if (m_end_conn_) {
-          m_stream_.Finish(Status::OK,
-                           tag_from_index_status(m_index_, cq_tag_t::DONE));
+    // This function is thread-safe
+    void RequestWrite(MaxResponse&& resp) {
+      bool expected = false;
+      if (!m_end_conn_) {
+        if (m_is_writing_ ||
+            !m_is_writing_.compare_exchange_strong(expected, true)) {
+          m_write_queue_.enqueue(std::forward<MaxResponse>(resp));
         } else {
-          m_is_writing_ = false;
+          // Nobody is writing and nobody is trying to read at the same time.
+          m_stream_.Write(resp,
+                          tag_from_index_status(m_index_, cq_tag_t::WRITE));
         }
-      } else {
-        m_stream_.Write(m_write_queue_.front(),
-                        tag_from_index_status(m_index_, cq_tag_t::WRITE));
-        m_write_queue_.pop();
       }
     }
 
-    void EndConn() {
-      m_end_conn_ = true;
-      if (!m_is_writing_) {
-        m_stream_.Finish(Status::OK,
-                         tag_from_index_status(m_index_, cq_tag_t::DONE));
-      }
-    }
+    // It's ok to call this function from multiple thread more than one time.
+    void MarkConnEnd() { m_end_conn_ = true; }
 
    private:
+    void WriteFinished() {
+      MaxResponse resp;
+      if (m_write_queue_.try_dequeue(resp)) {
+        m_stream_.Write(resp, tag_from_index_status(m_index_, cq_tag_t::WRITE));
+      } else {
+        // A slight chance that new pending write in enqueued before
+        // is_writing is set to false. The trailing writes are handle in
+        // destructor.
+        m_is_writing_ = false;
+      }
+    }
+
+    void m_conn_cq_func_() {
+      spdlog::info("[Server | Client {}] conn_cq_thread started.", m_index_);
+
+      while (true) {
+        void* got_tag = nullptr;
+        bool ok = false;
+        if (!m_conn_cq_.Next(&got_tag, &ok)) {
+          spdlog::info(
+              "[Server | Client {}] Completion Queue has been shutdown. "
+              "Exiting "
+              "conn_cq_ thread...",
+              m_index_);
+          break;
+        }
+
+        if (ok) {
+          uint64_t index = index_from_tag(got_tag);
+          cq_tag_t status = status_from_tag(got_tag);
+
+          spdlog::info(
+              "[Server | Client {}] Completion Queue Received: {}", index,
+              (status == cq_tag_t::READ)
+                  ? "READ"
+                  : ((status == cq_tag_t::WRITE)
+                         ? "WRITE"
+                         : (status == cq_tag_t::NEW_RPC_ESTAB ? "NEW_RPC_ESTAB"
+                                                              : "SHUTDOWN")));
+
+          if (status == cq_tag_t::READ) {
+            const MaxRequest& req = GetRequest();
+
+            if (req.a() != 0 || req.b() != 0) {
+              spdlog::info(
+                  "[Server | Client {}] Receive Request MAX({},{}) from ",
+                  index, req.a(), req.b());
+
+              MaxResponse resp;
+              resp.set_result(std::max(req.a(), req.b()));
+
+              RequestWrite(std::move(resp));
+
+              // Request Next Read.
+              RequestRead();
+            } else {
+              MarkConnEnd();
+              m_to_reap_conn_queue_->enqueue(m_index_);
+            }
+          } else if (status == cq_tag_t::WRITE) {
+            spdlog::info("[Server | Client {}] Write response to successfully.",
+                         index);
+            WriteFinished();
+          } else if (status == cq_tag_t::SHUTDOWN) {
+            spdlog::info(
+                "[Server | Client {}] SHUTDOWN is called from the destructor. "
+                "Stopping "
+                "the completion queue...",
+                index);
+            m_conn_cq_.Shutdown();
+          } else {
+            spdlog::error("[Server | Client {}] Unexpected status {}!", index,
+                          status);
+          }
+
+        } else {
+          spdlog::error(
+              "[Server | Client {}] CompletionQueue.Next() returned with "
+              "\"ok\": "
+              "false!");
+        }
+      }
+
+      spdlog::info("[Server | Client {}] conn_cq_thread ended.", m_index_);
+    }
+
+    std::atomic_bool m_initialized;
     uint64_t m_index_;
 
     MaxRequest m_req_;
@@ -424,16 +487,23 @@ class AsyncBidiMathServer {
     // from m_cq_->Next().
     ServerAsyncReaderWriter<MaxResponse, MaxRequest> m_stream_;
 
-    std::queue<MaxResponse> m_write_queue_;
-    bool m_is_writing_ = false;
-    bool m_end_conn_ = false;
+    CompletionQueue m_conn_cq_;
+
+    std::thread m_conn_cq_thread_;
+
+    moodycamel::ConcurrentQueue<uint64_t>* m_to_reap_conn_queue_;
+
+    std::atomic_bool m_end_conn_ = false;
+
+    moodycamel::ConcurrentQueue<MaxResponse> m_write_queue_;
+    std::atomic_bool m_is_writing_ = false;
   };
 };
 
 class BidiMathClient {
  public:
-  BidiMathClient(std::shared_ptr<Channel> channel)
-      : m_stub_(Math::NewStub(channel)) {
+  BidiMathClient(std::shared_ptr<Channel> channel, uint64_t index)
+      : m_stub_(Math::NewStub(channel)), m_index_(index) {
     m_stream_ = m_stub_->Max(&m_ctx_);
     m_recv_thread_ = std::thread(&BidiMathClient::ReceiveRespThread, this);
   }
@@ -445,14 +515,15 @@ class BidiMathClient {
   }
 
   void ReceiveRespThread() {
-    spdlog::info("Client Recv Thread Started...");
+    spdlog::info("[Client {}] Recv Thread Started...", m_index_);
 
     MaxResponse resp;
     while (m_stream_->Read(&resp)) {
-      spdlog::info("Client Received the response: {}", resp.result());
+      spdlog::info("[Client {}] Received the response: {}", m_index_,
+                   resp.result());
     }
 
-    spdlog::info("Client Recv Thread Exiting...");
+    spdlog::info("[Client {}] Recv Thread Exiting...", m_index_);
   }
 
   void FindMultipleMax(const std::vector<std::pair<int32_t, int32_t>>& pairs) {
@@ -471,6 +542,7 @@ class BidiMathClient {
   std::unique_ptr<grpc::ClientReaderWriter<MaxRequest, MaxResponse>> m_stream_;
   std::unique_ptr<Math::Stub> m_stub_;
   std::thread m_recv_thread_;
+  uint64_t m_index_;
 };
 
 TEST(GrpcExample, BidirectionalStream) {
@@ -482,17 +554,34 @@ TEST(GrpcExample, BidirectionalStream) {
 
   AsyncBidiMathServer server;
 
-  BidiMathClient client(grpc::CreateChannel(
-      "localhost:50051", grpc::InsecureChannelCredentials()));
+  BidiMathClient client0(
+      grpc::CreateChannel("localhost:50051",
+                          grpc::InsecureChannelCredentials()),
+      0);
 
-  std::vector<std::pair<int32_t, int32_t>> reqs{{1, 2},
-                                                {3, 4},
-                                                {5, 6},
-                                                {7, 8},
-                                                {0, 0}};
+  BidiMathClient client1(
+      grpc::CreateChannel("localhost:50051",
+                          grpc::InsecureChannelCredentials()),
+      1);
 
-  client.FindMultipleMax(reqs);
+  BidiMathClient client2(
+      grpc::CreateChannel("localhost:50051",
+                          grpc::InsecureChannelCredentials()),
+      2);
 
-  client.Wait();
+  std::vector<std::pair<int32_t, int32_t>> reqs_1{{1, 2},
+                                                  {3, 4},
+                                                  {5, 6},
+                                                  {7, 8},
+                                                  {0, 0}};
+
+  client0.FindMultipleMax(reqs_1);
+  client1.FindMultipleMax(reqs_1);
+  client2.FindMultipleMax(reqs_1);
+
+  client0.Wait();
+  client1.Wait();
+  client2.Wait();
+
   server.WaitStop();
 }
