@@ -11,7 +11,7 @@
 #include <thread>
 #include <vector>
 
-#include "../../src/SlurmXd/TaskManager/TaskManager.h"
+#include "../../src/SlurmXd/TaskManager.h"
 #include "gtest/gtest.h"
 
 // NOTICE: For non-RHEL system, swap account in cgroup is disabled by default.

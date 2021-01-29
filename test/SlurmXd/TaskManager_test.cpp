@@ -1,4 +1,4 @@
-#include "../../src/SlurmXd/TaskManager/TaskManager.h"
+#include "../../src/SlurmXd/TaskManager.h"
 
 #include <random>
 

@@ -1,14 +1,16 @@
-#include <grpc++/grpc++.h>
-#include <spdlog/spdlog.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #include <atomic>
 #include <queue>
 #include <thread>
 
 #include "concurrentqueue/concurrentqueue.h"
+#include "grpc++/grpc++.h"
 #include "gtest/gtest.h"
 #include "protos/grpc_example.grpc.pb.h"
 #include "protos/grpc_example.pb.h"
+#include "spdlog/spdlog.h"
 
 using grpc::Server;
 using grpc::ServerBuilder;
@@ -119,14 +121,14 @@ using grpc_example::MaxResponse;
 // the completion queue/server have a longer lifetime than the client(s).
 class AsyncBidiMathServer {
  public:
-  AsyncBidiMathServer() {
+  AsyncBidiMathServer(std::string server_address)
+      : m_server_address_(std::move(server_address)) {
     // In general avoid setting up the server in the main thread (specifically,
     // in a constructor-like function such as this). We ignore this in the
     // context of an example.
-    std::string server_address("0.0.0.0:50051");
-
     ServerBuilder builder;
-    builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+    builder.AddListeningPort(m_server_address_,
+                             grpc::InsecureServerCredentials());
     builder.RegisterService(&m_async_serv_);
     m_server_cq_ = builder.AddCompletionQueue();
     m_server_ = builder.BuildAndStart();
@@ -254,10 +256,12 @@ class AsyncBidiMathServer {
     }
   }
 
+  const std::string m_server_address_;
+  std::unique_ptr<Server> m_server_;
+
   Math::AsyncService m_async_serv_ = {};
 
   std::unique_ptr<ServerCompletionQueue> m_server_cq_;
-  std::unique_ptr<Server> m_server_;
 
   std::mutex m_conn_map_lock_;
   std::unordered_map<uint64_t, std::unique_ptr<ClientConn>> m_client_conns_;
@@ -327,10 +331,17 @@ class AsyncBidiMathServer {
     ~ClientConn() {
       // For those who has established the connection with the client, exit only
       // after all the pending writes have flushed.
+      //
+      // Also, the established connection may be ended from the client side.
+      // In such case, conn_cq_thread_ will receive a SHUTDOWN tag and will call
+      // m_conn_cq_.Shutdown(). The destructor shall not call any API on
+      // m_stream_ and m_conn_cq_ and should wait for the conn_cq_thread_ to
+      // quit directly.
+      //
       // For those who hasn't established the connection, shutdown the
       // completion queue directly (m_stream is still not associated with the
       // completion queue)
-      if (m_initialized) {
+      if (m_initialized && !m_cq_shutdown_called_) {
         MarkConnEnd();
         while (m_is_writing_) {
           // Wait for pending writes to be flushed.
@@ -456,6 +467,7 @@ class AsyncBidiMathServer {
                 "Stopping "
                 "the completion queue...",
                 index);
+            m_cq_shutdown_called_ = true;
             m_conn_cq_.Shutdown();
           } else {
             spdlog::error("[Server | Client {}] Unexpected status {}!", index,
@@ -493,7 +505,13 @@ class AsyncBidiMathServer {
 
     moodycamel::ConcurrentQueue<uint64_t>* m_to_reap_conn_queue_;
 
+    // When set true, the ClientConn class will not submit any more write
+    // requests and will keep flushing all pending writes.
     std::atomic_bool m_end_conn_ = false;
+
+    // Indicate whether m_conn_cq.Shutdown() has been called. When set true,
+    // NO MORE operations should be carried out on m_conn_cq_ and m_stream_.
+    std::atomic_bool m_cq_shutdown_called_ = false;
 
     moodycamel::ConcurrentQueue<MaxResponse> m_write_queue_;
     std::atomic_bool m_is_writing_ = false;
@@ -552,21 +570,19 @@ TEST(GrpcExample, BidirectionalStream) {
   ASSERT_EQ(AsyncBidiMathServer::index_from_tag(tag), 3);
   ASSERT_EQ(AsyncBidiMathServer::status_from_tag(tag), tag_t::READ);
 
-  AsyncBidiMathServer server;
+  std::string server_address{"localhost:50051"};
+  AsyncBidiMathServer server{server_address};
 
   BidiMathClient client0(
-      grpc::CreateChannel("localhost:50051",
-                          grpc::InsecureChannelCredentials()),
+      grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials()),
       0);
 
   BidiMathClient client1(
-      grpc::CreateChannel("localhost:50051",
-                          grpc::InsecureChannelCredentials()),
+      grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials()),
       1);
 
   BidiMathClient client2(
-      grpc::CreateChannel("localhost:50051",
-                          grpc::InsecureChannelCredentials()),
+      grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials()),
       2);
 
   std::vector<std::pair<int32_t, int32_t>> reqs_1{{1, 2},
@@ -584,4 +600,27 @@ TEST(GrpcExample, BidirectionalStream) {
   client2.Wait();
 
   server.WaitStop();
+}
+
+TEST(GrpcExample, BidirectionalStream_ClientAbort) {
+  std::string server_address{"localhost:50051"};
+
+  signal(SIGCHLD, SIG_IGN);
+  pid_t child_pid = fork();
+  if (child_pid == 0) {
+    int devNull = open("/dev/null", O_WRONLY);
+
+    dup2(devNull, STDOUT_FILENO);
+    dup2(devNull, STDERR_FILENO);
+
+    BidiMathClient client0(
+        grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials()),
+        0);
+
+    abort();
+  } else {
+    AsyncBidiMathServer server{server_address};
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    server.WaitStop();
+  }
 }
