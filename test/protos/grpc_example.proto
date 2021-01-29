@@ -19,7 +19,7 @@ message HelloReply {
 }
 
 service Math {
-  rpc Max (stream MaxRequest) returns (stream MaxResponse) {}
+  rpc Max (stream MaxRequest) returns (stream MaxResponse);
 }
 
 message MaxRequest {
