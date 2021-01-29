@@ -9,6 +9,7 @@ target_link_libraries(slurmx_test
         concurrentqueue
         spdlog::spdlog
         Utility_cgroup
+        Utility_PublicHeader
         Utility_AnonymousPipe
         Threads::Threads
         libevent::core

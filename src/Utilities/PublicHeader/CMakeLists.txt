@@ -1,0 +1,3 @@
+add_library(Utility_PublicHeader INTERFACE)
+target_include_directories(Utility_PublicHeader INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(Utility_PublicHeader INTERFACE spdlog::spdlog)

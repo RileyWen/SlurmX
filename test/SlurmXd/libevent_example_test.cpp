@@ -13,16 +13,16 @@
 static void log_cb(int severity, const char *msg) {
   switch (severity) {
     case _EVENT_LOG_DEBUG:
-      spdlog::debug("{}", msg);
+      SPDLOG_DEBUG("{}", msg);
       break;
     case _EVENT_LOG_MSG:
-      spdlog::info("{}", msg);
+      SPDLOG_INFO("{}", msg);
       break;
     case _EVENT_LOG_WARN:
-      spdlog::warn("{}", msg);
+      SPDLOG_WARN("{}", msg);
       break;
     case _EVENT_LOG_ERR:
-      spdlog::error("{}", msg);
+      SPDLOG_ERROR("{}", msg);
       break;
     default:
       break; /* never reached */
@@ -46,9 +46,9 @@ static void sigchld_handler(int sig) {
   int child_status;
   pid = wait(&child_status);
   if (pid < 0) {
-    spdlog::error("SIGCHLD received too early. Error:{}", strerror(errno));
+    SPDLOG_ERROR("SIGCHLD received too early. Error:{}", strerror(errno));
   } else
-    spdlog::info("SIGCHLD received too early. PID: {}", pid);
+    SPDLOG_INFO("SIGCHLD received too early. PID: {}", pid);
 }
 
 struct LibEvent : testing::Test {
@@ -79,7 +79,7 @@ struct LibEvent : testing::Test {
     auto *this_ = reinterpret_cast<LibEvent *>(user_data);
 
     size_t buf_len = evbuffer_get_length(bev->input);
-    spdlog::info("Trying to read buffer(len: {})...", buf_len);
+    SPDLOG_INFO("Trying to read buffer(len: {})...", buf_len);
     EXPECT_GT(buf_len, 0);
 
     char str_[buf_len + 1];
@@ -87,7 +87,7 @@ struct LibEvent : testing::Test {
     str_[buf_len] = '\0';
     std::string_view str(str_);
 
-    spdlog::info("Read from child(Copied: {} bytes): {}", n_copy, str);
+    SPDLOG_INFO("Read from child(Copied: {} bytes): {}", n_copy, str);
     EXPECT_EQ(str, this_->m_expected_str_);
   }
 
@@ -95,7 +95,7 @@ struct LibEvent : testing::Test {
                                    void *user_data) {
     auto *this_ = reinterpret_cast<LibEvent *>(user_data);
 
-    spdlog::info("SIGCHLD received...");
+    SPDLOG_INFO("SIGCHLD received...");
     int status;
     wait(&status);
 
@@ -129,7 +129,7 @@ TEST_F(LibEvent, IoRedirectAndDynamicTaskAdding) {
 
   cmd = fmt::format(R"(bash -c 'echo -e '"'"'{}'"'" | g++ -xc++ -o {} -)",
                     prog_text, test_prog_path);
-  // spdlog::info("Cmd: {}", cmd);
+  SPDLOG_TRACE("Cmd: {}", cmd);
   system(cmd.c_str());
 
   std::vector<const char *> args{test_prog_path.c_str(), nullptr};
@@ -180,5 +180,5 @@ TEST_F(LibEvent, IoRedirectAndDynamicTaskAdding) {
     bufferevent_free(ev_buf_event);
   }
   if (remove(test_prog_path.c_str()) != 0)
-    spdlog::error("Error removing test_prog:", strerror(errno));
+    SPDLOG_ERROR("Error removing test_prog:", strerror(errno));
 }

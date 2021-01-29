@@ -12,46 +12,46 @@ TaskManager::TaskManager()
 
   m_ev_base_ = event_base_new();
   if (!m_ev_base_) {
-    spdlog::error("Could not initialize libevent!");
+    SLURMX_ERROR("Could not initialize libevent!");
     abort();
   }
 
   m_ev_sigchld_ = evsignal_new(m_ev_base_, SIGCHLD, ev_sigchld_cb_, this);
   if (!m_ev_sigchld_) {
-    spdlog::error("Failed to create the SIGCHLD event!");
+    SLURMX_ERROR("Failed to create the SIGCHLD event!");
     abort();
   }
 
   if (event_add(m_ev_sigchld_, nullptr) < 0) {
-    spdlog::error("Could not add the SIGCHLD event to base!");
+    SLURMX_ERROR("Could not add the SIGCHLD event to base!");
     abort();
   }
 
   m_ev_sigint_ = evsignal_new(m_ev_base_, SIGINT, ev_sigint_cb_, this);
   if (!m_ev_sigint_) {
-    spdlog::error("Failed to create the SIGCHLD event!");
+    SLURMX_ERROR("Failed to create the SIGCHLD event!");
     abort();
   }
 
   if (event_add(m_ev_sigint_, nullptr) < 0) {
-    spdlog::error("Could not add the SIGINT event to base!");
+    SLURMX_ERROR("Could not add the SIGINT event to base!");
     abort();
   }
 
   if ((m_grpc_event_fd_ = eventfd(0, EFD_SEMAPHORE)) < 0) {
-    spdlog::error("Failed to init the eventfd!");
+    SLURMX_ERROR("Failed to init the eventfd!");
     abort();
   }
 
   m_ev_grpc_event_ = event_new(m_ev_base_, m_grpc_event_fd_,
                                EV_PERSIST | EV_READ, ev_grpc_event_cb_, this);
   if (!m_ev_grpc_event_) {
-    spdlog::error("Failed to create the grpc event!");
+    SLURMX_ERROR("Failed to create the grpc event!");
     abort();
   }
 
   if (event_add(m_ev_grpc_event_, nullptr) < 0) {
-    spdlog::error("Could not add the grpc event to base!");
+    SLURMX_ERROR("Could not add the grpc event to base!");
     abort();
   }
 
@@ -82,7 +82,7 @@ std::future<grpc_resp_t> TaskManager::AddTaskAsync(TaskInfo&& task_info) {
   m_gprc_reqs_.enqueue(std::move(req));
   ssize_t s = eventfd_write(m_grpc_event_fd_, u);
   if (s < 0) {
-    spdlog::error("Failed to write to grpc event fd: {}", strerror(errno));
+    SLURMX_ERROR("Failed to write to grpc event fd: {}", strerror(errno));
   }
   return resp_future;
 }
@@ -134,7 +134,7 @@ void TaskManager::ev_sigchld_cb_(evutil_socket_t sig, short events,
       std::string task_name;
       auto iter = this_->m_pid_to_name_map_.find(pid);
       if (iter == this_->m_pid_to_name_map_.end()) {
-        spdlog::error("Failed to find task name for pid {}.", pid);
+        SLURMX_ERROR("Failed to find task name for pid {}.", pid);
       } else {
         task_name = iter->second;
       }
@@ -147,14 +147,14 @@ void TaskManager::ev_sigchld_cb_(evutil_socket_t sig, short events,
       this_->m_name_to_task_map_.erase(task_name);
 
       this_->m_cg_mgr_.destroy(CgroupStrByPID(pid));
-      spdlog::debug("Received SIGCHLD. Destroying Task \"{}\".", task_name);
+      SLURMX_DEBUG("Received SIGCHLD. Destroying Task \"{}\".", task_name);
 
       // TODO: Add task termination notification to front-end.
     } else if (pid == 0)  // There's no child that needs reaping.
       break;
     else if (pid < 0) {
       if (errno != ECHILD)
-        spdlog::debug("waitpid() error: {}, {}", errno, strerror(errno));
+        SLURMX_DEBUG("waitpid() error: {}, {}", errno, strerror(errno));
       break;
     }
   }
@@ -166,8 +166,8 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
   s = read(efd, &u, sizeof(uint64_t));
   if (s != sizeof(uint64_t)) {
     if (errno != EAGAIN) {
-      spdlog::error("Failed to read grpc_fd: errno {}, {}", errno,
-                    strerror(errno));
+      SLURMX_ERROR("Failed to read grpc_fd: errno {}, {}", errno,
+                   strerror(errno));
     }
     return;
   }
@@ -178,7 +178,7 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
   this_->m_gprc_reqs_.try_dequeue(req);
   TaskInfo& task_info = req.task_info;
 
-  spdlog::debug("Receive one grpc req.");
+  SLURMX_DEBUG("Receive one grpc req.");
 
   if (this_->m_name_to_task_map_.count(task_info.name) > 0) {
     req.resp_promise.set_value(
@@ -194,7 +194,7 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
   if (child_pid == 0) {  // Child proc
     anon_pipe.CloseParentEnd();
 
-    spdlog::debug("Subprocess start running....");
+    SLURMX_DEBUG("Subprocess start running....");
 
     dup2(anon_pipe.GetChildEndFd(), 1);  // stdout -> pipe
     dup2(anon_pipe.GetChildEndFd(), 2);  // stderr -> pipe
@@ -204,7 +204,7 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
 
     // Blocking read to wait the parent move the child into designated cgroup.
     if (!anon_pipe.ReadIntegerFromParent<u_char>(&val))
-      spdlog::error("Failed to write the expected 1 byte to AnonymousPipe.");
+      SLURMX_ERROR("Failed to write the expected 1 byte to AnonymousPipe.");
 
     // Use abort to avoid the wrong call to destructor of CgroupManager, which
     // deletes all cgroup in system.
@@ -239,26 +239,26 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
     if (!this_->m_cg_mgr_.create_or_open(CgroupStrByPID(child_pid),
                                          ALL_CONTROLLER_FLAG,
                                          NO_CONTROLLER_FLAG, false)) {
-      spdlog::error(
+      SLURMX_ERROR(
           "Destroy child task process of \"{}\" due to failure of cgroup "
           "creation.",
           new_task.info.name);
 
       pipe_uchar_val = E_PIPE_SUICIDE;
       if (!anon_pipe.WriteIntegerToChild<u_char>(pipe_uchar_val))
-        spdlog::error("Failed to send E_PIPE_SUICIDE to child.");
+        SLURMX_ERROR("Failed to send E_PIPE_SUICIDE to child.");
     }
 
     // Add event for stdout/stderr of the new subprocess
     new_task.ev_buf_event = bufferevent_socket_new(
         this_->m_ev_base_, anon_pipe.GetParentEndFd(), BEV_OPT_CLOSE_ON_FREE);
     if (!new_task.ev_buf_event) {
-      spdlog::error(
+      SLURMX_ERROR(
           "Error constructing bufferevent for the subprocess of task \"{}\"!",
           task_info.name);
       pipe_uchar_val = E_PIPE_SUICIDE;
       if (!anon_pipe.WriteIntegerToChild<u_char>(pipe_uchar_val))
-        spdlog::error("Failed to send E_PIPE_SUICIDE to child.");
+        SLURMX_ERROR("Failed to send E_PIPE_SUICIDE to child.");
     }
     bufferevent_setcb(new_task.ev_buf_event, ev_subprocess_read_cb_, nullptr,
                       nullptr, (void*)static_cast<std::uintptr_t>(child_pid));
@@ -268,14 +268,14 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
     // Migrate the new subprocess to newly created cgroup
     if (!this_->m_cg_mgr_.migrate_proc_to_cgroup(new_task.root_pid,
                                                  new_task.cg_path)) {
-      spdlog::error(
+      SLURMX_ERROR(
           "Destroy child task process of \"{}\" due to failure of cgroup "
           "migration.",
           new_task.info.name);
 
       pipe_uchar_val = E_PIPE_SUICIDE;
       if (!anon_pipe.WriteIntegerToChild<u_char>(pipe_uchar_val))
-        spdlog::error("Failed to send E_PIPE_SUICIDE to child.");
+        SLURMX_ERROR("Failed to send E_PIPE_SUICIDE to child.");
 
       this_->m_cg_mgr_.destroy(new_task.cg_path);
       return;
@@ -283,7 +283,7 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
 
     pipe_uchar_val = E_PIPE_OK;
     if (!anon_pipe.WriteIntegerToChild<u_char>(pipe_uchar_val))
-      spdlog::error("Failed to send E_PIPE_OK to child.");
+      SLURMX_ERROR("Failed to send E_PIPE_OK to child.");
 
     this_->m_pid_to_name_map_.emplace(new_task.root_pid, new_task.info.name);
     this_->m_name_to_task_map_.emplace(std::move(task_name_copy),
@@ -303,7 +303,7 @@ void TaskManager::ev_subprocess_read_cb_(struct bufferevent* bev, void* pid_) {
   str_[buf_len] = '\0';
   std::string_view str(str_);
 
-  spdlog::info("Read {:>4} bytes from subprocess (pid: {}): {}", n_copy, pid,
+  SLURMX_DEBUG("Read {:>4} bytes from subprocess (pid: {}): {}", n_copy, pid,
                str);
 }
 
@@ -311,7 +311,7 @@ void TaskManager::ev_sigint_cb_(int sig, short events, void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
   struct timeval delay = {0, 0};
 
-  spdlog::info("Caught an interrupt signal; exiting cleanly ...");
+  SLURMX_DEBUG("Caught an interrupt signal; exiting cleanly ...");
 
   // Todo: Terminate and clean all task here
 

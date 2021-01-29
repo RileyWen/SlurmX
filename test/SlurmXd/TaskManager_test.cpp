@@ -2,6 +2,7 @@
 
 #include <random>
 
+#include "PublicHeader.h"
 #include "gtest/gtest.h"
 
 static std::string RandomFileNameStr() {
@@ -13,7 +14,7 @@ static std::string RandomFileNameStr() {
 }
 
 TEST(TaskManager, simple) {
-  spdlog::set_level(spdlog::level::debug);
+  spdlog::set_level(spdlog::level::trace);
 
   std::string test_prog_path = "/tmp/slurmxd_test_" + RandomFileNameStr();
   std::string prog_text =
@@ -37,7 +38,7 @@ TEST(TaskManager, simple) {
 
   auto future = tm.AddTaskAsync(std::move(info));
   grpc_resp_t resp = future.get();
-  spdlog::info("status: {}, reason: {}", resp.status,
+  SLURMX_TRACE("status: {}, reason: {}", resp.status,
                resp.reason.has_value() ? resp.reason.value() : "");
 
   using namespace std::chrono_literals;
@@ -47,8 +48,8 @@ TEST(TaskManager, simple) {
 
   tm.Wait();
 
-  spdlog::debug("Exiting test...");
+  SLURMX_TRACE("Exiting test...");
   // Cleanup
   if (remove(test_prog_path.c_str()) != 0)
-    spdlog::error("Error removing test_prog:", strerror(errno));
+    SLURMX_ERROR("Error removing test_prog:", strerror(errno));
 }

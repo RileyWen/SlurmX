@@ -13,6 +13,7 @@
 #include <unordered_map>
 
 #include "AnonymousPipe.h"
+#include "PublicHeader.h"
 #include "cgroup.linux.h"
 #include "concurrentqueue/concurrentqueue.h"
 #include "event2/bufferevent.h"

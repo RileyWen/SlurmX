@@ -31,7 +31,7 @@ CgroupManager &CgroupManager::getInstance() {
  */
 int CgroupManager::initialize() {
   // Initialize library and data structures
-  spdlog::warn("Initializing cgroup library.\n");
+  SLURMX_DEBUG("Initializing cgroup library.\n");
   cgroup_init();
 
   // cgroup_set_loglevel(CGROUP_LOG_DEBUG);
@@ -83,24 +83,23 @@ int CgroupManager::initialize() {
   }
 
   if (!isMounted(Controller::BLOCK_CONTROLLER)) {
-    spdlog::warn("Cgroup controller for I/O statistics is not available.\n");
+    SLURMX_WARN("Cgroup controller for I/O statistics is not available.\n");
   }
   if (!isMounted(Controller::FREEZE_CONTROLLER)) {
-    spdlog::warn(
-        "Cgroup controller for process management is not available.\n");
+    SLURMX_WARN("Cgroup controller for process management is not available.\n");
   }
   if (!isMounted(Controller::CPUACCT_CONTROLLER)) {
-    spdlog::warn("Cgroup controller for CPU accounting is not available.\n");
+    SLURMX_WARN("Cgroup controller for CPU accounting is not available.\n");
   }
   if (!isMounted(Controller::MEMORY_CONTROLLER)) {
-    spdlog::warn("Cgroup controller for memory accounting is not available.\n");
+    SLURMX_WARN("Cgroup controller for memory accounting is not available.\n");
   }
   if (!isMounted(Controller::CPU_CONTROLLER)) {
-    spdlog::warn("Cgroup controller for CPU is not available.\n");
+    SLURMX_WARN("Cgroup controller for CPU is not available.\n");
   }
   if (ret != ECGEOF) {
-    spdlog::warn("Error iterating through cgroups mount information: {}\n",
-                 cgroup_strerror(ret));
+    SLURMX_WARN("Error iterating through cgroups mount information: {}\n",
+                cgroup_strerror(ret));
     return -1;
   }
 
@@ -121,8 +120,8 @@ int CgroupManager::initialize_controller(
 
   if (!isMounted(controller)) {
     if (required) {
-      spdlog::warn("Error - cgroup controller {} not mounted, but required.\n",
-                   CgroupConstant::GetControllerStringView(controller));
+      SLURMX_WARN("Error - cgroup controller {} not mounted, but required.\n",
+                  CgroupConstant::GetControllerStringView(controller));
       return 1;
     } else {
       fmt::print("cgroup controller {} is already mounted");
@@ -134,8 +133,8 @@ int CgroupManager::initialize_controller(
       (cgroup_get_controller(&cgroup, controller_str.data()) == nullptr)) {
     changed_cgroup = true;
     if (cgroup_add_controller(&cgroup, controller_str.data()) == nullptr) {
-      spdlog::warn("Unable to initialize cgroup {} controller.\n",
-                   controller_str);
+      SLURMX_WARN("Unable to initialize cgroup {} controller.\n",
+                  controller_str);
       return required ? 1 : 0;
     }
   }
@@ -177,7 +176,7 @@ bool CgroupManager::create_or_open(const std::string &cgroup_string,
   bool created_cgroup = false, changed_cgroup = false;
   struct cgroup *cgroupp = cgroup_new_cgroup(cgroup_string.c_str());
   if (cgroupp == NULL) {
-    spdlog::warn("Unable to construct new cgroup object.\n");
+    SLURMX_WARN("Unable to construct new cgroup object.\n");
     return false;
   }
 
@@ -229,7 +228,7 @@ bool CgroupManager::create_or_open(const std::string &cgroup_string,
   if (!has_cgroup) {
     if ((err = cgroup_create_cgroup(cgroupp, 0))) {
       // Only record at D_ALWAYS if any cgroup mounts are available.
-      spdlog::warn(
+      SLURMX_WARN(
           "Unable to create cgroup {}."
           " Cgroup functionality will not work: {}\n",
           cgroup_string.c_str(), cgroup_strerror(err));
@@ -239,7 +238,7 @@ bool CgroupManager::create_or_open(const std::string &cgroup_string,
     }
   } else if (has_cgroup && changed_cgroup &&
              (err = cgroup_modify_cgroup(cgroupp))) {
-    spdlog::warn(
+    SLURMX_WARN(
         "Unable to modify cgroup {}."
         "  Some cgroup functionality may not work: {} {}\n",
         cgroup_string.c_str(), err, cgroup_strerror(err));
@@ -252,11 +251,11 @@ bool CgroupManager::create_or_open(const std::string &cgroup_string,
       (mem_controller != NULL)) {
     if ((err = cgroup_add_value_bool(mem_controller, "memory.use_hierarchy",
                                      true))) {
-      spdlog::warn("Unable to set hierarchical memory settings for {}: {} {}\n",
-                   cgroup_string.c_str(), err, cgroup_strerror(err));
+      SLURMX_WARN("Unable to set hierarchical memory settings for {}: {} {}\n",
+                  cgroup_string.c_str(), err, cgroup_strerror(err));
     } else {
       if ((err = cgroup_modify_cgroup(cgroupp))) {
-        spdlog::warn(
+        SLURMX_WARN(
             "Unable to enable hierarchical memory accounting for {} "
             ": {} {}\n",
             cgroup_string.c_str(), err, cgroup_strerror(err));
@@ -286,7 +285,7 @@ bool CgroupManager::destroy(const std::string &cgroup_path) {
 
   auto it = m_cgroup_info_.find(cgroup_path);
   if (it == m_cgroup_info_.end()) {
-    spdlog::warn("Destroying an unknown cgroup.");
+    SLURMX_WARN("Destroying an unknown cgroup.");
   }
   it->second.ref_cnt--;
 
@@ -297,8 +296,8 @@ bool CgroupManager::destroy(const std::string &cgroup_path) {
     struct cgroup *dcg = cgroup_new_cgroup(cgroup_path.c_str());
     assert(dcg != nullptr);
     if ((err = cgroup_get_cgroup(dcg))) {
-      spdlog::warn("Unable to read cgroup {} for deletion: {} {}\n",
-                   cgroup_path.c_str(), err, cgroup_strerror(err));
+      SLURMX_WARN("Unable to read cgroup {} for deletion: {} {}\n",
+                  cgroup_path.c_str(), err, cgroup_strerror(err));
       cgroup_free(&dcg);
       return false;
     }
@@ -310,10 +309,10 @@ bool CgroupManager::destroy(const std::string &cgroup_path) {
     // Todo: Test this part when cgroup is not empty!
     if ((err = cgroup_delete_cgroup_ext(
              dcg, CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
-      spdlog::warn("Unable to completely remove cgroup {}: {} {}\n",
-                   cgroup_path.c_str(), err, cgroup_strerror(err));
+      SLURMX_WARN("Unable to completely remove cgroup {}: {} {}\n",
+                  cgroup_path.c_str(), err, cgroup_strerror(err));
     } else {
-      spdlog::warn("Deleted cgroup {}.\n", cgroup_path.c_str());
+      SLURMX_WARN("Deleted cgroup {}.\n", cgroup_path.c_str());
     }
 
     // Notice the cgroup struct freed here is not the one held by Cgroup class.
@@ -334,7 +333,7 @@ bool CgroupManager::migrate_proc_to_cgroup(pid_t pid,
   // process is already in the cgroup
   auto iter = m_cgroup_info_.find(cgroup_path);
   if (iter == m_cgroup_info_.end()) {
-    spdlog::warn(cgroup_path);
+    SLURMX_WARN(cgroup_path);
     return false;
   }
 
@@ -356,7 +355,7 @@ bool CgroupManager::migrate_proc_to_cgroup(pid_t pid,
       (err = cgroup_get_current_controller_path(
            pid, GetControllerStringView(Controller::MEMORY_CONTROLLER).data(),
            &orig_cgroup_path))) {
-    spdlog::warn(
+    SLURMX_WARN(
         "Unable to determine current memory cgroup for PID {}. Error {}: {}\n",
         pid, err, cgroup_strerror(err));
     return false;
@@ -372,8 +371,8 @@ bool CgroupManager::migrate_proc_to_cgroup(pid_t pid,
     orig_cgroup = cgroup_new_cgroup(orig_cgroup_path);
     assert(orig_cgroup != nullptr);
     if ((err = cgroup_get_cgroup(orig_cgroup))) {
-      spdlog::warn("Unable to read original cgroup {}. Error {}: {}\n",
-                   orig_cgroup_path, err, cgroup_strerror(err));
+      SLURMX_WARN("Unable to read original cgroup {}. Error {}: {}\n",
+                  orig_cgroup_path, err, cgroup_strerror(err));
       cgroup_free(&orig_cgroup);
       goto after_migrate;
     }
@@ -381,7 +380,7 @@ bool CgroupManager::migrate_proc_to_cgroup(pid_t pid,
              orig_cgroup,
              GetControllerStringView(Controller::MEMORY_CONTROLLER).data())) ==
         nullptr) {
-      spdlog::warn(
+      SLURMX_WARN(
           "Unable to get memory controller of cgroup {}. Error {}: {}\n",
           orig_cgroup_path, err, cgroup_strerror(err));
       cgroup_free(&orig_cgroup);
@@ -393,13 +392,13 @@ bool CgroupManager::migrate_proc_to_cgroup(pid_t pid,
       if (err == ECGROUPVALUENOTEXIST) {
         // Older kernels don't have the ability to migrate memory accounting
         // to the new cgroup.
-        spdlog::warn(
+        SLURMX_WARN(
             "This kernel does not support memory usage migration; cgroup "
             "{} memory statistics"
             " will be slightly incorrect.\n",
             cgroup_path.c_str());
       } else {
-        spdlog::warn(
+        SLURMX_WARN(
             "Unable to read cgroup {} memory controller settings for "
             "migration: {} {}\n",
             orig_cgroup_path, err, cgroup_strerror(err));
@@ -419,7 +418,7 @@ bool CgroupManager::migrate_proc_to_cgroup(pid_t pid,
                               "memory.move_charge_at_immigrate", 3);
       if ((err = cgroup_modify_cgroup(orig_cgroup))) {
         // Not allowed to change settings
-        spdlog::warn(
+        SLURMX_WARN(
             "Unable to change cgroup {} memory controller settings for "
             "migration. "
             "Some memory accounting will be inaccurate: {} "
@@ -438,8 +437,8 @@ after_migrate:
   err = cgroup_attach_task_pid(
       &const_cast<struct cgroup &>(iter->second.cgroup_ptr->getCgroup()), pid);
   if (err) {
-    spdlog::warn("Cannot attach pid {} to cgroup {}: {} {}\n", pid,
-                 cgroup_path.c_str(), err, cgroup_strerror(err));
+    SLURMX_WARN("Cannot attach pid {} to cgroup {}: {} {}\n", pid,
+                cgroup_path.c_str(), err, cgroup_strerror(err));
   }
 
   if (changed_orig) {
@@ -454,7 +453,7 @@ after_migrate:
                                   "memory.move_charge_at_immigrate",
                                   orig_migrate))) {
       if ((err = cgroup_modify_cgroup(orig_cgroup))) {
-        spdlog::warn(
+        SLURMX_WARN(
             "Unable to change cgroup {} memory controller settings for "
             "migration. "
             "Some memory accounting will be inaccurate: {} "
@@ -583,9 +582,9 @@ bool CgroupManipulator::set_controller_value_(
   CgroupManager &cm = CgroupManager::getInstance();
 
   if (!cm.isMounted(controller)) {
-    spdlog::warn("Unable to set {} because cgroup {} is not mounted.\n",
-                 CgroupConstant::GetControllerFileStringView(controller_file),
-                 CgroupConstant::GetControllerStringView(controller));
+    SLURMX_WARN("Unable to set {} because cgroup {} is not mounted.\n",
+                CgroupConstant::GetControllerFileStringView(controller_file),
+                CgroupConstant::GetControllerStringView(controller));
     return false;
   }
 
@@ -599,9 +598,9 @@ bool CgroupManipulator::set_controller_value_(
   if ((cg_controller = cgroup_get_controller(
            cg, CgroupConstant::GetControllerStringView(controller).data())) ==
       nullptr) {
-    spdlog::warn("Unable to get cgroup {} controller for {}.\n",
-                 CgroupConstant::GetControllerStringView(controller),
-                 m_cgroup_.getCgroupString());
+    SLURMX_WARN("Unable to get cgroup {} controller for {}.\n",
+                CgroupConstant::GetControllerStringView(controller),
+                m_cgroup_.getCgroupString());
     return false;
   }
 
@@ -609,16 +608,16 @@ bool CgroupManipulator::set_controller_value_(
            cg_controller,
            CgroupConstant::GetControllerFileStringView(controller_file).data(),
            value))) {
-    spdlog::warn("Unable to set block IO weight for {}: {} {}\n",
-                 m_cgroup_.getCgroupString(), err, cgroup_strerror(err));
+    SLURMX_WARN("Unable to set block IO weight for {}: {} {}\n",
+                m_cgroup_.getCgroupString(), err, cgroup_strerror(err));
     return false;
   }
 
   // Commit cgroup modifications.
   if ((err = cgroup_modify_cgroup(cg))) {
-    spdlog::warn("Unable to commit {} for cgroup {}: {} {}\n",
-                 CgroupConstant::GetControllerFileStringView(controller_file),
-                 m_cgroup_.getCgroupString(), err, cgroup_strerror(err));
+    SLURMX_WARN("Unable to commit {} for cgroup {}: {} {}\n",
+                CgroupConstant::GetControllerFileStringView(controller_file),
+                m_cgroup_.getCgroupString(), err, cgroup_strerror(err));
     return false;
   }
 

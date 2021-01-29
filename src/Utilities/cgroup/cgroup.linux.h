@@ -18,11 +18,12 @@
 #include <optional>
 #include <string_view>
 
+#include "PublicHeader.h"
 #include "libcgroup.h"
 
 static pthread_mutex_t g_cgroups_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-class CgroupManager; // Forward Declaration
+class CgroupManager;  // Forward Declaration
 
 namespace CgroupConstant {
 
@@ -175,7 +176,6 @@ const ControllerFlags NO_CONTROLLER_FLAG{};
 //  handles this for us and no additional care needs to be take.
 const ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 
-
 // '0' means that the entry is not set.
 struct CgroupLimit {
   uint64_t memory_limit_bytes = 0;
@@ -220,13 +220,13 @@ class Cgroup {
     if (isValid()) {
       return *m_cgroup_;
     }
-    spdlog::warn("Accessing invalid cgroup.");
+    SLURMX_WARN("Accessing invalid cgroup.");
     return *m_cgroup_;
   }
   const std::string &getCgroupString() const { return m_cgroup_path_; };
 
   // Using the zombie object pattern as exceptions are not available.
-  bool isValid() const{ return m_cgroup_ != NULL; }
+  bool isValid() const { return m_cgroup_ != NULL; }
 
  private:
   std::string m_cgroup_path_;
@@ -289,7 +289,8 @@ class CgroupManager {
                             bool required, bool has_cgroup,
                             bool &changed_cgroup) const;
 
-  bool set_cgroup_limit(const Internal::Cgroup &cg, const CgroupLimit &cg_limit);
+  bool set_cgroup_limit(const Internal::Cgroup &cg,
+                        const CgroupLimit &cg_limit);
 
   ControllerFlags m_mounted_controllers_;
 
@@ -310,4 +311,3 @@ class CgroupManager {
 
   static MutexGuard getGuard() { return MutexGuard(g_cgroups_mutex); }
 };
-

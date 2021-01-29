@@ -92,7 +92,7 @@ TEST(GrpcExample, Simple) {
       "localhost:50051", grpc::InsecureChannelCredentials()));
   std::string user("world");
   std::string reply = greeter.SayHello(user);
-  spdlog::info("Greeter received: {}", reply);
+  SPDLOG_INFO("Greeter received: {}", reply);
 
   EXPECT_EQ(reply, "Hello world");
 
@@ -172,28 +172,28 @@ class AsyncBidiMathServer {
   static constexpr size_t cq_tag_n_bit = 3;
 
   void m_conn_reap_func_() {
-    spdlog::info("[Server] reap thread started.");
+    SPDLOG_INFO("[Server] reap thread started.");
     uint64_t index;
     while (!m_thread_should_stop_.load(std::memory_order_acquire)) {
       if (!m_to_reap_conn_queue_.try_dequeue(index))
         std::this_thread::yield();
       else {
-        spdlog::info("[Server] Reaping conn: {}", index);
+        SPDLOG_INFO("[Server] Reaping conn: {}", index);
         std::lock_guard<std::mutex> guard(m_conn_map_lock_);
         m_client_conns_.erase(index);
       }
     }
-    spdlog::info("[Server] reap thread ended.");
+    SPDLOG_INFO("[Server] reap thread ended.");
   }
 
   void m_server_cq_func_() {
-    spdlog::info("m_server_cq_func_ started.");
+    SPDLOG_INFO("m_server_cq_func_ started.");
 
     while (true) {
       void* got_tag = nullptr;
       bool ok = false;
       if (!m_server_cq_->Next(&got_tag, &ok)) {
-        spdlog::info(
+        SPDLOG_INFO(
             "[ServerCq] Server Completion Queue closed. Thread for server_cq "
             "is "
             "ending...");
@@ -204,7 +204,7 @@ class AsyncBidiMathServer {
         uint64_t index = index_from_tag(got_tag);
         cq_tag_t status = status_from_tag(got_tag);
 
-        spdlog::info(
+        SPDLOG_INFO(
             "[ServerCq] Client {} | Status: {}", index,
             (status == cq_tag_t::READ)
                 ? "READ"
@@ -219,7 +219,7 @@ class AsyncBidiMathServer {
 
         auto iter = m_client_conns_.find(index);
         if (GPR_UNLIKELY(iter == m_client_conns_.end())) {
-          spdlog::error("[ServerCq] Client {} doesn't exist!", index);
+          SPDLOG_ERROR("[ServerCq] Client {} doesn't exist!", index);
         } else {
           ClientConn* conn = iter->second.get();
 
@@ -227,7 +227,7 @@ class AsyncBidiMathServer {
             GPR_ASSERT(index_from_tag(got_tag) == m_next_client_index_ - 1);
             GPR_ASSERT(status_from_tag(got_tag) == cq_tag_t::NEW_RPC_ESTAB);
 
-            spdlog::info(
+            SPDLOG_INFO(
                 "[ServerCq] RPC for client {} established. Requesting read...",
                 m_next_client_index_ - 1);
             conn->RequestRead();
@@ -246,12 +246,12 @@ class AsyncBidiMathServer {
 
             m_next_client_index_++;
           } else {
-            spdlog::error("[ServerCq] Unexpected status {} of Client {}!",
-                          status, index);
+            SPDLOG_ERROR("[ServerCq] Unexpected status {} of Client {}!",
+                         status, index);
           }
         }
       } else {
-        spdlog::error("[ServerCq] server_cq_.Next() returned with ok false!");
+        SPDLOG_ERROR("[ServerCq] server_cq_.Next() returned with ok false!");
       }
     }
   }
@@ -411,13 +411,13 @@ class AsyncBidiMathServer {
     }
 
     void m_conn_cq_func_() {
-      spdlog::info("[Server | Client {}] conn_cq_thread started.", m_index_);
+      SPDLOG_INFO("[Server | Client {}] conn_cq_thread started.", m_index_);
 
       while (true) {
         void* got_tag = nullptr;
         bool ok = false;
         if (!m_conn_cq_.Next(&got_tag, &ok)) {
-          spdlog::info(
+          SPDLOG_INFO(
               "[Server | Client {}] Completion Queue has been shutdown. "
               "Exiting "
               "conn_cq_ thread...",
@@ -429,7 +429,7 @@ class AsyncBidiMathServer {
           uint64_t index = index_from_tag(got_tag);
           cq_tag_t status = status_from_tag(got_tag);
 
-          spdlog::info(
+          SPDLOG_INFO(
               "[Server | Client {}] Completion Queue Received: {}", index,
               (status == cq_tag_t::READ)
                   ? "READ"
@@ -442,7 +442,7 @@ class AsyncBidiMathServer {
             const MaxRequest& req = GetRequest();
 
             if (req.a() != 0 || req.b() != 0) {
-              spdlog::info(
+              SPDLOG_INFO(
                   "[Server | Client {}] Receive Request MAX({},{}) from ",
                   index, req.a(), req.b());
 
@@ -458,11 +458,11 @@ class AsyncBidiMathServer {
               m_to_reap_conn_queue_->enqueue(m_index_);
             }
           } else if (status == cq_tag_t::WRITE) {
-            spdlog::info("[Server | Client {}] Write response to successfully.",
-                         index);
+            SPDLOG_INFO("[Server | Client {}] Write response to successfully.",
+                        index);
             WriteFinished();
           } else if (status == cq_tag_t::SHUTDOWN) {
-            spdlog::info(
+            SPDLOG_INFO(
                 "[Server | Client {}] SHUTDOWN is called from the destructor. "
                 "Stopping "
                 "the completion queue...",
@@ -470,19 +470,19 @@ class AsyncBidiMathServer {
             m_cq_shutdown_called_ = true;
             m_conn_cq_.Shutdown();
           } else {
-            spdlog::error("[Server | Client {}] Unexpected status {}!", index,
-                          status);
+            SPDLOG_ERROR("[Server | Client {}] Unexpected status {}!", index,
+                         status);
           }
 
         } else {
-          spdlog::error(
+          SPDLOG_ERROR(
               "[Server | Client {}] CompletionQueue.Next() returned with "
               "\"ok\": "
               "false!");
         }
       }
 
-      spdlog::info("[Server | Client {}] conn_cq_thread ended.", m_index_);
+      SPDLOG_INFO("[Server | Client {}] conn_cq_thread ended.", m_index_);
     }
 
     std::atomic_bool m_initialized;
@@ -533,15 +533,15 @@ class BidiMathClient {
   }
 
   void ReceiveRespThread() {
-    spdlog::info("[Client {}] Recv Thread Started...", m_index_);
+    SPDLOG_INFO("[Client {}] Recv Thread Started...", m_index_);
 
     MaxResponse resp;
     while (m_stream_->Read(&resp)) {
-      spdlog::info("[Client {}] Received the response: {}", m_index_,
-                   resp.result());
+      SPDLOG_INFO("[Client {}] Received the response: {}", m_index_,
+                  resp.result());
     }
 
-    spdlog::info("[Client {}] Recv Thread Exiting...", m_index_);
+    SPDLOG_INFO("[Client {}] Recv Thread Exiting...", m_index_);
   }
 
   void FindMultipleMax(const std::vector<std::pair<int32_t, int32_t>>& pairs) {

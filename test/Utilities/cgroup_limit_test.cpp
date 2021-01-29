@@ -173,7 +173,7 @@ TEST(cgroup, memory_limit) {
 
     sleep(10);
   } else {
-    spdlog::info("[Parent] Child pid: {}\n", child_pid);
+    SPDLOG_INFO("[Parent] Child pid: {}\n", child_pid);
 
     const std::string cg_path{"riley_cgroup"};
 

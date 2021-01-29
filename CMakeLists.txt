@@ -12,7 +12,10 @@ find_package(Threads REQUIRED)
 find_package(fmt 7.1.3 REQUIRED HINTS ${THIRD_PARTY_DIR}/fmt)
 find_package(Boost 1.71 REQUIRED)
 find_package(GTest CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/google-test)
+
 find_package(spdlog 1.8.2 REQUIRED HINTS ${THIRD_PARTY_DIR}/spdlog)
+add_definitions(-DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
+
 find_package(Libevent REQUIRED HINTS ${THIRD_PARTY_DIR}/libevent)
 
 find_package(Protobuf CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/grpc)
@@ -32,19 +35,8 @@ target_include_directories(concurrentqueue INTERFACE ${THIRD_PARTY_DIR}/concurre
 
 LIST(APPEND THIRD_PARTY_LIBS proto fmt::fmt)
 
-add_subdirectory(src/Utilities)
-
-file(GLOB_RECURSE SLURMXD_SRC
-        src/SlurmXd/*.cpp src/SlurmXd/*.h
-        src/SlurmXd/**/*.cpp src/SlurmXd/**/*.h)
-add_executable(slurmxd ${SLURMXD_SRC})
-target_link_libraries(slurmxd
-        PkgConfig::libuv
-        spdlog::spdlog
-        concurrentqueue
-        Utility_AnonymousPipe
-        Utility_cgroup
-        )
+# Source Code
+add_subdirectory(src)
 
 # Tests
 add_subdirectory(test)
