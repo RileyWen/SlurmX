@@ -12,6 +12,7 @@
 #include "gtest/gtest.h"
 
 #include "protos/slrumxd.grpc.pb.h"
+#include "opt_parse.h"
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -22,7 +23,7 @@ using slurmx_grpc::SrunXReply;
 
 
 
-class SrunXClient {
+class SrunXClient : public opt_parse {
  public:
   explicit SrunXClient(const std::shared_ptr<Channel> &channel)
       : stub_(SlurmCtlXd::NewStub(channel)) {
@@ -37,47 +38,6 @@ class SrunXClient {
     signal(SIGINT, sig_int);
 
 
-  }
-
-
-  cxxopts::ParseResult  parse(int argc, char** argv){
-    try
-    {
-      cxxopts::Options options(argv[0], " - srun command line options");
-      options
-          .positional_help("task_name [Task Args...]")
-          .show_positional_help();
-      options
-          .add_options()
-              ("c,ncpu", "limiting the cpu usage of task", cxxopts::value<uint64_t>()->default_value("2"))
-              ("s,ncpu_shares", "limiting the cpu shares of task", cxxopts::value<uint64_t>()->default_value("2"))
-              ("m,nmemory", "limiting the memory usage of task",cxxopts::value<std::string>()->default_value("128M"))
-              ("w,nmemory_swap", "limiting the swap memory usage of task",cxxopts::value<std::string>()->default_value("128M"))
-              ("f,nmemory_soft", "limiting the soft memory usage of task",cxxopts::value<std::string>()->default_value("128M"))
-              ("b,blockio_weight", "limiting the weight of blockio",cxxopts::value<std::string>()->default_value("128M"))
-              ("t,task", "task", cxxopts::value<std::string>()->default_value("notask"))
-              ("help", "Print help")
-              ("positional",
-               "Positional arguments: these are the arguments that are entered "
-               "without an option", cxxopts::value<std::vector<std::string>>()->default_value(" "));
-
-
-      options.parse_positional({"task", "positional"});
-
-      auto result = options.parse(argc, argv);
-
-      if (result.count("help"))
-      {
-        fmt::print("{}",options.help({"", "Group"}));
-        exit(0);
-      }
-      return result;
-    }
-    catch (const cxxopts::OptionException& e)
-    {
-      fmt::print("error parsing options: {}\n", e.what());
-      exit(1);
-    }
   }
 
 
@@ -133,10 +93,10 @@ class SrunXClient {
 
     taskresourcelimit.set_cpu_core_limit(result["ncpu"].as<uint64_t>());
     taskresourcelimit.set_cpu_shares(result["ncpu_shares"].as<uint64_t>());
-    taskresourcelimit.set_memory_limit_bytes(memory_parse_client("nmemory",result));
-    taskresourcelimit.set_memory_sw_limit_bytes(memory_parse_client("nmemory_swap",result));
-    taskresourcelimit.set_memory_soft_limit_bytes(memory_parse_client("nmemory_soft",result));
-    taskresourcelimit.set_blockio_weight(memory_parse_client("blockio_weight",result));
+    taskresourcelimit.set_memory_limit_bytes(opt_parse::memory_parse_client("nmemory",result));
+    taskresourcelimit.set_memory_sw_limit_bytes(opt_parse::memory_parse_client("nmemory_swap",result));
+    taskresourcelimit.set_memory_soft_limit_bytes(opt_parse::memory_parse_client("nmemory_soft",result));
+    taskresourcelimit.set_blockio_weight(opt_parse::memory_parse_client("blockio_weight",result));
 
     taskInfoResourceLimit->CopyFrom(taskresourcelimit);
 
@@ -144,10 +104,6 @@ class SrunXClient {
 
     m_stream_->Write(request);
   }
-
-
-
-
 
  private:
 
@@ -187,25 +143,9 @@ class SrunXClient {
     m_stream_->Write(request);
   }
 
+
+
   std::unique_ptr<SlurmCtlXd::Stub> stub_;
-  uint64_t memory_parse_client(std::string str, const cxxopts::ParseResult &result){
-    auto nmemory = result[str].as<std::string>();
-
-    uint64_t nmemory_byte;
-    if( nmemory[nmemory.length()-1]=='M' ||  nmemory[nmemory.length()-1] == 'm'){
-      nmemory_byte =(uint64_t)std::stoi(nmemory.substr(0,nmemory.length()-1)) * 1024;
-    }
-    else if(nmemory[nmemory.length()-1]=='G' ||  nmemory[nmemory.length()-1]=='g'){
-      nmemory_byte = (uint64_t)std::stoi(nmemory.substr(0,nmemory.length()-1)) * 1024 * 1024;
-    }
-    else{
-      nmemory_byte=(uint64_t)std::stoi(nmemory.substr(0, nmemory.length()));
-    }
-
-    return nmemory_byte;
-  }
-
-
   static std::unique_ptr<grpc::ClientReaderWriter<SrunXRequest, SrunXReply>> m_stream_;
 //  static volatile sig_atomic_t fg;
   static std::condition_variable m_cv_;
@@ -336,73 +276,6 @@ TEST(SrunX, SingalFromClient1) {
 }
 
 
-
-
-
-
-
-
-uint64_t memory_parse_client(std::string str, const cxxopts::ParseResult &result){
-  auto nmemory = result[str].as<std::string>();
-
-  uint64_t nmemory_byte;
-  if( nmemory[nmemory.length()-1]=='M' ||  nmemory[nmemory.length()-1] == 'm'){
-    nmemory_byte =(uint64_t)std::stoi(nmemory.substr(0,nmemory.length()-1)) * 1024;
-  }
-  else if(nmemory[nmemory.length()-1]=='G' ||  nmemory[nmemory.length()-1]=='g'){
-    nmemory_byte = (uint64_t)std::stoi(nmemory.substr(0,nmemory.length()-1)) * 1024 * 1024;
-  }
-  else{
-    nmemory_byte=(uint64_t)std::stoi(nmemory.substr(0, nmemory.length()));
-  }
-
-  return nmemory_byte;
-}
-cxxopts::ParseResult  parse(int argc, char** argv){
-  try
-  {
-    cxxopts::Options options(argv[0], " - srun command line options");
-    options
-        .positional_help("task_name [Task Args...]")
-        .show_positional_help();
-    options
-        .add_options()
-            ("c,ncpu", "limiting the cpu usage of task", cxxopts::value<uint64_t>()->default_value("2"))
-            ("s,ncpu_shares", "limiting the cpu shares of task", cxxopts::value<uint64_t>()->default_value("2"))
-            ("m,nmemory", "limiting the memory usage of task",cxxopts::value<std::string>()->default_value("128M"))
-            ("w,nmemory_swap", "limiting the swap memory usage of task",cxxopts::value<std::string>()->default_value("128M"))
-            ("f,nmemory_soft", "limiting the soft memory usage of task",cxxopts::value<std::string>()->default_value("128M"))
-            ("b,blockio_weight", "limiting the weight of blockio",cxxopts::value<std::string>()->default_value("128M"))
-            ("t,task", "task", cxxopts::value<std::string>()->default_value("notask"))
-            ("help", "Print help")
-            ("positional",
-             "Positional arguments: these are the arguments that are entered "
-             "without an option", cxxopts::value<std::vector<std::string>>()->default_value(" "));
-
-
-    options.parse_positional({"task", "positional"});
-
-    auto result = options.parse(argc, argv);
-
-    if (result.count("help"))
-    {
-      fmt::print("{}",options.help({"", "Group"}));
-      exit(0);
-    }
-    return result;
-  }
-  catch (const cxxopts::OptionException& e)
-  {
-    fmt::print("error parsing options: {}\n", e.what());
-    exit(1);
-  }
-}
-
-
-
-
-
-
 //command line parse means tests
 TEST(SrunX, OptHelpMessage)
 {
@@ -420,28 +293,193 @@ TEST(SrunX, OptHelpMessage)
 TEST(SrunX, OptTestSimple)
 {
   int argc=16;
-  char* argv[]={"./srunX","-c", "10", "-s", "20", "-m" ,"200m", "-w", "102m", "-w", "100m", "-b", "1g", "task1", "arg1", "arg2" };
-  auto result = parse(argc,argv);
+  char* argv[]={"./srunX","-c", "10", "-s", "2", "-m" ,"200M", "-w", "102G", "-f", "100m", "-b", "1g", "task", "arg1", "arg2" };
 
-  fmt::print("executive_path:{}\n",
-             result["task"].as<std::string>()
-  );
+  opt_parse parser;
+  auto result = parser.parse(argc,argv);
 
-  fmt::print("argments: ");
-  for(auto arg : result["positional"].as<std::vector<std::string>>()){
-    fmt::print("{}, ",arg);
-  }
-
-  fmt::print("\nResourceLimit:\n cpu_byte:{}\n cpu_shares:{}\n memory_byte:{}\n memory_sw_byte:{}\n memory_ft_byte:{}\n blockio_wt_byte:{}\n",
-
-             result["ncpu"].as<uint64_t>(),
-             result["ncpu_shares"].as<uint64_t>(),
-             memory_parse_client("nmemory",result),
-             memory_parse_client("nmemory_swap",result),
-             memory_parse_client("nmemory_soft",result),
-             memory_parse_client("blockio_weight",result)
-
-  );
+  parser.PrintTaskInfo(parser.GetTaskInfo(result));
 
 }
 
+TEST(SrunX, OptTest_C)
+{
+  int argc=3;
+  char* argv0[]={"./srunX","-c","0"};
+  char* argv1[]={"./srunX","-c","-1"};
+  char* argv2[]={"./srunX","-c","0.5"};
+  char* argv3[]={"./srunX","-c","2m"};
+  char* argv4[]={"./srunX","-c","m"};
+  char* argv5[]={"./srunX","-c","0M1"};
+
+  opt_parse parser;
+
+  try{
+    std::cout<<"cpu input:"<<argv0[2]<<std::endl;
+    auto result0 = parser.parse(argc,argv0);
+    parser.GetTaskInfo(result0);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+
+  try{
+    std::cout<<"cpu input:"<<argv1[2]<<std::endl;
+    auto result1 = parser.parse(argc,argv1);
+    parser.GetTaskInfo(result1);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+
+  try{
+    std::cout<<"cpu input:"<<argv2[2]<<std::endl;
+    auto result2 = parser.parse(argc,argv2);
+    parser.GetTaskInfo(result2);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+  try{
+    std::cout<<"cpu input:"<<argv3[2]<<std::endl;
+    auto result3 = parser.parse(argc,argv3);
+    parser.GetTaskInfo(result3);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+
+  try{
+    std::cout<<"cpu input:"<<argv4[2]<<std::endl;
+    auto result4 = parser.parse(argc,argv4);
+    parser.GetTaskInfo(result4);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+
+  try{
+    std::cout<<"cpu input:"<<argv5[2]<<std::endl;
+    auto result5 = parser.parse(argc,argv5);
+    parser.GetTaskInfo(result5);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+}
+
+
+TEST(SrunX, OptTest_Memory)
+{
+  int argc=3;
+  char* argv0[]={"./srunX","-m","m12"};
+  char* argv1[]={"./srunX","-m","m12m"};
+  char* argv2[]={"./srunX","-m","1m2"};
+  char* argv3[]={"./srunX","-m","2.5m"};
+  char* argv4[]={"./srunX","-m","125mm"};
+  char* argv5[]={"./srunX","-m","125p"};
+
+  opt_parse parser;
+
+
+  try{
+    std::cout<<"memory input:"<<argv0[2]<<std::endl;
+    auto result0 = parser.parse(argc,argv0);
+    parser.GetTaskInfo(result0);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+
+  try{
+    std::cout<<"memory input:"<<argv1[2]<<std::endl;
+    auto result1 = parser.parse(argc,argv1);
+    parser.GetTaskInfo(result1);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+
+  try{
+    std::cout<<"memory input:"<<argv2[2]<<std::endl;
+    auto result2 = parser.parse(argc,argv2);
+    parser.GetTaskInfo(result2);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+  try{
+    std::cout<<"memory input:"<<argv3[2]<<std::endl;
+    auto result3 = parser.parse(argc,argv3);
+    parser.GetTaskInfo(result3);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+
+  try{
+    std::cout<<"memory input:"<<argv4[2]<<std::endl;
+    auto result4 = parser.parse(argc,argv4);
+    parser.GetTaskInfo(result4);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+
+  try{
+    std::cout<<"memory input:"<<argv5[2]<<std::endl;
+    auto result5 = parser.parse(argc,argv5);
+    parser.GetTaskInfo(result5);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+
+}
+
+TEST(SrunX, OptTest_Task)
+{
+  int argc=3;
+  char* argv0[]={"./srunX", "task."};
+  char* argv1[]={"./srunX", "task-"};
+  char* argv2[]={"./srunX", "task/"};
+  char* argv3[]={"./srunX", "task\\"};
+  char* argv4[]={"./srunX", "task|"};
+  char* argv5[]={"./srunX", "task*"};
+
+  opt_parse parser;
+
+  try{
+    std::cout<<"task input:"<<argv0[1]<<std::endl;
+    auto result0 = parser.parse(argc,argv0);
+    parser.GetTaskInfo(result0);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+
+  try{
+    std::cout<<"task input:"<<argv1[1]<<std::endl;
+    auto result1 = parser.parse(argc,argv1);
+    parser.GetTaskInfo(result1);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+
+  try{
+    std::cout<<"task input:"<<argv2[1]<<std::endl;
+    auto result2 = parser.parse(argc,argv2);
+    parser.GetTaskInfo(result2);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+
+  try{
+    std::cout<<"task input:"<<argv3[1]<<std::endl;
+    auto result3 = parser.parse(argc,argv3);
+    parser.GetTaskInfo(result3);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+
+  try{
+    std::cout<<"task input:"<<argv4[1]<<std::endl;
+    auto result4 = parser.parse(argc,argv4);
+    parser.GetTaskInfo(result4);
+  }catch (std::exception e){}
+
+  std::cout<<"##############################"<<std::endl;
+
+  try{
+    std::cout<<"task input:"<<argv5[1]<<std::endl;
+    auto result5 = parser.parse(argc,argv5);
+    parser.GetTaskInfo(result5);
+  }catch (std::exception e){}
+}
