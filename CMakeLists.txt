@@ -39,19 +39,6 @@ LIST(APPEND THIRD_PARTY_LIBS proto fmt::fmt)
 
 # Source Code
 add_subdirectory(src)
-#opt parse
-add_library(optparse_lib STATIC
-        src/srunX/srun_X.cpp
-        )
-target_link_libraries(optparse_lib
-        ${THIRD_PARTY_LIBS}
-)
-target_include_directories(optparse_lib
-        PUBLIC
-        ${PROJECT_SOURCE_DIR}/src/srunX
-           # ${THIRD_PARTY_DIR}/grpc/include
-)
-
 
 # Tests
 add_subdirectory(test)

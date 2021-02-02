@@ -5,14 +5,14 @@
 #include <csignal>
 #include <cxxopts.hpp>
 #include <grpcpp/grpcpp.h>
-#include <fmt/format.h>
 #include <thread>
 #include <condition_variable>
 #include <atomic>
 #include "gtest/gtest.h"
+#include "PublicHeader.h"
 
-#include "protos/slrumxd.grpc.pb.h"
-#include "opt_parse.h"
+#include "protos/slrumx.grpc.pb.h"
+#include "../src/srunX/opt_parse.h"
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -23,7 +23,7 @@ using slurmx_grpc::SrunXReply;
 
 
 
-class SrunXClient : public opt_parse {
+class SrunXClient {
  public:
   explicit SrunXClient(const std::shared_ptr<Channel> &channel)
       : stub_(SlurmCtlXd::NewStub(channel)) {
@@ -67,9 +67,8 @@ class SrunXClient : public opt_parse {
     Status status = m_stream_->Finish();
 
     if (!status.ok()) {
-      std::cout << status.error_code() << ": " << status.error_message()
-                << std::endl;
-      std::cout << "RPC failed";
+      SLURMX_ERROR("{}:{}",status.error_code(),status.error_message());
+      SLURMX_ERROR("RPC failed");
     }
 
   }
@@ -93,10 +92,10 @@ class SrunXClient : public opt_parse {
 
     taskresourcelimit.set_cpu_core_limit(result["ncpu"].as<uint64_t>());
     taskresourcelimit.set_cpu_shares(result["ncpu_shares"].as<uint64_t>());
-    taskresourcelimit.set_memory_limit_bytes(opt_parse::memory_parse_client("nmemory",result));
-    taskresourcelimit.set_memory_sw_limit_bytes(opt_parse::memory_parse_client("nmemory_swap",result));
-    taskresourcelimit.set_memory_soft_limit_bytes(opt_parse::memory_parse_client("nmemory_soft",result));
-    taskresourcelimit.set_blockio_weight(opt_parse::memory_parse_client("blockio_weight",result));
+    taskresourcelimit.set_memory_limit_bytes(parser.memory_parse_client("nmemory",result));
+    taskresourcelimit.set_memory_sw_limit_bytes(parser.memory_parse_client("nmemory_swap",result));
+    taskresourcelimit.set_memory_soft_limit_bytes(parser.memory_parse_client("nmemory_soft",result));
+    taskresourcelimit.set_blockio_weight(parser.memory_parse_client("blockio_weight",result));
 
     taskInfoResourceLimit->CopyFrom(taskresourcelimit);
 
@@ -105,12 +104,15 @@ class SrunXClient : public opt_parse {
     m_stream_->Write(request);
   }
 
+
+    opt_parse parser;
+
  private:
 
   void m_client_read_func_(){
     SrunXReply reply;
     while (m_stream_->Read(&reply)){
-      std::cout << "S:"<< reply.io_redirection().buf() << "\n";
+      SLURMX_DEBUG("Received:{}",reply.io_redirection().buf());
     }
   }
   void m_client_wait_func_(){
@@ -122,7 +124,6 @@ class SrunXClient : public opt_parse {
 
 
   static void sig_int(int signo){
-    printf("sig_int\n");
     std::unique_lock<std::mutex> lk(m_cv_m_);
     m_fg_=1;
     m_cv_.notify_all();
@@ -141,6 +142,7 @@ class SrunXClient : public opt_parse {
     Signal->CopyFrom(signal);
 
     m_stream_->Write(request);
+
   }
 
 
@@ -154,7 +156,6 @@ class SrunXClient : public opt_parse {
   std::thread m_client_read_thread_;
   std::thread m_client_wait_thread_;
   ClientContext m_context_;
-
 
 };
 
@@ -189,13 +190,13 @@ class SrunXServiceImpl final : public SlurmCtlXd::Service {
     std::thread read([stream, &request]() {
       while (stream->Read(&request))
         if(request.type()==SrunXRequest::Signal){
-          std::cout<<"Signal"<<std::endl;
+          SLURMX_INFO("Signal");
           //TODO  print agrs
         }else if(request.type()==SrunXRequest::Negotiation){
-          std::cout<<"Negotiation"<<std::endl;
+          SLURMX_INFO("Negotiation");
           //TODO  print agrs
         } else if(request.type()==SrunXRequest::NewTask){
-          std::cout<<"NewTask"<<std::endl;
+          SLURMX_INFO("NewTask");
           //TODO  print agrs
         }
     });
@@ -233,11 +234,11 @@ TEST(SrunX, StreamFromServer) {
   builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
   builder.RegisterService(&service);
   std::unique_ptr<Server> server(builder.BuildAndStart());
-  std::cout << "Server listening on " << server_address << std::endl;
+  SLURMX_INFO("Server listening on {}",server_address);
 
   SrunXClient client(grpc::CreateChannel(
         "localhost:50051", grpc::InsecureChannelCredentials()));
-  client.WriteValues(client.parse(argc,argv));
+  client.WriteValues(client.parser.parse(argc,argv));
 
 
   server->Wait();
@@ -259,12 +260,12 @@ TEST(SrunX, SingalFromClient1) {
   builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
   builder.RegisterService(&service);
   std::unique_ptr<Server> server(builder.BuildAndStart());
-  std::cout << "Server listening on " << server_address << std::endl;
+  SLURMX_INFO("Server listening on {}", server_address);
 
   if((pid=fork()) == 0){
     SrunXClient client(grpc::CreateChannel(
         "localhost:50051", grpc::InsecureChannelCredentials()));
-    client.WriteValues(client.parse(argc,argv));
+    client.WriteValues(client.parser.parse(argc,argv));
 
   }
 
@@ -284,7 +285,7 @@ TEST(SrunX, OptHelpMessage)
 
   SrunXClient client(grpc::CreateChannel(
       "localhost:50051", grpc::InsecureChannelCredentials()));
-  client.WriteValues(client.parse(argc,argv));
+  client.WriteValues(client.parser.parse(argc,argv));
 
 }
 
@@ -315,51 +316,41 @@ TEST(SrunX, OptTest_C)
   opt_parse parser;
 
   try{
-    std::cout<<"cpu input:"<<argv0[2]<<std::endl;
+    SLURMX_INFO("cpu input:{}",argv0[2]);
     auto result0 = parser.parse(argc,argv0);
     parser.GetTaskInfo(result0);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
-
   try{
-    std::cout<<"cpu input:"<<argv1[2]<<std::endl;
+    SLURMX_INFO("cpu input:{}",argv1[2]);
     auto result1 = parser.parse(argc,argv1);
     parser.GetTaskInfo(result1);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
-
   try{
-    std::cout<<"cpu input:"<<argv2[2]<<std::endl;
+    SLURMX_INFO("cpu input:{}",argv2[2]);
     auto result2 = parser.parse(argc,argv2);
     parser.GetTaskInfo(result2);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
   try{
-    std::cout<<"cpu input:"<<argv3[2]<<std::endl;
+    SLURMX_INFO("cpu input:{}",argv3[2]);
     auto result3 = parser.parse(argc,argv3);
     parser.GetTaskInfo(result3);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
-
   try{
-    std::cout<<"cpu input:"<<argv4[2]<<std::endl;
+    SLURMX_INFO("cpu input:{}",argv4[2]);
     auto result4 = parser.parse(argc,argv4);
     parser.GetTaskInfo(result4);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
-
   try{
-    std::cout<<"cpu input:"<<argv5[2]<<std::endl;
+    SLURMX_INFO("cpu input:{}",argv5[2]);
     auto result5 = parser.parse(argc,argv5);
     parser.GetTaskInfo(result5);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
 }
 
 
@@ -377,51 +368,40 @@ TEST(SrunX, OptTest_Memory)
 
 
   try{
-    std::cout<<"memory input:"<<argv0[2]<<std::endl;
+   SLURMX_INFO("memory input:{}",argv0[2]);
     auto result0 = parser.parse(argc,argv0);
     parser.GetTaskInfo(result0);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
-
   try{
-    std::cout<<"memory input:"<<argv1[2]<<std::endl;
+    SLURMX_INFO("memory input:{}",argv1[2]);
     auto result1 = parser.parse(argc,argv1);
     parser.GetTaskInfo(result1);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
-
   try{
-    std::cout<<"memory input:"<<argv2[2]<<std::endl;
+    SLURMX_INFO("memory input:{}",argv2[2]);
     auto result2 = parser.parse(argc,argv2);
     parser.GetTaskInfo(result2);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
   try{
-    std::cout<<"memory input:"<<argv3[2]<<std::endl;
+    SLURMX_INFO("memory input:{}",argv3[2]);
     auto result3 = parser.parse(argc,argv3);
     parser.GetTaskInfo(result3);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
-
   try{
-    std::cout<<"memory input:"<<argv4[2]<<std::endl;
+    SLURMX_INFO("memory input:{}",argv4[2]);
     auto result4 = parser.parse(argc,argv4);
     parser.GetTaskInfo(result4);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
-
   try{
-    std::cout<<"memory input:"<<argv5[2]<<std::endl;
+    SLURMX_INFO("memory input:{}",argv5[2]);
     auto result5 = parser.parse(argc,argv5);
     parser.GetTaskInfo(result5);
   }catch (std::exception e){}
-
-  std::cout<<"##############################"<<std::endl;
 
 }
 
@@ -438,47 +418,37 @@ TEST(SrunX, OptTest_Task)
   opt_parse parser;
 
   try{
-    std::cout<<"task input:"<<argv0[1]<<std::endl;
+    SLURMX_INFO("task input:{}",argv0[1]);
     auto result0 = parser.parse(argc,argv0);
     parser.GetTaskInfo(result0);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
-
   try{
-    std::cout<<"task input:"<<argv1[1]<<std::endl;
+    SLURMX_INFO("task input:{}",argv1[1]);
     auto result1 = parser.parse(argc,argv1);
     parser.GetTaskInfo(result1);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
-
   try{
-    std::cout<<"task input:"<<argv2[1]<<std::endl;
+    SLURMX_INFO("task input:{}",argv2[1]);
     auto result2 = parser.parse(argc,argv2);
     parser.GetTaskInfo(result2);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
-
   try{
-    std::cout<<"task input:"<<argv3[1]<<std::endl;
+    SLURMX_INFO("task input:{}",argv3[1]);
     auto result3 = parser.parse(argc,argv3);
     parser.GetTaskInfo(result3);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
-
   try{
-    std::cout<<"task input:"<<argv4[1]<<std::endl;
+    SLURMX_INFO("task input:{}",argv4[1]);
     auto result4 = parser.parse(argc,argv4);
     parser.GetTaskInfo(result4);
   }catch (std::exception e){}
 
-  std::cout<<"##############################"<<std::endl;
-
   try{
-    std::cout<<"task input:"<<argv5[1]<<std::endl;
+    SLURMX_INFO("task input:{}",argv5[1]);
     auto result5 = parser.parse(argc,argv5);
     parser.GetTaskInfo(result5);
   }catch (std::exception e){}

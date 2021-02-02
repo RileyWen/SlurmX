@@ -10,7 +10,7 @@
 #include <condition_variable>
 #include <atomic>
 
-#include "protos/slrumxd.grpc.pb.h"
+#include "protos/slrumx.grpc.pb.h"
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -65,9 +65,8 @@ class SrunXClient : public opt_parse {
     Status status = m_stream_->Finish();
 
     if (!status.ok()) {
-      std::cout << status.error_code() << ": " << status.error_message()
-                << std::endl;
-      std::cout << "RPC failed";
+      SLURMX_ERROR("{}:{}",status.error_code(),status.error_message());
+      SLURMX_ERROR("RPC failed");
     }
 
   }
@@ -107,7 +106,7 @@ class SrunXClient : public opt_parse {
   void m_client_read_func_(){
     SrunXReply reply;
     while (m_stream_->Read(&reply)){
-      std::cout << "S:"<< reply.io_redirection().buf() << "\n";
+      SLURMX_DEBUG("Received:{}",reply.io_redirection().buf());
     }
   }
   void m_client_wait_func_(){
@@ -126,7 +125,7 @@ class SrunXClient : public opt_parse {
   }
 
 
-   void WriteSignal(){
+  void WriteSignal(){
 
     SrunXRequest request;
 
@@ -137,7 +136,7 @@ class SrunXClient : public opt_parse {
     signal.set_signal_type(slurmx_grpc::Signal::Interrupt);
     Signal->CopyFrom(signal);
 
-     m_stream_->Write(request);
+    m_stream_->Write(request);
   }
 
 

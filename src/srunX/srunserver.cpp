@@ -5,7 +5,7 @@
 #include <thread>
 #include <grpcpp/grpcpp.h>
 
-#include "protos/slrumxd.grpc.pb.h"
+#include "protos/slrumx.grpc.pb.h"
 
 using grpc::Server;
 using grpc::ServerBuilder;
@@ -19,7 +19,7 @@ using slurmx_grpc::SrunXReply;
 
 class SrunXServiceImpl final : public SlurmCtlXd::Service {
   Status SrunXStream(ServerContext* context,
-                   ServerReaderWriter<SrunXReply, SrunXRequest>* stream) override {
+                     ServerReaderWriter<SrunXReply, SrunXRequest>* stream) override {
     SrunXRequest request;
 
     SrunXReply reply;
@@ -27,13 +27,13 @@ class SrunXServiceImpl final : public SlurmCtlXd::Service {
     std::thread read([stream, &request]() {
       while (stream->Read(&request))
         if(request.type()==SrunXRequest::Signal){
-          std::cout<<"Signal"<<std::endl;
+          SLURMX_INFO("Signal");
           //TODO  print agrs
         }else if(request.type()==SrunXRequest::Negotiation){
-          std::cout<<"Negotiation"<<std::endl;
+          SLURMX_INFO("Negotiation");
           //TODO  print agrs
         } else if(request.type()==SrunXRequest::NewTask){
-          std::cout<<"NewTask"<<std::endl;
+          SLURMX_INFO("NewTask");
           //TODO  print agrs
         }
     });
@@ -45,17 +45,8 @@ class SrunXServiceImpl final : public SlurmCtlXd::Service {
     ioRedirection->CopyFrom(ioRed);
 
     stream->Write(reply);
-//    std::string str;
-//
-//    std::cin>>str;
-//    while(str!="quit"){
-//      ioRed.set_buf(str);
-//      ioRedirection->CopyFrom(ioRed);
-//      stream->Write(reply);
-//      std::cin>>str;
-//    }
 
-    for(int i=0;i<50000;i++){
+    for(int i=0;i<50;i++){
       ioRed.set_buf(std::to_string(i));
       ioRedirection->CopyFrom(ioRed);
       stream->Write(reply);

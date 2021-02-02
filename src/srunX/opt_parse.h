@@ -9,6 +9,7 @@
 #include <cxxopts.hpp>
 #include <vector>
 #include <regex>
+#include "PublicHeader.h"
 
 class opt_parse{
  public:
@@ -32,7 +33,7 @@ class opt_parse{
   cxxopts::ParseResult  parse(int argc, char** argv){
     try
     {
-      cxxopts::Options options(argv[0], " - srun command line options");
+      cxxopts::Options options(argv[0], " - srunX command line options");
       options
           .positional_help("task_name [Task Args...]")
           .show_positional_help();
@@ -57,14 +58,14 @@ class opt_parse{
 
       if (result.count("help"))
       {
-        fmt::print("{}",options.help({"", "Group"}));
+        SLURMX_INFO("\n{}",options.help({"", "Group"}));
         exit(0);
       }
       return result;
     }
     catch (const cxxopts::OptionException& e)
     {
-      fmt::print("error parsing options: {}\n", e.what());
+      SLURMX_ERROR("error parsing options: {}", e.what());
 //      exit(1);
       throw std::exception();
     }
@@ -74,8 +75,7 @@ class opt_parse{
     auto nmemory = result[str].as<std::string>();
     std::regex Rnmemory("^[0-9]+[mMgG]?$");
     if(!std::regex_match(nmemory,Rnmemory)){
-      std::cout<<"error"<<std::endl;
-      std::cout<<str<<"must be uint number or the uint number ends with 'm/M/g/G'"<<std::endl;
+      SLURMX_ERROR("Error! {} must be uint number or the uint number ends with 'm/M/g/G'",str);
       throw std::exception();
 
     }else{
@@ -103,8 +103,7 @@ class opt_parse{
     if(std::regex_match(str,Rexecutive_path)){
       task.executive_path=str;
     } else{
-      std::cout<<"error"<<std::endl;
-      std::cout<<"task name can not have '-,|,/,\\,.,*' "<<std::endl;
+      SLURMX_ERROR("Error! Task name can not have '-,|,/,\\,.,*'",str);
       throw std::exception();
 
     }
@@ -118,8 +117,7 @@ class opt_parse{
 
     uint = result["ncpu"].as<uint64_t>();
     if(uint==0){
-      std::cout<<"error"<<std::endl;
-      std::cout<<"cpu core can not be zero "<<std::endl;
+      SLURMX_ERROR("Error! Cpu core can not be zero",str);
       throw std::exception();
     } else{
       task.resourceLimit.cpu_core_limit=uint;
@@ -128,8 +126,7 @@ class opt_parse{
 
     uint = result["ncpu_shares"].as<uint64_t>();
     if(uint==0){
-      std::cout<<"error"<<std::endl;
-      std::cout<<"cpu shares can not be zero "<<std::endl;
+      SLURMX_ERROR("Error! Cpu shares can not be zero",str);
       throw std::exception();
     } else{
       task.resourceLimit.cpu_shares=uint;
@@ -159,22 +156,22 @@ class opt_parse{
 
   void PrintTaskInfo(const TaskInfo task){
 
-    fmt::print("executive_path:{}\n",
-               task.executive_path
-    );
+    std::string args;
 
-    fmt::print("argments: ");
     for(auto arg : task.arguments){
-       fmt::print("{}, ",arg);
+      args.append(arg).append(", ");
     }
 
-    fmt::print("\nResourceLimit:\n cpu_byte:{}\n cpu_shares:{}\n memory_byte:{}\n memory_sw_byte:{}\n memory_ft_byte:{}\n blockio_wt_byte:{}\n",
-       task.resourceLimit.cpu_core_limit,
-       task.resourceLimit.cpu_shares,
-       task.resourceLimit.memory_limit_bytes,
-       task.resourceLimit.memory_sw_limit_bytes,
-       task.resourceLimit.memory_soft_limit_bytes,
-       task.resourceLimit.blockio_weight
+    SLURMX_INFO("\nexecutive_path: {}\nargments: {}\nResourceLimit:\n cpu_byte: {}\n cpu_shares: {}\n memory_byte: {}\n memory_sw_byte: {}\n memory_ft_byte: {}\n blockio_wt_byte: {}\n",
+                task.executive_path,
+                args,
+                task.resourceLimit.cpu_core_limit,
+                task.resourceLimit.cpu_shares,
+                task.resourceLimit.memory_limit_bytes,
+                task.resourceLimit.memory_sw_limit_bytes,
+                task.resourceLimit.memory_soft_limit_bytes,
+                task.resourceLimit.blockio_weight
+
     );
 
   }
