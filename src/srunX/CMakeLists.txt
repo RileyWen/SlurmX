@@ -1,0 +1,7 @@
+include(${CMAKE_SOURCE_DIR}/CMakeModule/CMakeMacros.cmake)
+
+SUBDIRLIST(SUBDIRS ${CMAKE_CURRENT_SOURCE_DIR})
+
+FOREACH(SUBDIR ${SUBDIRS})
+    add_subdirectory(${SUBDIR})
+ENDFOREACH()

@@ -41,14 +41,14 @@ LIST(APPEND THIRD_PARTY_LIBS proto fmt::fmt)
 add_subdirectory(src)
 #opt parse
 add_library(optparse_lib STATIC
-        src/srun_X/srun_X.cpp
-        src/srun_X/srun_async_X.cpp )
+        src/srunX/srun_X.cpp
+        )
 target_link_libraries(optparse_lib
         ${THIRD_PARTY_LIBS}
 )
 target_include_directories(optparse_lib
         PUBLIC
-        ${PROJECT_SOURCE_DIR}/src/srun_X
+        ${PROJECT_SOURCE_DIR}/src/srunX
            # ${THIRD_PARTY_DIR}/grpc/include
 )
 
