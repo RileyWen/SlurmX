@@ -5,44 +5,53 @@
 #include <thread>
 #include <grpcpp/grpcpp.h>
 
-#include "protos/slrumx.grpc.pb.h"
+#include "protos/slurmx.grpc.pb.h"
 
 using grpc::Server;
 using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::ServerReaderWriter;
 using grpc::Status;
-using slurmx_grpc::SlurmCtlXd;
-using slurmx_grpc::SrunXRequest;
-using slurmx_grpc::SrunXReply;
+using slurmx_grpc::SlurmXd;
+using slurmx_grpc::SrunXStreamRequest;
+using slurmx_grpc::SrunXStreamReply;
 
 
-class SrunXServiceImpl final : public SlurmCtlXd::Service {
+class SrunXServiceImpl final : public SlurmXd::Service {
   Status SrunXStream(ServerContext* context,
-                     ServerReaderWriter<SrunXReply, SrunXRequest>* stream) override {
-    SrunXRequest request;
+                     ServerReaderWriter<SrunXStreamReply, SrunXStreamRequest>* stream) override {
+    SrunXStreamRequest request;
 
-    SrunXReply reply;
+    SrunXStreamReply reply;
 
     std::thread read([stream, &request]() {
-      while (stream->Read(&request))
-        if(request.type()==SrunXRequest::Signal){
+      while (stream->Read(&request)){
+//        SLURMX_INFO("WHILE");
+        if(request.type()==SrunXStreamRequest::Signal){
           SLURMX_INFO("Signal");
           //TODO  print agrs
-        }else if(request.type()==SrunXRequest::Negotiation){
+          exit(0);
+        }else if(request.type()==SrunXStreamRequest::Negotiation){
           SLURMX_INFO("Negotiation");
           //TODO  print agrs
-        } else if(request.type()==SrunXRequest::NewTask){
-          SLURMX_INFO("NewTask");
-          //TODO  print agrs
+        } else if(request.type()==SrunXStreamRequest::NewTask){
+          std::string args;
+          for(auto  arg : request.task_info().arguments()){
+            args.append(arg).append(", ");
+          }
+          SLURMX_INFO("\nNewTask:\n Task name: {}\n Task args: {}\n uuid: {}\n",
+                      request.task_info().executive_path(),
+                      args,
+                      request.task_info().resource_uuid());
         }
+      }
     });
 
-    reply.set_type(SrunXReply::IoRedirection);
+    reply.set_type(SrunXStreamReply::IoRedirection);
     slurmx_grpc::IoRedirection * ioRedirection=reply.mutable_io_redirection();
     slurmx_grpc::IoRedirection  ioRed;
-    ioRed.set_buf("OK");
-    ioRedirection->CopyFrom(ioRed);
+//    ioRed.set_buf("OK");
+//    ioRedirection->CopyFrom(ioRed);
 
     stream->Write(reply);
 

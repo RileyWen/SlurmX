@@ -15,6 +15,7 @@ target_link_libraries(slurmx_test
         libevent::core
         proto
         test_proto
+        cxxopts::cxxopts
         )
 add_test(NAME slurm_test COMMAND test/slurmx_test)
 

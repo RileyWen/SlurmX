@@ -27,7 +27,7 @@ class opt_parse{
 
     std::string executive_path;
     std::vector<std::string> arguments;
-    ResourceLimit resourceLimit;
+    std::string resource_uuid;
 
   } TaskInfo;
   cxxopts::ParseResult  parse(int argc, char** argv){
@@ -75,7 +75,7 @@ class opt_parse{
     auto nmemory = result[str].as<std::string>();
     std::regex Rnmemory("^[0-9]+[mMgG]?$");
     if(!std::regex_match(nmemory,Rnmemory)){
-      SLURMX_ERROR("Error! {} must be uint number or the uint number ends with 'm/M/g/G'",str);
+      SLURMX_ERROR("Error! {} must be uint number or the uint number ends with 'm/M/g/G'!",str);
       throw std::exception();
 
     }else{
@@ -88,13 +88,17 @@ class opt_parse{
       }
       else{
         nmemory_byte=(uint64_t)std::stoi(nmemory.substr(0, nmemory.length()));
+        if(nmemory_byte==0){
+          SLURMX_ERROR("Error! {} can not be zero!",str);
+          throw std::exception();
+        }
       }
 
       return nmemory_byte;
     }
   }
 
-  TaskInfo GetTaskInfo(const cxxopts::ParseResult &result){
+  TaskInfo GetTaskInfo(const cxxopts::ParseResult &result,std::string uuid){
     TaskInfo task;
 
 
@@ -103,58 +107,62 @@ class opt_parse{
     if(std::regex_match(str,Rexecutive_path)){
       task.executive_path=str;
     } else{
-      SLURMX_ERROR("Error! Task name can not have '-,|,/,\\,.,*'",str);
+      SLURMX_ERROR("Task name can only contain letters, numbers, and underscores!");
       throw std::exception();
 
     }
 
-
     for(auto arg : result["positional"].as<std::vector<std::string>>()){
       task.arguments.push_back(arg);
     }
+    task.resource_uuid=uuid;
+    return task;
+  }
+
+
+
+  ResourceLimit GetREsourceLimit(const cxxopts::ParseResult &result){
+    ResourceLimit resourceLimit;
 
     uint64_t uint ;
 
     uint = result["ncpu"].as<uint64_t>();
     if(uint==0){
-      SLURMX_ERROR("Error! Cpu core can not be zero",str);
+      SLURMX_ERROR("Error! Cpu core can not be zero!");
       throw std::exception();
     } else{
-      task.resourceLimit.cpu_core_limit=uint;
+      resourceLimit.cpu_core_limit=uint;
     }
 
 
     uint = result["ncpu_shares"].as<uint64_t>();
     if(uint==0){
-      SLURMX_ERROR("Error! Cpu shares can not be zero",str);
+      SLURMX_ERROR("Error! Cpu shares can not be zero");
       throw std::exception();
     } else{
-      task.resourceLimit.cpu_shares=uint;
+      resourceLimit.cpu_shares=uint;
     }
 
-
     uint = memory_parse_client("nmemory",result);
-    task.resourceLimit.memory_limit_bytes=uint;
+    resourceLimit.memory_limit_bytes=uint;
 
     uint = memory_parse_client("nmemory_swap",result);
-    task.resourceLimit.memory_sw_limit_bytes=uint;
+    resourceLimit.memory_sw_limit_bytes=uint;
 
     uint = memory_parse_client("nmemory_soft",result);
-    task.resourceLimit.memory_soft_limit_bytes=uint;
+    resourceLimit.memory_soft_limit_bytes=uint;
 
 
     uint = memory_parse_client("blockio_weight",result);
-    task.resourceLimit.blockio_weight=uint;
+    resourceLimit.blockio_weight=uint;
 
 
-    return task;
+    return resourceLimit;
 
 
   }
 
-
-
-  void PrintTaskInfo(const TaskInfo task){
+  void PrintTaskInfo(const TaskInfo task,const ResourceLimit resourceLimit){
 
     std::string args;
 
@@ -165,12 +173,12 @@ class opt_parse{
     SLURMX_INFO("\nexecutive_path: {}\nargments: {}\nResourceLimit:\n cpu_byte: {}\n cpu_shares: {}\n memory_byte: {}\n memory_sw_byte: {}\n memory_ft_byte: {}\n blockio_wt_byte: {}\n",
                 task.executive_path,
                 args,
-                task.resourceLimit.cpu_core_limit,
-                task.resourceLimit.cpu_shares,
-                task.resourceLimit.memory_limit_bytes,
-                task.resourceLimit.memory_sw_limit_bytes,
-                task.resourceLimit.memory_soft_limit_bytes,
-                task.resourceLimit.blockio_weight
+                resourceLimit.cpu_core_limit,
+                resourceLimit.cpu_shares,
+                resourceLimit.memory_limit_bytes,
+                resourceLimit.memory_sw_limit_bytes,
+                resourceLimit.memory_soft_limit_bytes,
+                resourceLimit.blockio_weight
 
     );
 
