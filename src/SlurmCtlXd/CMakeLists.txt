@@ -5,10 +5,11 @@ file(GLOB_RECURSE SLURMCTLXD_SRC
 add_executable(slurmctlxd ${SLURMCTLXD_SRC})
 
 target_link_libraries(slurmctlxd
-        PkgConfig::libuv
         spdlog::spdlog
         concurrentqueue
         Utility_AnonymousPipe
         Utility_cgroup
         Utility_PublicHeader
+        proto
+        cxxopts::cxxopts
         )

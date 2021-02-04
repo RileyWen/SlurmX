@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package slurmx_grpc;
+
+message Negotiation {
+  uint32 version = 1;
+}
+
+message ResourceLimit {
+  uint64 cpu_core_limit = 1;
+  uint64 cpu_shares = 2;
+  uint64 memory_limit_bytes = 3;
+  uint64 memory_sw_limit_bytes = 4;
+  uint64 memory_soft_limit_bytes = 5;
+  uint64 blockio_weight = 6;
+}
+
+message ResourceAllocReply {
+  bytes resource_uuid = 1;
+}
+
+message TaskInfo {
+  string executive_path = 1;
+  repeated string arguments = 2;
+
+  bytes resource_uuid = 3;
+}
+
+message Signal {
+  enum SignalType {
+    Interrupt = 0;
+  }
+  SignalType signal_type = 1;
+}
+
+message IoRedirection {
+  string buf = 1;
+}
+
+message TaskExitStatus {
+  uint32 return_value = 1;
+  string reason = 2;
+}
+
+message NewTaskResult {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message SrunXStreamRequest{
+  enum Type {
+    Negotiation = 0;
+    NewTask = 1;
+    Signal = 2;
+  }
+  Type type = 1;
+
+  oneof payload {
+    Negotiation negotiation = 2;
+    TaskInfo task_info = 3;
+    Signal signal = 4;
+  }
+}
+
+message SrunXStreamReply {
+  enum Type {
+    IoRedirection = 0;
+    ExitStatus = 1;
+    NewTaskResult = 2;
+  }
+  Type type = 1;
+
+  oneof payload {
+    IoRedirection io_redirection = 2 ;
+    TaskExitStatus task_exit_status = 3;
+    NewTaskResult new_task_result = 4;
+  }
+}
+
+message SlurmXdNodeSpec {
+  uint32 cpu_count = 1;
+  uint64 memory_bytes = 2;
+}
+
+message SlurmXdRegisterResult {
+  bool ok = 1;
+  oneof payload {
+    bytes uuid = 2; // always 16 bytes
+    string reason = 3;
+  }
+}
+
+message HeartbeatRequest {
+  bytes node_uuid = 1;
+}
+
+message HeartbeatReply {}
+
+// Todo: Divide service into two parts: one for SlurmXd and one for SrunX
+service SlurmCtlXd {
+  rpc RegisterSlurmXd(SlurmXdNodeSpec) returns (SlurmXdRegisterResult);
+  rpc AllocateResource(ResourceLimit) returns(ResourceAllocReply);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatReply);
+}
+
+service SlurmXd {
+  rpc SrunXStream(stream SrunXStreamRequest) returns (stream SrunXStreamReply);
+}

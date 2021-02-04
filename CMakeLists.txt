@@ -18,6 +18,8 @@ add_definitions(-DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
 
 find_package(Libevent REQUIRED HINTS ${THIRD_PARTY_DIR}/libevent)
 
+find_package(cxxopts 2.2.0 REQUIRED HINTS ${THIRD_PARTY_DIR}/cxxopts)
+
 find_package(Protobuf CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/grpc)
 find_package(gRPC CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/grpc)
 get_target_property(GRPC_CPP_PLUGIN_LOCATION gRPC::grpc_cpp_plugin LOCATION)
