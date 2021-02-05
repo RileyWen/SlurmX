@@ -10,6 +10,8 @@ target_link_libraries(slurmxd
         concurrentqueue
         Utility_AnonymousPipe
         Utility_cgroup
+        Utility_PublicHeader
         proto
+        Boost::boost
         )
 

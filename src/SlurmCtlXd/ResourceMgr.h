@@ -14,38 +14,28 @@ namespace CtlXd {
 
 using namespace boost::uuids;
 
-struct SlurmXdNodeSpec {
-  uint32_t cpu_count;
-  uint64_t memory_bytes;
-};
-
-struct ResourceShard {
-  uint64_t cpu_core_limit;
-  uint64_t cpu_shares;
-  uint64_t memory_limit_bytes;
-  uint64_t memory_sw_limit_bytes;
-  uint64_t memory_soft_limit_bytes;
-  uint64_t blockio_weight;
-};
-
 struct SlurmXdNode {
   uuid node_uuid;
-  SlurmXdNodeSpec spec;
-  std::unordered_map<uuid, ResourceShard> resc_shards;
+
+  // total = avail + in-use
+  resource_t res_total;
+  resource_t res_avail;
+  resource_t res_in_use;
+
+  std::unordered_map<uuid, resource_t> resc_shards;
 };
 
 // A class for
 class ResourceMgr {
  public:
-  ResourceMgr& GetInstance() {
+  static ResourceMgr& GetInstance() {
     static ResourceMgr ins;
     return ins;
   }
 
-  uuid RegisterNewSlurmXdNode(const SlurmXdNodeSpec& spec);
+  SlurmxErr RegisterNewSlurmXdNode(const resource_t& spec, uuid* node_uuid);
 
-  uuid AllocateResourceForNode(const uuid& node_uuid,
-                               const ResourceShard& resc_shard);
+  SlurmxErr AllocateResource(const resource_t& res, uuid* res_uuid);
 
   void HeartBeatFromNode(const uuid& node_uuid);
 
@@ -54,13 +44,15 @@ class ResourceMgr {
  private:
   ResourceMgr() = default;
 
-  struct {
-    uint32_t cpu_count;
-    uint64_t memory_bytes;
-  } m_resource_total;
+  // total = avail + in-use
+  resource_t m_resource_total_;
+  resource_t m_resource_avail_;
+  resource_t m_resource_in_use_;
 
   std::unordered_map<uuid, SlurmXdNode> m_node_map_;
   std::mutex m_mut_;
+
+  boost::uuids::random_generator_mt19937 m_uuid_gen_;
 };
 
 }  // namespace CtlXd

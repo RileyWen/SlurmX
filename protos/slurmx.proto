@@ -16,7 +16,11 @@ message ResourceLimit {
 }
 
 message ResourceAllocReply {
-  bytes resource_uuid = 1;
+  bool ok = 1;
+  oneof payload {
+    bytes resource_uuid = 2;
+    string reason = 3;
+  }
 }
 
 message TaskInfo {
@@ -80,6 +84,12 @@ message SrunXStreamReply {
 message SlurmXdNodeSpec {
   uint32 cpu_count = 1;
   uint64 memory_bytes = 2;
+  uint64 memory_sw_bytes = 3;
+}
+
+message SlurmXdRegisterRequest {
+  Negotiation header = 1;
+  SlurmXdNodeSpec spec = 2;
 }
 
 message SlurmXdRegisterResult {
@@ -98,7 +108,7 @@ message HeartbeatReply {}
 
 // Todo: Divide service into two parts: one for SlurmXd and one for SrunX
 service SlurmCtlXd {
-  rpc RegisterSlurmXd(SlurmXdNodeSpec) returns (SlurmXdRegisterResult);
+  rpc RegisterSlurmXd(SlurmXdRegisterRequest) returns (SlurmXdRegisterResult);
   rpc AllocateResource(ResourceLimit) returns(ResourceAllocReply);
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatReply);
 }

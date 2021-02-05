@@ -12,4 +12,5 @@ target_link_libraries(slurmctlxd
         Utility_PublicHeader
         proto
         cxxopts::cxxopts
+        Boost::boost
         )
