@@ -422,8 +422,8 @@ TEST(SrunX, OptTest_Memory)
 {
   int argc=3;
   char* argv0[]={"./srunX","-m","m12"};
-  char* argv1[]={"./srunX","-m","m12m"};
-  char* argv2[]={"./srunX","-m","1m2"};
+  char* argv1[]={"./srunX","-m","18446744073709551615m"};
+  char* argv2[]={"./srunX","-m","0"};
   char* argv3[]={"./srunX","-m","2.5m"};
   char* argv4[]={"./srunX","-m","125mm"};
   char* argv5[]={"./srunX","-m","125p"};

@@ -81,19 +81,37 @@ class opt_parse{
     }else{
       uint64_t nmemory_byte;
       if( nmemory[nmemory.length()-1]=='M' ||  nmemory[nmemory.length()-1] == 'm'){
-        nmemory_byte =(uint64_t)std::stoi(nmemory.substr(0,nmemory.length()-1)) * 1024;
+        std::regex Rnmemory_M("^[0-9]{1,8}[mMgG]?$");
+        if(!std::regex_match(nmemory,Rnmemory_M)){
+          SLURMX_ERROR("Error! {} out of the range!",str);
+          throw std::exception();
+        }
+        nmemory_byte =(uint64_t)std::stoi(nmemory.substr(0,nmemory.length()-1)) * 1024 * 1024;
       }
       else if(nmemory[nmemory.length()-1]=='G' ||  nmemory[nmemory.length()-1]=='g'){
-        nmemory_byte = (uint64_t)std::stoi(nmemory.substr(0,nmemory.length()-1)) * 1024 * 1024;
+        std::regex Rnmemory_G("^[0-9]{1,5}[mMgG]?$");
+        if(!std::regex_match(nmemory,Rnmemory_G)){
+          SLURMX_ERROR("Error! {} out of the range!",str);
+          throw std::exception();
+        }
+        nmemory_byte = (uint64_t)std::stoi(nmemory.substr(0,nmemory.length()-1)) * 1024 * 1024 * 1024;
       }
       else{
+        std::regex Rnmemory_G("^[0-9]{1,15}$");
+        if(!std::regex_match(nmemory,Rnmemory_G)){
+          SLURMX_ERROR("Error! {} out of the range!",str);
+          throw std::exception();
+        }
         nmemory_byte=(uint64_t)std::stoi(nmemory.substr(0, nmemory.length()));
         if(nmemory_byte==0){
           SLURMX_ERROR("Error! {} can not be zero!",str);
           throw std::exception();
         }
       }
-
+      if(nmemory_byte==0){
+        SLURMX_ERROR("Error! {} can not be zero!",str);
+        throw std::exception();
+      }
       return nmemory_byte;
     }
   }
