@@ -23,14 +23,14 @@ using slurmx_grpc::SlurmXd;
 using slurmx_grpc::SrunXStreamRequest;
 using slurmx_grpc::SrunXStreamReply;
 using slurmx_grpc::SlurmCtlXd;
-using slurmx_grpc::ResourceLimit;
+using slurmx_grpc::ResourceAllocRequest;
 using slurmx_grpc::ResourceAllocReply;
 
 
 class SrunXClient {
  public:
   explicit SrunXClient(const std::shared_ptr<Channel> &channel,const std::shared_ptr<Channel> &channel_ctld,int argc,char* argv[])
-      : stub_(SlurmXd::NewStub(channel)),stub_ctld_(SlurmCtlXd::NewStub(channel_ctld)) {
+      : m_stub_(SlurmXd::NewStub(channel)),m_stub_ctld_(SlurmCtlXd::NewStub(channel_ctld)) {
 
     enum class SrunX_State {
       SEND_REQUIREMENT_TO_SLURMCTLXD=0,
@@ -51,19 +51,20 @@ class SrunXClient {
           //send resourcelimit to slurmctlxd and received token
         case SrunX_State::SEND_REQUIREMENT_TO_SLURMCTLXD:
         {
-          ResourceLimit resourceLimit;
-          resourceLimit.set_cpu_core_limit(result["ncpu"].as<uint64_t>());
-          resourceLimit.set_cpu_shares(result["ncpu_shares"].as<uint64_t>());
-          resourceLimit.set_memory_limit_bytes(parser.memory_parse_client("nmemory",result));
-          resourceLimit.set_memory_soft_limit_bytes(parser.memory_parse_client("nmemory_soft",result));
-          resourceLimit.set_memory_sw_limit_bytes(parser.memory_parse_client("nmemory_swap",result));
-          resourceLimit.set_blockio_weight(parser.memory_parse_client("blockio_weight",result));
 
-          Status status = stub_ctld_->AllocateResource(&context, resourceLimit, &resourceAllocReply);
+          ResourceAllocRequest resourceAllocRequest;
+          slurmx_grpc::AllocatableResource *AllocatableResource=resourceAllocRequest.mutable_required_resource();
+          slurmx_grpc::AllocatableResource allocatableResource;
+          allocatableResource.set_cpu_core_limit(result["ncpu"].as<uint64_t>());
+          allocatableResource.set_memory_sw_limit_bytes(parser.memory_parse_client("nmemory_swap",result));
+          allocatableResource.set_memory_limit_bytes(parser.memory_parse_client("nmemory",result));
+          AllocatableResource->CopyFrom(allocatableResource);
+
+          Status status = m_stub_ctld_->AllocateResource(&context, resourceAllocRequest, &resourceAllocReply);
 
           if (status.ok()) {
             if(resourceAllocReply.ok()){
-              uuid = resourceAllocReply.resource_uuid();
+              m_uuid_ = resourceAllocReply.resource_uuid();
               SLURMX_INFO("Srunxclient: Get the token from the slurmxctld.");
               state = SrunX_State::COMMUNICATION_WITH_SLURMXD;
             } else{
@@ -88,7 +89,7 @@ class SrunXClient {
         //  NewTaskResult -
         case SrunX_State::COMMUNICATION_WITH_SLURMXD:
         {
-          m_stream_ = stub_->SrunXStream(&m_context_);
+          m_stream_ = m_stub_->SrunXStream(&m_context_);
           m_fg_=0;
 
           SrunXStreamRequest request;
@@ -131,7 +132,7 @@ class SrunXClient {
                   taskinfo.add_arguments(arg);
                 }
 
-                taskinfo.set_resource_uuid(uuid);
+                taskinfo.set_resource_uuid(m_uuid_);
                 taskInfo->CopyFrom(taskinfo);
 
                 m_stream_->Write(request);
@@ -223,8 +224,8 @@ class SrunXClient {
   }
 
 
-  std::unique_ptr<SlurmXd::Stub> stub_;
-  std::unique_ptr<SlurmCtlXd::Stub> stub_ctld_;
+  std::unique_ptr<SlurmXd::Stub> m_stub_;
+  std::unique_ptr<SlurmCtlXd::Stub> m_stub_ctld_;
   static std::unique_ptr<grpc::ClientReaderWriter<SrunXStreamRequest, SrunXStreamReply>> m_stream_;
 //  static volatile sig_atomic_t fg;
   static std::condition_variable m_cv_;
@@ -233,7 +234,7 @@ class SrunXClient {
   std::thread m_client_read_thread_;
   std::thread m_client_wait_thread_;
   ClientContext m_context_;
-  std::string uuid;
+  std::string m_uuid_;
 
 };
 
@@ -410,11 +411,11 @@ using grpc::ServerContext;
 using grpc::Status;
 using slurmx_grpc::SlurmCtlXd;
 using slurmx_grpc::ResourceAllocReply;
-using slurmx_grpc::ResourceLimit;
+using slurmx_grpc::ResourceAllocRequest;
 
 // Logic and data behind the server's behavior.
 class SrunCtldServiceImpl final : public SlurmCtlXd::Service {
-  Status AllocateResource(ServerContext* context, const ResourceLimit* request,
+  Status AllocateResource(ServerContext* context, const ResourceAllocRequest* request,
                   ResourceAllocReply* reply) override {
 
     std::string uuid("e9ad48f9-1e60-497b-8d31-8a533a96f984");
@@ -426,13 +427,11 @@ class SrunCtldServiceImpl final : public SlurmCtlXd::Service {
       reply->set_ok(false);
       reply->set_reason("reason why");
     }
-    SLURMX_INFO("Slrumctlxdserver: \nResourceLimit:\n cpu_byte: {}\n cpu_shares: {}\n memory_byte: {}\n memory_sw_byte: {}\n memory_ft_byte: {}\n blockio_wt_byte: {}\n",
-                request->cpu_core_limit(),
-                request->cpu_shares(),
-                request->memory_limit_bytes(),
-                request->memory_sw_limit_bytes(),
-                request->memory_soft_limit_bytes(),
-                request->blockio_weight()
+
+        SLURMX_INFO("Slrumctlxdserver: \nrequired_resource:\n cpu_byte: {}\n memory_byte: {}\n memory_sw_byte: {}\n",
+                request->required_resource().cpu_core_limit(),
+                request->required_resource().memory_limit_bytes(),
+                request->required_resource().memory_sw_limit_bytes()
     );
     return Status::OK;
   }
