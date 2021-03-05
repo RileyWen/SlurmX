@@ -1,7 +1,12 @@
-include(${CMAKE_SOURCE_DIR}/CMakeModule/CMakeMacros.cmake)
+file(GLOB_RECURSE SLURMXD_SRC
+        ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/*.h)
 
-SUBDIRLIST(SUBDIRS ${CMAKE_CURRENT_SOURCE_DIR})
+add_executable(srunX ${SLURMXD_SRC})
 
-FOREACH(SUBDIR ${SUBDIRS})
-    add_subdirectory(${SUBDIR})
-ENDFOREACH()
+target_link_libraries(srunX
+        cxxopts::cxxopts
+        proto
+        Utility_PublicHeader
+        )
+
