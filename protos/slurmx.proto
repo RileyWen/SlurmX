@@ -15,6 +15,17 @@ message ResourceLimit {
   uint64 blockio_weight = 6;
 }
 
+// Match the definition of 'resource_t' in PublicHeader.h
+message AllocatableResource {
+  uint64 cpu_core_limit = 1;
+  uint64 memory_limit_bytes = 2;
+  uint64 memory_sw_limit_bytes = 3;
+}
+
+message ResourceAllocRequest {
+  AllocatableResource required_resource = 1;
+}
+
 message ResourceAllocReply {
   bool ok = 1;
   oneof payload {
@@ -81,15 +92,9 @@ message SrunXStreamReply {
   }
 }
 
-message SlurmXdNodeSpec {
-  uint32 cpu_count = 1;
-  uint64 memory_bytes = 2;
-  uint64 memory_sw_bytes = 3;
-}
-
 message SlurmXdRegisterRequest {
   Negotiation header = 1;
-  SlurmXdNodeSpec spec = 2;
+  AllocatableResource resource_total = 2;
 }
 
 message SlurmXdRegisterResult {
@@ -106,13 +111,37 @@ message HeartbeatRequest {
 
 message HeartbeatReply {}
 
+message GrantResourceTokenRequest {
+  bytes resource_uuid = 1;
+  AllocatableResource allocated_resource = 2;
+}
+
+message GrantResourceTokenReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message RevokeResourceTokenRequest {
+  bytes resource_uuid = 1;
+}
+
+message RevokeResourceTokenReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
 // Todo: Divide service into two parts: one for SlurmXd and one for SrunX
+//  We need to distinguish the message sender
+//  and have some kind of authentication
 service SlurmCtlXd {
   rpc RegisterSlurmXd(SlurmXdRegisterRequest) returns (SlurmXdRegisterResult);
-  rpc AllocateResource(ResourceLimit) returns(ResourceAllocReply);
+  rpc AllocateResource(ResourceAllocRequest) returns(ResourceAllocReply);
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatReply);
 }
 
 service SlurmXd {
+  rpc GrantResourceToken(GrantResourceTokenRequest) returns (GrantResourceTokenReply);
+  rpc RevokeResourceToken(RevokeResourceTokenRequest) returns (RevokeResourceTokenReply);
+
   rpc SrunXStream(stream SrunXStreamRequest) returns (stream SrunXStreamReply);
 }
