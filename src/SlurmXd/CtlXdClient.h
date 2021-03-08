@@ -1,23 +1,25 @@
 #pragma once
 
+#include <grpc++/grpc++.h>
+
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_hash.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <memory>
 
 #include "PublicHeader.h"
-#include "grpc++/grpc++.h"
 #include "protos/slurmx.grpc.pb.h"
 #include "protos/slurmx.pb.h"
 
-namespace SlurmXd {
+namespace Xd {
 
 using boost::uuids::uuid;
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
+using slurmx_grpc::AllocatableResource;
 using slurmx_grpc::SlurmCtlXd;
-using slurmx_grpc::SlurmXdNodeSpec;
+using slurmx_grpc::SlurmXdRegisterRequest;
 using slurmx_grpc::SlurmXdRegisterResult;
 
 class CtlXdClient {
@@ -41,4 +43,4 @@ class CtlXdClient {
   uuid m_node_uuid_;
 };
 
-}  // namespace SlurmXd
+}  // namespace Xd

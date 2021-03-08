@@ -178,11 +178,11 @@ const ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 
 // '0' means that the entry is not set.
 struct CgroupLimit {
+  uint64_t cpu_core_limit = 0;
+  uint64_t cpu_shares = 0;
   uint64_t memory_limit_bytes = 0;
   uint64_t memory_sw_limit_bytes = 0;
   uint64_t memory_soft_limit_bytes = 0;
-  uint64_t cpu_core_limit = 0;
-  uint64_t cpu_shares = 0;
   uint64_t blockio_weight = 0;
 };
 

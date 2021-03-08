@@ -13,4 +13,5 @@ target_link_libraries(slurmctlxd
         proto
         cxxopts::cxxopts
         Boost::boost
+        libevent::core
         )

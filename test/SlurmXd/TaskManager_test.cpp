@@ -33,13 +33,23 @@ TEST(TaskManager, simple) {
   // spdlog::info("Cmd: {}", cmd);
   system(cmd.c_str());
 
-  TaskManager& tm = TaskManager::GetInstance();
-  TaskInfo info{"RileyTest", test_prog_path, {}, {.cpu_core_limit = 2}};
+  auto output_callback = [](std::string&& buf) {
+    SLURMX_DEBUG("Output from callback: {}", buf);
+  };
 
-  auto future = tm.AddTaskAsync(std::move(info));
-  grpc_resp_t resp = future.get();
-  SLURMX_TRACE("status: {}, reason: {}", resp.status,
-               resp.reason.has_value() ? resp.reason.value() : "");
+  auto finish_callback = [](bool is_terminated_by_signal, int value) {
+    SLURMX_DEBUG("Task ended. Normal exit: {}. Value: {}",
+                 !is_terminated_by_signal, value);
+  };
+
+  TaskManager& tm = TaskManager::GetInstance();
+  TaskInitInfo info{
+      "RileyTest",           test_prog_path,  {},
+      {.cpu_core_limit = 2}, output_callback, finish_callback,
+  };
+
+  SlurmxErr err = tm.AddTaskAsync(std::move(info));
+  SLURMX_TRACE("err value: {}, reason: {}", uint64_t(err), SlurmxErrStr(err));
 
   using namespace std::chrono_literals;
   std::this_thread::sleep_for(2s);
@@ -53,3 +63,6 @@ TEST(TaskManager, simple) {
   if (remove(test_prog_path.c_str()) != 0)
     SLURMX_ERROR("Error removing test_prog:", strerror(errno));
 }
+
+// Todo: Test TaskManager from grpc.
+// Todo: Test task termination with SIGINT.

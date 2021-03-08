@@ -1,4 +1,4 @@
-#include "CtlXdServer.h"
+#include "CtlXdGrpcServer.h"
 
 namespace CtlXd {
 
@@ -6,17 +6,14 @@ grpc::Status CtlXd::SlurmCtlXdServiceImpl::RegisterSlurmXd(
     grpc::ServerContext *context,
     const slurmx_grpc::SlurmXdRegisterRequest *request,
     slurmx_grpc::SlurmXdRegisterResult *response) {
-  ResourceMgr &res_mgr = ResourceMgr::GetInstance();
+  ConcurrentResourceMgr &res_mgr = ConcurrentResourceMgr::GetInstance();
 
-  resource_t spec;
-  spec.cpu_count = request->spec().cpu_count();
-  spec.memory_bytes = request->spec().memory_bytes();
-  spec.memory_sw_bytes = request->spec().memory_sw_bytes();
+  resource_t spec{request->resource_total()};
 
   SlurmxErr err;
   uuid node_uuid;
   err = res_mgr.RegisterNewSlurmXdNode(spec, &node_uuid);
-  if (err == SlurmxErr::OK) {
+  if (err == SlurmxErr::kOk) {
     response->set_ok(true);
     response->set_uuid(node_uuid.data, node_uuid.size());
   } else {
@@ -26,19 +23,17 @@ grpc::Status CtlXd::SlurmCtlXdServiceImpl::RegisterSlurmXd(
 }
 
 grpc::Status SlurmCtlXdServiceImpl::AllocateResource(
-    grpc::ServerContext *context, const slurmx_grpc::ResourceLimit *request,
+    grpc::ServerContext *context,
+    const slurmx_grpc::ResourceAllocRequest *request,
     slurmx_grpc::ResourceAllocReply *response) {
-  ResourceMgr &res_mgr = ResourceMgr::GetInstance();
+  ConcurrentResourceMgr &res_mgr = ConcurrentResourceMgr::GetInstance();
 
-  resource_t res;
-  res.cpu_count = request->cpu_core_limit();
-  res.memory_bytes = request->memory_limit_bytes();
-  res.memory_sw_bytes = request->memory_sw_limit_bytes();
+  resource_t res{request->required_resource()};
 
   SlurmxErr err;
   uuid res_uuid;
   err = res_mgr.AllocateResource(res, &res_uuid);
-  if (err == SlurmxErr::OK) {
+  if (err == SlurmxErr::kOk) {
     response->set_ok(true);
     response->set_resource_uuid(res_uuid.data, res_uuid.size());
   } else {
@@ -56,7 +51,7 @@ grpc::Status SlurmCtlXdServiceImpl::Heartbeat(
   std::copy(request->node_uuid().begin(), request->node_uuid().end(),
             node_uuid.data);
 
-  ResourceMgr &res_mgr = ResourceMgr::GetInstance();
+  ConcurrentResourceMgr &res_mgr = ConcurrentResourceMgr::GetInstance();
   res_mgr.HeartBeatFromNode(node_uuid);
 
   return grpc::Status::OK;

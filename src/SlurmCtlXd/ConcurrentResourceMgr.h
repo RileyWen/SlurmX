@@ -25,11 +25,12 @@ struct SlurmXdNode {
   std::unordered_map<uuid, resource_t> resc_shards;
 };
 
-// A class for
-class ResourceMgr {
+// A thread-safe class for the resource management of nodes.
+// All methods in the class is thread-safe.
+class ConcurrentResourceMgr {
  public:
-  static ResourceMgr& GetInstance() {
-    static ResourceMgr ins;
+  static ConcurrentResourceMgr& GetInstance() {
+    static ConcurrentResourceMgr ins;
     return ins;
   }
 
@@ -39,10 +40,11 @@ class ResourceMgr {
 
   void HeartBeatFromNode(const uuid& node_uuid);
 
-  void UnregisterSlurmXdNode(const uuid& node_uuid);
+  // Use heartbeat timeout to decide the availability of a node
+  // void UnregisterSlurmXdNode(const uuid& node_uuid);
 
  private:
-  ResourceMgr() = default;
+  ConcurrentResourceMgr() = default;
 
   // total = avail + in-use
   resource_t m_resource_total_;

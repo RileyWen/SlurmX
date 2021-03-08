@@ -1,5 +1,6 @@
 #pragma once
 
+#include "protos/slurmx.pb.h"
 #include "spdlog/spdlog.h"
 
 #define SLURMX_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
@@ -10,9 +11,12 @@
 #define SLURMX_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
 
 enum class SlurmxErr : uint16_t {
-  OK = 0,
-  GENERIC_FAILURE,
-  NO_RESOURCE,
+  kOk = 0,
+  kGenericFailure,
+  kNoResource,
+  kNonExistentUuid,
+  kSystemErr,
+  kExistingTask,
 
   __ERR_SIZE
 };
@@ -24,6 +28,9 @@ constexpr std::array<std::string_view, uint16_t(SlurmxErr::__ERR_SIZE)>
         "Success",
         "Generic failure",
         "Resource not enough",
+        "UUID doesn't exist",
+        "Linux Error",
+        "Task already exists",
 };
 
 }
@@ -37,6 +44,9 @@ struct resource_t {
   uint32_t cpu_count = 0;
   uint64_t memory_bytes = 0;
   uint64_t memory_sw_bytes = 0;
+
+  resource_t() = default;
+  resource_t(const slurmx_grpc::AllocatableResource&);
 
   resource_t& operator+=(const resource_t& rhs);
 

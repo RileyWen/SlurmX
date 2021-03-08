@@ -53,8 +53,13 @@ message IoRedirection {
 }
 
 message TaskExitStatus {
-  uint32 return_value = 1;
-  string reason = 2;
+  enum ExitReason {
+    Normal = 0;
+    Signal = 1;
+  }
+
+  ExitReason reason = 1;
+  uint32 value = 2;
 }
 
 message NewTaskResult {

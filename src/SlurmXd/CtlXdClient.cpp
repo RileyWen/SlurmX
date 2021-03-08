@@ -4,18 +4,20 @@
 
 #include "CtlXdClient.h"
 
-namespace SlurmXd {
+namespace Xd {
 
-SlurmxErr SlurmXd::CtlXdClient::RegisterOnCtlXd(const resource_t& resource) {
-  SlurmXdNodeSpec spec;
-  spec.set_cpu_count(resource.cpu_count);
-  spec.set_memory_bytes(resource.memory_bytes);
-  spec.set_memory_sw_bytes(resource.memory_sw_bytes);
+SlurmxErr CtlXdClient::RegisterOnCtlXd(const resource_t& resource) {
+  SlurmXdRegisterRequest req;
+
+  AllocatableResource* resource_total = req.mutable_resource_total();
+  resource_total->set_cpu_core_limit(resource.cpu_count);
+  resource_total->set_memory_limit_bytes(resource.memory_bytes);
+  resource_total->set_memory_sw_limit_bytes(resource.memory_sw_bytes);
 
   SlurmXdRegisterResult result;
 
   ClientContext context;
-  Status status = m_stub_->RegisterSlurmXd(&context, spec, &result);
+  Status status = m_stub_->RegisterSlurmXd(&context, req, &result);
 
   if (status.ok()) {
     if (result.ok()) {
@@ -23,17 +25,17 @@ SlurmxErr SlurmXd::CtlXdClient::RegisterOnCtlXd(const resource_t& resource) {
       SLURMX_INFO("Register Node Successfully! UUID: {}",
                   boost::uuids::to_string(m_node_uuid_));
 
-      return SlurmxErr::OK;
+      return SlurmxErr::kOk;
     }
 
     SLURMX_ERROR("Failed to register node. Reason from CtlXd: {}",
                  result.reason());
-    return SlurmxErr::GENERIC_FAILURE;
+    return SlurmxErr::kGenericFailure;
   }
 
   SLURMX_ERROR("Register Error. Code: {}, Msg: {}", status.error_code(),
                status.error_message());
-  return SlurmxErr::GENERIC_FAILURE;
+  return SlurmxErr::kGenericFailure;
 }
 
-}  // namespace SlurmXd
+}  // namespace Xd
