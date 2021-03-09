@@ -56,8 +56,7 @@ class opt_parse {
       return result;
     } catch (const cxxopts::OptionException &e) {
       SLURMX_ERROR("error parsing options: {}", e.what());
-      //      exit(1);
-      throw std::exception();
+      exit(1);
     }
   }
 
@@ -70,7 +69,8 @@ class opt_parse {
           "Error! {} must be uint number or the uint number ends with "
           "'m/M/g/G'!",
           str);
-      throw std::exception();
+
+      exit(1);
 
     } else {
       uint64_t nmemory_byte;
@@ -79,7 +79,7 @@ class opt_parse {
         std::regex Rnmemory_M("^[0-9]{1,8}[mMgG]?$");
         if (!std::regex_match(nmemory, Rnmemory_M)) {
           SLURMX_ERROR("Error! {} out of the range!", str);
-          throw std::exception();
+          exit(1);
         }
         nmemory_byte =
             (uint64_t)std::stoi(nmemory.substr(0, nmemory.length() - 1)) *
@@ -89,7 +89,7 @@ class opt_parse {
         std::regex Rnmemory_G("^[0-9]{1,5}[mMgG]?$");
         if (!std::regex_match(nmemory, Rnmemory_G)) {
           SLURMX_ERROR("Error! {} out of the range!", str);
-          throw std::exception();
+          exit(1);
         }
         nmemory_byte =
             (uint64_t)std::stoi(nmemory.substr(0, nmemory.length() - 1)) *
@@ -98,17 +98,18 @@ class opt_parse {
         std::regex Rnmemory_G("^[0-9]{1,15}$");
         if (!std::regex_match(nmemory, Rnmemory_G)) {
           SLURMX_ERROR("Error! {} out of the range!", str);
-          throw std::exception();
+          exit(1);
         }
-        nmemory_byte = (uint64_t)std::stoi(nmemory.substr(0, nmemory.length()));
+        nmemory_byte =
+            (uint64_t)std::stoi(nmemory.substr(0, nmemory.length())) * 1024;
         if (nmemory_byte == 0) {
           SLURMX_ERROR("Error! {} can not be zero!", str);
-          throw std::exception();
+          exit(1);
         }
       }
       if (nmemory_byte == 0) {
         SLURMX_ERROR("Error! {} can not be zero!", str);
-        throw std::exception();
+        exit(1);
       }
       return nmemory_byte;
     }
@@ -124,7 +125,7 @@ class opt_parse {
     } else {
       SLURMX_ERROR(
           "Task name can only contain letters, numbers, and underscores!");
-      throw std::exception();
+      exit(1);
     }
     for (auto arg : result["positional"].as<std::vector<std::string>>()) {
       task.arguments.push_back(arg);
@@ -142,7 +143,7 @@ class opt_parse {
     uint = result["ncpu"].as<uint64_t>();
     if (uint == 0) {
       SLURMX_ERROR("Error! Cpu core can not be zero!");
-      throw std::exception();
+      exit(1);
     } else {
       allocatableResource.cpu_core_limit = uint;
     }

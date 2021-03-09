@@ -15,7 +15,7 @@
 #include "gtest/gtest.h"
 #include "protos/slurmx.grpc.pb.h"
 
-#define version 1
+constexpr uint32_t version = 1;
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -30,10 +30,11 @@ using slurmx_grpc::SrunXStreamRequest;
 class SrunXClient {
  public:
   explicit SrunXClient(const std::shared_ptr<Channel>& channel,
-                       const std::shared_ptr<Channel>& channel_ctld, int argc,
-                       char* argv[])
+                       const std::shared_ptr<Channel>& channel_ctld)
       : m_stub_(SlurmXd::NewStub(channel)),
-        m_stub_ctld_(SlurmCtlXd::NewStub(channel_ctld)) {
+        m_stub_ctld_(SlurmCtlXd::NewStub(channel_ctld)) {}
+
+  SlurmxErr Init(int argc, char* argv[]) {
     enum class SrunX_State {
       SEND_REQUIREMENT_TO_SLURMCTLXD = 0,
       COMMUNICATION_WITH_SLURMXD,
@@ -65,7 +66,7 @@ class SrunXClient {
           if (status.ok()) {
             if (resourceAllocReply.ok()) {
               m_uuid_ = resourceAllocReply.resource_uuid();
-              SLURMX_INFO("Srunxclient: Get the token from the slurmxctld.");
+              SLURMX_DEBUG("Srunxclient: Get the token from the slurmxctld.");
               state = SrunX_State::COMMUNICATION_WITH_SLURMXD;
             } else {
               SLURMX_ERROR("Error ! Can not get token for reason: {}",
@@ -130,9 +131,10 @@ class SrunXClient {
               } break;
 
               case SrunX_slurmd_State::WAIT_FOR_REPLY_OR_SEND_SIG: {
+                SlurmxErr err = SlurmxErr::OK;
                 // read the stream from slurmxd
-                m_client_read_thread_ =
-                    std::thread(&SrunXClient::m_client_read_func_, this);
+                m_client_read_thread_ = std::thread(
+                    &SrunXClient::m_client_read_func_, this, std::ref(err));
                 // wait the signal from user
                 m_client_wait_thread_ =
                     std::thread(&SrunXClient::m_client_wait_func_, this);
@@ -143,44 +145,35 @@ class SrunXClient {
 
                 m_stream_->WritesDone();
                 Status status = m_stream_->Finish();
-
-                if (!status.ok()) {
-                  SLURMX_ERROR("{}:{} \nSlurmxd RPC failed",
-                               status.error_code(), status.error_message());
-                  state_d = SrunX_slurmd_State::ABORT;
-                }
+                return err;
               } break;
-
-              case SrunX_slurmd_State::ABORT:
-                throw std::exception();
-                break;
             }
           }
         } break;
 
         case SrunX_State::ABORT:
-          throw std::exception();
-          break;
+          return SlurmxErr::CONNECTION_FAILURE;
       }
     }
   }
+
   opt_parse parser;
 
  private:
-  void m_client_read_func_() {
+  void m_client_read_func_(SlurmxErr& err) {
     SrunXStreamReply reply;
     while (m_stream_->Read(&reply)) {
       if (reply.type() == SrunXStreamReply::IoRedirection) {
-        SLURMX_INFO("Received:{}", reply.io_redirection().buf());
+        SLURMX_DEBUG("Received:{}", reply.io_redirection().buf());
       } else if (reply.type() == SrunXStreamReply::ExitStatus) {
-        SLURMX_INFO("Srunxclient: Slurmxd exit at {} ,for the reason : {}",
+        SLURMX_DEBUG("Srunxclient: Slurmxd exit at {} ,for the reason : {}",
                     reply.task_exit_status().return_value(),
                     reply.task_exit_status().reason());
-        exit(0);
+        err = SlurmxErr::SIG_INT;
+        break;
       } else {
         // TODO Print NEW Task Result
-        SLURMX_INFO("New Task Result {} ", reply.new_task_result().reason());
-        exit(0);
+        SLURMX_DEBUG("New Task Result {} ", reply.new_task_result().reason());
       }
     }
   }
@@ -200,7 +193,7 @@ class SrunXClient {
   }
 
   static void sig_int(int signo) {
-    SLURMX_INFO("Srunxclient: Press down 'Ctrl+C'");
+    SLURMX_DEBUG("Srunxclient: Press down 'Ctrl+C'");
     std::unique_lock<std::mutex> lk(m_cv_m_);
     m_fg_ = 1;
     m_cv_.notify_all();
@@ -214,6 +207,7 @@ class SrunXClient {
   static std::condition_variable m_cv_;
   static std::mutex m_cv_m_;
   static int m_fg_;
+  static SlurmxErr err;
   std::thread m_client_read_thread_;
   std::thread m_client_wait_thread_;
   ClientContext m_context_;
@@ -223,6 +217,7 @@ class SrunXClient {
 std::condition_variable SrunXClient::m_cv_;
 std::mutex SrunXClient::m_cv_m_;
 int SrunXClient::m_fg_;
+SlurmxErr SrunXClient::err;
 std::unique_ptr<grpc::ClientReaderWriter<SrunXStreamRequest, SrunXStreamReply>>
     SrunXClient::m_stream_ = nullptr;
 
@@ -264,7 +259,7 @@ class SrunXServiceImpl final : public SlurmXd::Service {
                            context->peer());
               state = StreamState::ABORT;
             } else {
-              SLURMX_INFO("Slurmxdserver: RECEIVE NEGOTIATION");
+              SLURMX_DEBUG("Slurmxdserver: RECEIVE NEGOTIATION");
               state = StreamState::NEW_TASK;
             }
           } else {
@@ -284,7 +279,7 @@ class SrunXServiceImpl final : public SlurmXd::Service {
                            context->peer());
               state = StreamState::ABORT;
             } else {
-              SLURMX_INFO("Slurmxdserver: RECEIVE NEWTASK");
+              SLURMX_DEBUG("Slurmxdserver: RECEIVE NEWTASK");
               state = StreamState::WAIT_FOR_EOF_OR_SIG;
             }
           } else {
@@ -306,7 +301,7 @@ class SrunXServiceImpl final : public SlurmXd::Service {
               if (request.signal().signal_type() ==
                   slurmx_grpc::Signal_SignalType_Interrupt) {
                 // Todo: Send signal to task manager here and wait for result.
-                SLURMX_INFO("Slurmxdserver: RECEIVE SIGNAL");
+                SLURMX_DEBUG("Slurmxdserver: RECEIVE SIGNAL");
 
                 reply.set_type(SrunXStreamReply::ExitStatus);
                 slurmx_grpc::TaskExitStatus* taskExitStatus =
@@ -361,7 +356,7 @@ class SrunCtldServiceImpl final : public SlurmCtlXd::Service {
       reply->set_ok(false);
       reply->set_reason("reason why");
     }
-    SLURMX_INFO(
+    SLURMX_DEBUG(
         "Slrumctlxdserver: \nrequired_resource:\n cpu_byte: {}\n memory_byte: "
         "{}\n memory_sw_byte: {}\n",
         request->required_resource().cpu_core_limit(),
@@ -396,8 +391,9 @@ TEST(SrunX, ConnectionSimple) {
 
   // command line
   int argc = 16;
-  char* argv[] = {"./srunX", "-c", "10",   "-s", "2",  "-m",   "200M", "-w",
-                  "102G",    "-f", "100m", "-b", "1g", "task", "arg1", "arg2"};
+  const char* argv[] = {"./srunX", "-c",   "10",   "-s",  "2",    "-m",
+                        "200M",    "-w",   "102G", "-f",  "100m", "-b",
+                        "1g",      "task", "arg1", "arg2"};
 
   std::thread shutdown([]() {
     sleep(1);
@@ -407,11 +403,14 @@ TEST(SrunX, ConnectionSimple) {
   SrunXClient client(grpc::CreateChannel("localhost:50051",
                                          grpc::InsecureChannelCredentials()),
                      grpc::CreateChannel("localhost:50052",
-                                         grpc::InsecureChannelCredentials()),
-                     argc, argv);
+                                         grpc::InsecureChannelCredentials()));
+  EXPECT_EQ(client.Init(argc, const_cast<char**>(argv)), SlurmxErr::SIG_INT);
 
   // Simulate the user pressing ctrl+C
   shutdown.join();
+
+  server->Shutdown();
+  server_ctld->Shutdown();
 
   server->Wait();
   server_ctld->Wait();
@@ -420,175 +419,308 @@ TEST(SrunX, ConnectionSimple) {
 // command line parse means tests
 TEST(SrunX, OptHelpMessage) {
   int argc = 2;
-  char* argv[] = {"./srunX", "--help"};
+  const char* argv[] = {"./srunX", "--help"};
 
   SrunXClient client(grpc::CreateChannel("localhost:50051",
                                          grpc::InsecureChannelCredentials()),
                      grpc::CreateChannel("localhost:50052",
-                                         grpc::InsecureChannelCredentials()),
-                     argc, argv);
-
-  auto result = client.parser.parse(argc, argv);
+                                         grpc::InsecureChannelCredentials()));
+  client.Init(argc, const_cast<char**>(argv));
 }
-
-TEST(SrunX, OptTest_C) {
+TEST(SrunX, OptTest_C_true) {
   int argc = 3;
-  char* argv0[] = {"./srunX", "-c", "0"};
-  char* argv1[] = {"./srunX", "-c", "-1"};
-  char* argv2[] = {"./srunX", "-c", "0.5"};
-  char* argv3[] = {"./srunX", "-c", "2m"};
-  char* argv4[] = {"./srunX", "-c", "m"};
-  char* argv5[] = {"./srunX", "-c", "0M1"};
+  const char* argv[] = {"./srunX", "-c", "10"};
 
   opt_parse parser;
 
-  try {
-    SLURMX_INFO("cpu input:{}", argv0[2]);
-    auto result0 = parser.parse(argc, argv0);
-    parser.GetAllocatableResource(result0);
-  } catch (std::exception e) {
-  }
-
-  try {
-    SLURMX_INFO("cpu input:{}", argv1[2]);
-    auto result1 = parser.parse(argc, argv1);
-    parser.GetAllocatableResource(result1);
-  } catch (std::exception e) {
-  }
-
-  try {
-    SLURMX_INFO("cpu input:{}", argv2[2]);
-    auto result2 = parser.parse(argc, argv2);
-    parser.GetAllocatableResource(result2);
-  } catch (std::exception e) {
-  }
-
-  try {
-    SLURMX_INFO("cpu input:{}", argv3[2]);
-    auto result3 = parser.parse(argc, argv3);
-    parser.GetAllocatableResource(result3);
-  } catch (std::exception e) {
-  }
-
-  try {
-    SLURMX_INFO("cpu input:{}", argv4[2]);
-    auto result4 = parser.parse(argc, argv4);
-    parser.GetAllocatableResource(result4);
-  } catch (std::exception e) {
-  }
-
-  try {
-    SLURMX_INFO("cpu input:{}", argv5[2]);
-    auto result5 = parser.parse(argc, argv5);
-    parser.GetAllocatableResource(result5);
-  } catch (std::exception e) {
-  }
+  SLURMX_INFO("cpu input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).cpu_core_limit,
+            (uint64_t)atoi(argv[2]));
 }
 
-TEST(SrunX, OptTest_Memory) {
+TEST(SrunX, OptTest_C_Zero) {
   int argc = 3;
-  char* argv0[] = {"./srunX", "-m", "m12"};
-  char* argv1[] = {"./srunX", "-m", "18446744073709551615m"};
-  char* argv2[] = {"./srunX", "-m", "0"};
-  char* argv3[] = {"./srunX", "-m", "2.5m"};
-  char* argv4[] = {"./srunX", "-m", "125mm"};
-  char* argv5[] = {"./srunX", "-m", "125p"};
+  const char* argv[] = {"./srunX", "-c", "0"};
 
   opt_parse parser;
 
-  try {
-    SLURMX_INFO("memory input:{}", argv0[2]);
-    auto result0 = parser.parse(argc, argv0);
-    parser.GetAllocatableResource(result0);
-  } catch (std::exception e) {
-  }
-
-  try {
-    SLURMX_INFO("memory input:{}", argv1[2]);
-    auto result1 = parser.parse(argc, argv1);
-    parser.GetAllocatableResource(result1);
-  } catch (std::exception e) {
-  }
-
-  try {
-    SLURMX_INFO("memory input:{}", argv2[2]);
-    auto result2 = parser.parse(argc, argv2);
-    parser.GetAllocatableResource(result2);
-  } catch (std::exception e) {
-  }
-
-  try {
-    SLURMX_INFO("memory input:{}", argv3[2]);
-    auto result3 = parser.parse(argc, argv3);
-    parser.GetAllocatableResource(result3);
-  } catch (std::exception e) {
-  }
-
-  try {
-    SLURMX_INFO("memory input:{}", argv4[2]);
-    auto result4 = parser.parse(argc, argv4);
-    parser.GetAllocatableResource(result4);
-  } catch (std::exception e) {
-  }
-
-  try {
-    SLURMX_INFO("memory input:{}", argv5[2]);
-    auto result5 = parser.parse(argc, argv5);
-    parser.GetAllocatableResource(result5);
-  } catch (std::exception e) {
-  }
+  SLURMX_INFO("cpu input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).cpu_core_limit ==
+                (uint64_t)atoi(argv[2]),
+            false);
 }
 
-TEST(SrunX, OptTest_Task) {
+TEST(SrunX, OptTest_C_negative) {
   int argc = 3;
-  char* argv0[] = {"./srunX", "task."};
-  char* argv1[] = {"./srunX", "task-"};
-  char* argv2[] = {"./srunX", "task/"};
-  char* argv3[] = {"./srunX", "task\\"};
-  char* argv4[] = {"./srunX", "task|"};
-  char* argv5[] = {"./srunX", "task*"};
+
+  const char* argv[] = {"./srunX", "-c", "-1"};
+
+  opt_parse parser;
+
+  SLURMX_INFO("cpu input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).cpu_core_limit ==
+                (uint64_t)atoi(argv[2]),
+            false);
+}
+
+TEST(SrunX, OptTest_C_decimal) {
+  int argc = 3;
+
+  const char* argv[] = {"./srunX", "-c", "0.5"};
+
+  opt_parse parser;
+
+  SLURMX_INFO("cpu input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).cpu_core_limit ==
+                (uint64_t)atoi(argv[2]),
+            false);
+}
+
+TEST(SrunX, OptTest_C_errortype1) {
+  int argc = 3;
+
+  const char* argv[] = {"./srunX", "-c", "2m"};
+
+  opt_parse parser;
+
+  SLURMX_INFO("cpu input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).cpu_core_limit ==
+                (uint64_t)atoi(argv[2]),
+            false);
+}
+
+TEST(SrunX, OptTest_C_errortype2) {
+  int argc = 3;
+
+  const char* argv[] = {"./srunX", "-c", "m"};
+
+  opt_parse parser;
+
+  SLURMX_INFO("cpu input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).cpu_core_limit ==
+                (uint64_t)atoi(argv[2]),
+            false);
+}
+
+TEST(SrunX, OptTest_C_errortype3) {
+  int argc = 3;
+
+  const char* argv[] = {"./srunX", "-c", "0M1"};
+
+  opt_parse parser;
+
+  SLURMX_INFO("cpu input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).cpu_core_limit ==
+                (uint64_t)atoi(argv[2]),
+            false);
+}
+
+TEST(SrunX, OptTest_Memory_range) {
+  int argc = 3;
+  const char* argv[] = {"./srunX", "-m", "18446744073709551615m"};
+
+  opt_parse parser;
+
+  SLURMX_INFO("memory input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).memory_limit_bytes ==
+                (uint64_t)atoi(argv[2]),
+            false);
+
+  parser.GetAllocatableResource(result);
+}
+
+TEST(SrunX, OptTest_Memory_true_k) {
+  int argc = 3;
+  const char* argv[] = {"./srunX", "-m", "128"};
+
+  opt_parse parser;
+
+  SLURMX_INFO("memory input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).memory_limit_bytes,
+            (uint64_t)131072);
+}
+
+TEST(SrunX, OptTest_Memory_true_m) {
+  int argc = 3;
+  const char* argv[] = {"./srunX", "-m", "128m"};
+
+  opt_parse parser;
+
+  SLURMX_INFO("memory input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).memory_limit_bytes,
+            (uint64_t)134217728);
+}
+
+TEST(SrunX, OptTest_Memory_true_g) {
+  int argc = 3;
+  const char* argv[] = {"./srunX", "-m", "128g"};
+
+  opt_parse parser;
+
+  SLURMX_INFO("memory input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).memory_limit_bytes,
+            (uint64_t)137438953472);
+}
+
+TEST(SrunX, OptTest_Memory_zero) {
+  int argc = 3;
+  const char* argv[] = {"./srunX", "-m", "0"};
+
+  opt_parse parser;
+
+  SLURMX_INFO("memory input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).memory_limit_bytes ==
+                (uint64_t)atoi(argv[2]),
+            false);
+}
+
+TEST(SrunX, OptTest_Memory_errortype1) {
+  int argc = 3;
+  const char* argv[] = {"./srunX", "-m", "m12"};
+
+  opt_parse parser;
+
+  SLURMX_INFO("memory input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).memory_limit_bytes ==
+                (uint64_t)atoi(argv[2]),
+            false);
+}
+
+TEST(SrunX, OptTest_Memory_errortype2) {
+  int argc = 3;
+
+  const char* argv[] = {"./srunX", "-m", "2.5m"};
+
+  opt_parse parser;
+
+  SLURMX_INFO("memory input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).memory_limit_bytes ==
+                (uint64_t)atoi(argv[2]),
+            false);
+}
+TEST(SrunX, OptTest_Memory_errortype4) {
+  int argc = 3;
+
+  const char* argv[] = {"./srunX", "-m", "125mm"};
+
+  opt_parse parser;
+
+  SLURMX_INFO("memory input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).memory_limit_bytes ==
+                (uint64_t)atoi(argv[2]),
+            false);
+}
+TEST(SrunX, OptTest_Memory_errortype5) {
+  int argc = 3;
+
+  const char* argv[] = {"./srunX", "-m", "125p"};
+
+  opt_parse parser;
+
+  SLURMX_INFO("memory input:{}", argv[2]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetAllocatableResource(result).memory_limit_bytes ==
+                (uint64_t)atoi(argv[2]),
+            false);
+}
+
+TEST(SrunX, OptTest_Task_true) {
+  int argc = 3;
+  const char* argv[] = {"./srunX", "task"};
 
   opt_parse parser;
   std::string uuid;
-  try {
-    SLURMX_INFO("task input:{}", argv0[1]);
-    auto result0 = parser.parse(argc, argv0);
-    parser.GetTaskInfo(result0, uuid);
-  } catch (std::exception e) {
-  }
 
-  try {
-    SLURMX_INFO("task input:{}", argv1[1]);
-    auto result1 = parser.parse(argc, argv1);
-    parser.GetTaskInfo(result1, uuid);
-  } catch (std::exception e) {
-  }
+  SLURMX_INFO("task input:{}", argv[1]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetTaskInfo(result, uuid).executive_path, argv[1]);
+}
 
-  try {
-    SLURMX_INFO("task input:{}", argv2[1]);
-    auto result2 = parser.parse(argc, argv2);
-    parser.GetTaskInfo(result2, uuid);
-  } catch (std::exception e) {
-  }
+TEST(SrunX, OptTest_Task_errortype1) {
+  int argc = 3;
+  const char* argv[] = {"./srunX", "task."};
 
-  try {
-    SLURMX_INFO("task input:{}", argv3[1]);
-    auto result3 = parser.parse(argc, argv3);
-    parser.GetTaskInfo(result3, uuid);
-  } catch (std::exception e) {
-  }
+  opt_parse parser;
+  std::string uuid;
 
-  try {
-    SLURMX_INFO("task input:{}", argv4[1]);
-    auto result4 = parser.parse(argc, argv4);
-    parser.GetTaskInfo(result4, uuid);
-  } catch (std::exception e) {
-  }
+  SLURMX_INFO("task input:{}", argv[1]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetTaskInfo(result, uuid).executive_path == argv[1], false);
+}
 
-  try {
-    SLURMX_INFO("task input:{}", argv5[1]);
-    auto result5 = parser.parse(argc, argv5);
-    parser.GetTaskInfo(result5, uuid);
-  } catch (std::exception e) {
-  }
+TEST(SrunX, OptTest_Task_errortype2) {
+  int argc = 3;
+  const char* argv[] = {"./srunX", "task-"};
+
+  opt_parse parser;
+  std::string uuid;
+
+  SLURMX_INFO("task input:{}", argv[1]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetTaskInfo(result, uuid).executive_path == argv[1], false);
+}
+
+TEST(SrunX, OptTest_Task_errortype3) {
+  int argc = 3;
+  const char* argv[] = {"./srunX", "task/"};
+
+  opt_parse parser;
+  std::string uuid;
+
+  SLURMX_INFO("task input:{}", argv[1]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetTaskInfo(result, uuid).executive_path == argv[1], false);
+}
+
+TEST(SrunX, OptTest_Task_errortype4) {
+  int argc = 3;
+
+  const char* argv[] = {"./srunX", "task\\"};
+
+  opt_parse parser;
+  std::string uuid;
+
+  SLURMX_INFO("task input:{}", argv[1]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetTaskInfo(result, uuid).executive_path == argv[1], false);
+}
+
+TEST(SrunX, OptTest_Task_errortype5) {
+  int argc = 3;
+
+  const char* argv[] = {"./srunX", "task|"};
+
+  opt_parse parser;
+  std::string uuid;
+
+  SLURMX_INFO("task input:{}", argv[1]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetTaskInfo(result, uuid).executive_path == argv[1], false);
+}
+
+TEST(SrunX, OptTest_Task_errortype6) {
+  int argc = 3;
+  const char* argv[] = {"./srunX", "task*"};
+
+  opt_parse parser;
+  std::string uuid;
+
+  SLURMX_INFO("task input:{}", argv[1]);
+  auto result = parser.parse(argc, const_cast<char**>(argv));
+  EXPECT_EQ(parser.GetTaskInfo(result, uuid).executive_path == argv[1], false);
 }
