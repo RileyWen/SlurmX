@@ -34,26 +34,37 @@ struct TaskInitInfo {
 
   CgroupLimit cg_limit;
 
-  /// @param[in] buf a slice of output buffer.
+  /***
+   * The callback function called when a task writes to stdout or stderr.
+   * @param[in] buf a slice of output buffer.
+   */
   std::function<void(std::string&& buf)> output_callback;
 
-  /// @param[in] bool true if the task is terminated by a signal, false
-  /// otherwise.
-  /// @param[in] int the number of signal if bool is true, the return value
-  /// otherwise.
+  /***
+   * The callback function called when a task is finished.
+   * @param[in] bool true if the task is terminated by a signal, false
+   * otherwise.
+   * @param[in] int the number of signal if bool is true, the return value
+   * otherwise.
+   */
   std::function<void(bool, int)> finish_callback;
 };
-
-using TaskInitInfoRef = std::reference_wrapper<TaskInitInfo>;
-using TaskInitInfoCRef = std::reference_wrapper<const TaskInitInfo>;
 
 // Todo: Task may consists of multiple subtasks
 struct Task {
   TaskInitInfo init_info;
 
-  // Task runtime info
+  // fields below are types of Task runtime information
+
+  // The pid of the root process of a task.
+  // Also the pgid of all processes spawned from the root process.
+  // When a signal is sent to a task, it's sent to this pgid.
   pid_t root_pid = {};
+
+  // The cgroup name that restrains the Task.
   std::string cg_path;
+
+  // The underlying event that handles the output of the task.
   struct bufferevent* ev_buf_event;
 };
 
@@ -68,19 +79,51 @@ struct grpc_req_new_task_t {
   std::promise<grpc_resp_new_task_t> resp_promise;
 };
 
+/***
+ * The class that manages all tasks and handles interrupts.
+ * SIGINT and SIGCHLD are processed in TaskManager.
+ * Especially, outside caller can use SetSigintCallback() to
+ * set the callback when SIGINT is triggered.
+ */
 class TaskManager {
-  // TODO: 1. Add process group supporting.
  public:
   static TaskManager& GetInstance() {
     static TaskManager singleton;
     return singleton;
   }
 
-  std::optional<TaskInitInfoCRef> FindTaskInfoByName(
-      const std::string& task_name);
+  /***
+   * This function is thread-safe.
+   * @param task_info The initialization information of a task.
+   * @return If the task is added successfully, kOk is returned
+   */
+  SlurmxErr AddTaskAsync(TaskInitInfo&& task_info);
+
+  // Wait internal libevent base loop to exit...
+  void Wait();
+
+  /***
+   * Send a signal to the task (which is a process group).
+   * @param task_name the name of the task.
+   * @param signum the value of signal.
+   * @return if the signal is sent successfully, kOk is returned.
+   * if the task name doesn't exist, kNonExistent is returned.
+   * if the signal is invalid, kInvalidParam is returned.
+   * otherwise, kGenericFailure is returned.
+   */
+  SlurmxErr Kill(const std::string& task_name, int signum);
+
+  /***
+   * Set the callback function will be called when SIGINT is triggered.
+   * This function is not thread-safe.
+   * @param cb the callback function.
+   */
+  void SetSigintCallback(std::function<void()> cb);
 
  private:
   static std::string CgroupStrByPID(pid_t pid);
+
+  std::optional<const Task*> FindTaskByName(const std::string& task_name);
 
   TaskManager();
 
@@ -98,7 +141,6 @@ class TaskManager {
   // Functions and members for libevent {
   static inline TaskManager* m_instance_ptr_;
 
-  // Runs in the loop thread
   static void ev_sigchld_cb_(evutil_socket_t sig, short events,
                              void* user_data);
 
@@ -120,21 +162,16 @@ class TaskManager {
   struct event* m_ev_sigchld_;
   struct event* m_ev_sigint_;
 
+  // The function which will be called when SIGINT is triggered.
+  std::function<void()> m_sigint_cb_;
+
   // When a new task grpc message arrives, the grpc function (which
   //  runs in parallel) uses m_grpc_event_fd_ to inform the event
   //  loop thread and the event loop thread retrieves the message
   //  from m_grpc_reqs_. We use this to keep thread-safety.
   struct event* m_ev_grpc_event_;
   int m_grpc_event_fd_;
-
   moodycamel::ConcurrentQueue<grpc_req_new_task_t> m_gprc_new_task_queue_;
 
   std::thread m_ev_loop_thread_;
-
- public:
-  // This function is thread-safe.
-  SlurmxErr AddTaskAsync(TaskInitInfo&& task_info);
-
-  // Wait internal libevent base loop to exit...
-  void Wait();
 };

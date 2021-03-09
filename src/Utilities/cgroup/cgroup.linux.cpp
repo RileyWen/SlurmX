@@ -312,7 +312,7 @@ bool CgroupManager::destroy(const std::string &cgroup_path) {
       SLURMX_WARN("Unable to completely remove cgroup {}: {} {}\n",
                   cgroup_path.c_str(), err, cgroup_strerror(err));
     } else {
-      SLURMX_WARN("Deleted cgroup {}.\n", cgroup_path.c_str());
+      SLURMX_WARN("Deleted cgroup {}.", cgroup_path.c_str());
     }
 
     // Notice the cgroup struct freed here is not the one held by Cgroup class.

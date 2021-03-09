@@ -6,15 +6,6 @@ message Negotiation {
   uint32 version = 1;
 }
 
-message ResourceLimit {
-  uint64 cpu_core_limit = 1;
-  uint64 cpu_shares = 2;
-  uint64 memory_limit_bytes = 3;
-  uint64 memory_sw_limit_bytes = 4;
-  uint64 memory_soft_limit_bytes = 5;
-  uint64 blockio_weight = 6;
-}
-
 // Match the definition of 'resource_t' in PublicHeader.h
 message AllocatableResource {
   uint64 cpu_core_limit = 1;
@@ -39,13 +30,6 @@ message TaskInfo {
   repeated string arguments = 2;
 
   bytes resource_uuid = 3;
-}
-
-message Signal {
-  enum SignalType {
-    Interrupt = 0;
-  }
-  SignalType signal_type = 1;
 }
 
 message IoRedirection {
@@ -78,7 +62,7 @@ message SrunXStreamRequest{
   oneof payload {
     Negotiation negotiation = 2;
     TaskInfo task_info = 3;
-    Signal signal = 4;
+    uint32 signum = 4;
   }
 }
 

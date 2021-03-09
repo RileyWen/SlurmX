@@ -62,10 +62,11 @@ TEST(cgroup, cpu_core_limit) {
   AnonymousPipe anon_pipe_p_c;
   AnonymousPipe anon_pipe_c_p;
   u_char val;
+  bool _;
 
   pid_t child_pid = fork();
   if (child_pid == 0) {
-    anon_pipe_p_c.ReadIntegerFromParent<u_char>(&val);
+    _ = anon_pipe_p_c.ReadIntegerFromParent<u_char>(&val);
 
     auto cpu_burning = [] {
       clock_t timeStart;
@@ -91,7 +92,7 @@ TEST(cgroup, cpu_core_limit) {
     std::thread t2(cpu_burning);
     std::thread t3(cpu_burning);
 
-    anon_pipe_c_p.WriteIntegerToChild<u_char>(val);
+    _ = anon_pipe_c_p.WriteIntegerToChild<u_char>(val);
 
     t1.join();
     t2.join();
@@ -113,7 +114,7 @@ TEST(cgroup, cpu_core_limit) {
     cm.migrate_proc_to_cgroup(child_pid, cg_path);
 
     val = 1;
-    anon_pipe_p_c.WriteIntegerToChild<u_char>(val);
+    _ = anon_pipe_p_c.WriteIntegerToChild<u_char>(val);
 
     std::atomic_bool running{true};
     pstat stat_1{};
@@ -121,7 +122,7 @@ TEST(cgroup, cpu_core_limit) {
     double scpu, ucpu;
     double avg_cpu = 0;
 
-    anon_pipe_c_p.ReadIntegerFromParent<u_char>(&val);
+    _ = anon_pipe_c_p.ReadIntegerFromParent<u_char>(&val);
 
     get_usage(child_pid, &stat_2);
     while (!sigchld_received) {

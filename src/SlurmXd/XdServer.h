@@ -86,6 +86,8 @@ class XdServer {
   std::unique_ptr<Server> m_server_;
 };
 
+// The initialization of XdServer requires some parameters.
+// We can't use the Singleton pattern here. So we use one global variable.
 inline std::unique_ptr<XdServer> g_server;
 
 }  // namespace Xd

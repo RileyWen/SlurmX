@@ -91,12 +91,12 @@ SlurmxErr TaskManager::AddTaskAsync(TaskInitInfo&& task_init_info) {
   return resp.err;
 }
 
-std::optional<TaskInitInfoCRef> TaskManager::FindTaskInfoByName(
+std::optional<const Task*> TaskManager::FindTaskByName(
     const std::string& task_name) {
   auto iter = m_name_to_task_map_.find(task_name);
   if (iter == m_name_to_task_map_.end()) return std::nullopt;
 
-  return iter->second->init_info;
+  return iter->second.get();
 }
 
 std::string TaskManager::CgroupStrByPID(pid_t pid) {
@@ -215,6 +215,10 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
     // Release the file descriptor before calling exec()
     anon_pipe.CloseChildEnd();
 
+    // Set pgid to the root process of task.
+    setpgid(0, 0);
+
+    // Prepare the command line arguments.
     std::vector<const char*> argv;
     argv.push_back(task_init_info.executive_path.c_str());
     for (auto&& arg : task_init_info.arguments) {
@@ -311,9 +315,8 @@ void TaskManager::ev_subprocess_read_cb_(struct bufferevent* bev,
   size_t buf_len = evbuffer_get_length(bev->input);
 
   std::string str;
-  str.resize(buf_len + 1);
+  str.resize(buf_len);
   int n_copy = evbuffer_remove(bev->input, str.data(), buf_len);
-  str[buf_len] = '\0';
 
   SLURMX_TRACE("Read {:>4} bytes from subprocess (pid: {}): {}", n_copy,
                task_ptr->root_pid, str);
@@ -327,11 +330,34 @@ void TaskManager::ev_sigint_cb_(int sig, short events, void* user_data) {
 
   SLURMX_DEBUG("Caught an interrupt signal; exiting cleanly ...");
 
-  // Todo: Terminate and clean all task here
+  if (this_->m_sigint_cb_) this_->m_sigint_cb_();
 
   event_base_loopexit(this_->m_ev_base_, &delay);
 }
 
 void TaskManager::Wait() {
   if (m_ev_loop_thread_.joinable()) m_ev_loop_thread_.join();
+}
+
+SlurmxErr TaskManager::Kill(const std::string& task_name, int signum) {
+  auto task_option = FindTaskByName(task_name);
+  if (task_option.has_value()) {
+    const Task* task = task_option.value();
+
+    // Send the signal to the whole process group.
+    int err = kill(-task->root_pid, signum);
+
+    if (err == 0)
+      return SlurmxErr::kOk;
+    else if (err == EINVAL)
+      return SlurmxErr::kInvalidParam;
+    else
+      return SlurmxErr::kGenericFailure;
+  }
+
+  return SlurmxErr::kNonExistent;
+}
+
+void TaskManager::SetSigintCallback(std::function<void()> cb) {
+  m_sigint_cb_ = cb;
 }

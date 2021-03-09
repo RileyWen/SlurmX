@@ -21,6 +21,9 @@ Status SlurmXdServiceImpl::SrunXStream(
   SrunXStreamRequest request;
   SrunXStreamReply reply;
 
+  // A task name is bound to one connection.
+  std::string task_name;
+
   StreamState state = StreamState::kNegotiation;
   while (true) {
     switch (state) {
@@ -66,7 +69,7 @@ Status SlurmXdServiceImpl::SrunXStream(
               reply.Clear();
               reply.set_type(slurmx_grpc::SrunXStreamReply_Type_NewTaskResult);
 
-              slurmx_grpc::NewTaskResult *result;
+              auto *result = reply.mutable_new_task_result();
               result->set_ok(false);
               result->set_reason(std::string(SlurmxErrStr(err)));
 
@@ -74,8 +77,8 @@ Status SlurmXdServiceImpl::SrunXStream(
 
               state = StreamState::kFinish;
             } else {
-              std::string task_name = fmt::format("{}_{}", context->peer(),
-                                                  g_server->NewTaskSeqNum());
+              task_name = fmt::format("{}_{}", context->peer(),
+                                      g_server->NewTaskSeqNum());
 
               std::forward_list<std::string> arguments;
               auto iter = arguments.before_begin();
@@ -156,37 +159,20 @@ Status SlurmXdServiceImpl::SrunXStream(
                          context->peer());
             state = StreamState::kAbort;
           } else {
-            if (request.signal().signal_type() ==
-                slurmx_grpc::Signal_SignalType_Interrupt) {
-              // If ctrl+C is pressed before the task ends, inform TaskManager
-              //  of the interrupt and wait for TaskManager to stop the Task.
+            // If ctrl+C is pressed before the task ends, inform TaskManager
+            // of the interrupt and wait for TaskManager to stop the Task.
 
-              // Todo: Not Implemented: Send signal to task manager here and
-              //  wait for result.
+            TaskManager::GetInstance().Kill(task_name, request.signum());
 
-              slurmx_grpc::TaskExitStatus *exit_status =
-                  reply.mutable_task_exit_status();
-              exit_status->set_reason(
-                  slurmx_grpc::TaskExitStatus_ExitReason_Signal);
-              exit_status->set_value(9);
-
-              reply.set_allocated_task_exit_status(exit_status);
-              stream->WriteLast(reply, grpc::WriteOptions());
-
-              state = StreamState::kFinish;
-            } else
-              state = StreamState::kAbort;
+            // The state machine does not switch the state here.
+            // We just use stream->Read() to wait for the task to end.
+            // When the task ends, the finish_callback will shutdown the
+            // stream and cause stream->Read() to return with false.
           }
         } else {
-          // If the task ends before user sends a ctrl+C interrupt,
-          // the callback which handles the end of a task in TaskManager will
-          // call stream->WriteLast() to end the stream. Then the stream->Read()
-          // returns with ok = false.
-
-          SLURMX_DEBUG(
-              "Stream with WaitForEofOrSigOrTaskEnd on Connection of peer {} "
-              "has no more message to read. Ending...",
-              context->peer());
+          // If the task ends, the callback which handles the end of a task in
+          // TaskManager will call stream->WriteLast() to end the stream. Then
+          // the stream->Read() returns with ok = false.
 
           state = StreamState::kFinish;
         }
@@ -237,7 +223,7 @@ SlurmxErr XdServer::RevokeResourceToken(const uuid &resource_uuid) {
 
   auto iter = m_resource_uuid_map_.find(resource_uuid);
   if (iter == m_resource_uuid_map_.end()) {
-    return SlurmxErr::kNonExistentUuid;
+    return SlurmxErr::kNonExistent;
   }
 
   m_resource_avail_ += iter->second;
@@ -301,7 +287,7 @@ SlurmxErr XdServer::CheckValidityOfResourceUuid(const uuid &resource_uuid) {
   size_t count = m_resource_uuid_map_.count(resource_uuid);
   if (count > 0) return SlurmxErr::kOk;
 
-  return SlurmxErr::kNonExistentUuid;
+  return SlurmxErr::kNonExistent;
 }
 
 std::optional<resource_t> XdServer::FindResourceByUuid(

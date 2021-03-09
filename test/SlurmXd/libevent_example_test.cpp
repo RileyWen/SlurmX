@@ -135,6 +135,7 @@ TEST_F(LibEvent, IoRedirectAndDynamicTaskAdding) {
   std::vector<const char *> args{test_prog_path.c_str(), nullptr};
 
   u_char val{};
+  bool _;
   AnonymousPipe anon_pipe;
 
   pid_t child_pid = fork();
@@ -144,7 +145,7 @@ TEST_F(LibEvent, IoRedirectAndDynamicTaskAdding) {
     dup2(anon_pipe.GetChildEndFd(), 1);  // stdout -> pipe
     dup2(anon_pipe.GetChildEndFd(), 2);  // stderr -> pipe
 
-    anon_pipe.ReadIntegerFromParent<u_char>(&val);
+    _ = anon_pipe.ReadIntegerFromParent<u_char>(&val);
     anon_pipe.CloseChildEnd();  // This descriptor is no longer needed.
 
     std::vector<const char *> argv{test_prog_path.c_str(), nullptr};
@@ -163,7 +164,7 @@ TEST_F(LibEvent, IoRedirectAndDynamicTaskAdding) {
     bufferevent_enable(ev_buf_event, EV_READ);
     bufferevent_disable(ev_buf_event, EV_WRITE);
 
-    anon_pipe.WriteIntegerToChild<u_char>(val);
+    _ = anon_pipe.WriteIntegerToChild<u_char>(val);
 
     // Persistent event. No need to reactivate it.
     this->m_ev_sigchld_ =

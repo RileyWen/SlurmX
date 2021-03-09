@@ -14,9 +14,10 @@ enum class SlurmxErr : uint16_t {
   kOk = 0,
   kGenericFailure,
   kNoResource,
-  kNonExistentUuid,
+  kNonExistent,
   kSystemErr,
   kExistingTask,
+  kInvalidParam,
 
   __ERR_SIZE
 };
@@ -28,9 +29,10 @@ constexpr std::array<std::string_view, uint16_t(SlurmxErr::__ERR_SIZE)>
         "Success",
         "Generic failure",
         "Resource not enough",
-        "UUID doesn't exist",
+        "The object doesn't exist",
         "Linux Error",
         "Task already exists",
+        "Invalid Parameter",
 };
 
 }
