@@ -1,12 +1,11 @@
 #include "TaskManager.h"
 
-#include <evrpc.h>
-
 TaskManager::TaskManager()
     : m_cg_mgr_(CgroupManager::getInstance()),
       m_ev_sigchld_(nullptr),
       m_ev_base_(nullptr),
-      m_ev_grpc_event_(nullptr) {
+      m_ev_grpc_event_(nullptr),
+      m_is_ending_now_(false) {
   // Only called once. Guaranteed by singleton pattern.
   m_instance_ptr_ = this;
 
@@ -69,26 +68,30 @@ TaskManager::~TaskManager() {
 }
 
 SlurmxErr TaskManager::AddTaskAsync(TaskInitInfo&& task_init_info) {
-  eventfd_t u = 1;
+  if (m_is_ending_now_) {
+    return SlurmxErr::kStop;
+  } else {
+    eventfd_t u = 1;
 
-  std::promise<grpc_resp_new_task_t> resp_prom;
-  std::future<grpc_resp_new_task_t> resp_future = resp_prom.get_future();
+    std::promise<grpc_resp_new_task_t> resp_prom;
+    std::future<grpc_resp_new_task_t> resp_future = resp_prom.get_future();
 
-  grpc_req_new_task_t req{
-      std::move(task_init_info),
-      std::move(resp_prom),
-  };
+    grpc_req_new_task_t req{
+        std::move(task_init_info),
+        std::move(resp_prom),
+    };
 
-  m_gprc_new_task_queue_.enqueue(std::move(req));
-  ssize_t s = eventfd_write(m_grpc_event_fd_, u);
-  if (s < 0) {
-    SLURMX_ERROR("Failed to write to grpc event fd: {}", strerror(errno));
-    return SlurmxErr::kSystemErr;
+    m_gprc_new_task_queue_.enqueue(std::move(req));
+    ssize_t s = eventfd_write(m_grpc_event_fd_, u);
+    if (s < 0) {
+      SLURMX_ERROR("Failed to write to grpc event fd: {}", strerror(errno));
+      return SlurmxErr::kSystemErr;
+    }
+
+    grpc_resp_new_task_t resp = resp_future.get();
+
+    return resp.err;
   }
-
-  grpc_resp_new_task_t resp = resp_future.get();
-
-  return resp.err;
 }
 
 std::optional<const Task*> TaskManager::FindTaskByName(
@@ -153,6 +156,11 @@ void TaskManager::ev_sigchld_cb_(evutil_socket_t sig, short events,
       this_->m_name_to_task_map_.erase(task_name);
 
       this_->m_cg_mgr_.destroy(CgroupStrByPID(pid));
+
+      if (this_->m_is_ending_now_ && this_->m_pid_to_name_map_.empty()) {
+        struct timeval delay = {0, 0};
+        event_base_loopexit(this_->m_ev_base_, &delay);
+      }
     } else if (pid == 0)  // There's no child that needs reaping.
       break;
     else if (pid < 0) {
@@ -240,8 +248,6 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
     new_task->cg_path = CgroupStrByPID(child_pid);
     new_task->init_info = std::move(task_init_info);
 
-    // Todo: Set the process group here!
-
     // Avoid corruption during std::move
     std::string task_name_copy = new_task->init_info.name;
 
@@ -326,13 +332,20 @@ void TaskManager::ev_subprocess_read_cb_(struct bufferevent* bev,
 
 void TaskManager::ev_sigint_cb_(int sig, short events, void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-  struct timeval delay = {0, 0};
 
-  SLURMX_DEBUG("Caught an interrupt signal; exiting cleanly ...");
+  if (!this_->m_is_ending_now_) {
+    SLURMX_INFO("Caught SIGINT. Send SIGINT to all running tasks...");
 
-  if (this_->m_sigint_cb_) this_->m_sigint_cb_();
+    this_->m_is_ending_now_ = true;
 
-  event_base_loopexit(this_->m_ev_base_, &delay);
+    if (this_->m_sigint_cb_) this_->m_sigint_cb_();
+
+    for (auto&& elem : this_->m_pid_to_name_map_) {
+      this_->Kill(elem.second, SIGINT);
+    }
+  } else {
+    SLURMX_INFO("SIGINT has been triggered already. Ignoring it.");
+  }
 }
 
 void TaskManager::Wait() {

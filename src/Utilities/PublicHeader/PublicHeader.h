@@ -18,6 +18,7 @@ enum class SlurmxErr : uint16_t {
   kSystemErr,
   kExistingTask,
   kInvalidParam,
+  kStop,
 
   __ERR_SIZE
 };
@@ -33,7 +34,7 @@ constexpr std::array<std::string_view, uint16_t(SlurmxErr::__ERR_SIZE)>
         "Linux Error",
         "Task already exists",
         "Invalid Parameter",
-};
+                       "The owner object of the function is stopping"};
 
 }
 

@@ -17,6 +17,7 @@ Status SlurmXdServiceImpl::SrunXStream(
     kAbort
   };
 
+  SlurmxErr err;
   bool ok;
   SrunXStreamRequest request;
   SrunXStreamReply reply;
@@ -60,7 +61,6 @@ Status SlurmXdServiceImpl::SrunXStream(
                       resource_uuid.data);
 
             // Check the validity of resource uuid provided by client.
-            SlurmxErr err;
             err = g_server->CheckValidityOfResourceUuid(resource_uuid);
 
             if (err != SlurmxErr::kOk) {
@@ -71,7 +71,7 @@ Status SlurmXdServiceImpl::SrunXStream(
 
               auto *result = reply.mutable_new_task_result();
               result->set_ok(false);
-              result->set_reason(std::string(SlurmxErrStr(err)));
+              result->set_reason("Resource uuid is invalid");
 
               stream->WriteLast(reply, grpc::WriteOptions());
 
@@ -138,9 +138,38 @@ Status SlurmXdServiceImpl::SrunXStream(
                   .finish_callback = std::move(finish_callback),
               };
 
-              TaskManager::GetInstance().AddTaskAsync(std::move(task_info));
+              err =
+                  TaskManager::GetInstance().AddTaskAsync(std::move(task_info));
+              if (err == SlurmxErr::kOk) {
+                reply.Clear();
+                reply.set_type(
+                    slurmx_grpc::SrunXStreamReply_Type_NewTaskResult);
 
-              state = StreamState::kWaitForEofOrSigOrTaskEnd;
+                auto *result = reply.mutable_new_task_result();
+                result->set_ok(true);
+
+                stream->Write(reply);
+                state = StreamState::kWaitForEofOrSigOrTaskEnd;
+              } else {
+                reply.Clear();
+                reply.set_type(
+                    slurmx_grpc::SrunXStreamReply_Type_NewTaskResult);
+
+                auto *result = reply.mutable_new_task_result();
+                result->set_ok(false);
+
+                if (err == SlurmxErr::kSystemErr)
+                  result->set_reason(
+                      fmt::format("System error: {}", strerror(errno)));
+                else if (err == SlurmxErr::kStop)
+                  result->set_reason("Server is stopping");
+                else
+                  result->set_reason(
+                      fmt::format("Unknown failure. Code: ", uint16_t(err)));
+
+                stream->WriteLast(reply, grpc::WriteOptions());
+                state = StreamState::kFinish;
+              }
             }
           }
         } else {

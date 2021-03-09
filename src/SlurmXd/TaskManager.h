@@ -3,6 +3,7 @@
 #include <event2/bufferevent.h>
 #include <event2/event.h>
 #include <event2/util.h>
+#include <evrpc.h>
 #include <grpc++/grpc++.h>
 #include <sys/eventfd.h>
 #include <sys/signal.h>
@@ -95,7 +96,10 @@ class TaskManager {
   /***
    * This function is thread-safe.
    * @param task_info The initialization information of a task.
-   * @return If the task is added successfully, kOk is returned
+   * @return
+   * If the task is added successfully, kOk is returned. <br>
+   * If the task name exists, kExistingTask is returned. <br>
+   * If SIGINT is triggered and the TaskManager is stopping, kStop is returned.
    */
   SlurmxErr AddTaskAsync(TaskInitInfo&& task_info);
 
@@ -123,11 +127,16 @@ class TaskManager {
  private:
   static std::string CgroupStrByPID(pid_t pid);
 
+  static inline TaskManager* m_instance_ptr_;
+
   std::optional<const Task*> FindTaskByName(const std::string& task_name);
 
   TaskManager();
 
   ~TaskManager();
+
+  // Note: the two maps below are NOT protected by any mutex.
+  //  They should be modified in libev callbacks to avoid races.
 
   // Users submit tasks by name.
   std::unordered_map<std::string, std::unique_ptr<Task>> m_name_to_task_map_;
@@ -137,9 +146,6 @@ class TaskManager {
   std::unordered_map<pid_t, std::string> m_pid_to_name_map_;
 
   CgroupManager& m_cg_mgr_;
-
-  // Functions and members for libevent {
-  static inline TaskManager* m_instance_ptr_;
 
   static void ev_sigchld_cb_(evutil_socket_t sig, short events,
                              void* user_data);
@@ -160,10 +166,19 @@ class TaskManager {
 
   struct event_base* m_ev_base_;
   struct event* m_ev_sigchld_;
+
+  // When this event is triggered, the TaskManager will not accept
+  // any more new tasks and quit as soon as all existing task end.
   struct event* m_ev_sigint_;
 
   // The function which will be called when SIGINT is triggered.
   std::function<void()> m_sigint_cb_;
+
+  // When SIGINT is triggered, this variable is set to true.
+  // Then, AddTaskAsyncMethod will not accept any more new tasks
+  // and ev_sigchld_cb_ will stop the event loop when there is
+  // no task running.
+  std::atomic_bool m_is_ending_now_;
 
   // When a new task grpc message arrives, the grpc function (which
   //  runs in parallel) uses m_grpc_event_fd_ to inform the event

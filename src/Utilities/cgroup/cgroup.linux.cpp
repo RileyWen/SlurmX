@@ -31,7 +31,7 @@ CgroupManager &CgroupManager::getInstance() {
  */
 int CgroupManager::initialize() {
   // Initialize library and data structures
-  SLURMX_DEBUG("Initializing cgroup library.\n");
+  SLURMX_DEBUG("Initializing cgroup library.");
   cgroup_init();
 
   // cgroup_set_loglevel(CGROUP_LOG_DEBUG);
