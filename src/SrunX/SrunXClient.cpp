@@ -165,3 +165,16 @@ void SrunXClient::ModifySignalFlag(int signo) {
   SLURMX_DEBUG("Srunxclient: Press down 'Ctrl+C'");
   m_fg_ = 1;
 }
+
+std::atomic_int SrunXClient::m_fg_;
+SlurmxErr SrunXClient::err;
+std::unique_ptr<grpc::ClientReaderWriter<SrunXStreamRequest, SrunXStreamReply>>
+    SrunXClient::m_stream_ = nullptr;
+
+int main(int argc, char **argv){
+  SrunXClient client(grpc::CreateChannel("localhost:50051",
+                                         grpc::InsecureChannelCredentials()),
+                     grpc::CreateChannel("localhost:50052",
+                                         grpc::InsecureChannelCredentials()));
+  client.Init(argc,argv);
+}

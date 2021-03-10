@@ -2,9 +2,9 @@ file(GLOB_RECURSE SRUNX-SRC
         ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/*.h)
 
-add_executable(srunX ${SRUNX-SRC})
+add_executable(SrunX ${SRUNX-SRC})
 
-target_link_libraries(srunX
+target_link_libraries(SrunX
         cxxopts::cxxopts
         proto
         Utility_PublicHeader
