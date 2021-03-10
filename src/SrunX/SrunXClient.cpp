@@ -133,8 +133,6 @@ SlurmxErr SrunXClient::Init(int argc, char** argv) {
       } break;
 
       case SrunX_State::ABORT:
-        SLURMX_INFO("abort");
-
         m_stream_->WritesDone();
         status = m_stream_->Finish();
         SLURMX_DEBUG("Connection from peer {} aborted.", context.peer());
@@ -176,5 +174,6 @@ int main(int argc, char **argv){
                                          grpc::InsecureChannelCredentials()),
                      grpc::CreateChannel("localhost:50052",
                                          grpc::InsecureChannelCredentials()));
-  client.Init(argc,argv);
+  SlurmxErr err = client.Init(argc,argv);
+  SLURMX_INFO("SlurmxErr code: {}", err);
 }
