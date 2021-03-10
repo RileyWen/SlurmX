@@ -34,7 +34,8 @@ constexpr std::array<std::string_view, uint16_t(SlurmxErr::__ERR_SIZE)>
         "Linux Error",
         "Task already exists",
         "Invalid Parameter",
-                       "The owner object of the function is stopping"};
+        "The owner object of the function is stopping",
+};
 
 }
 
@@ -65,6 +66,7 @@ struct StaticLogFormatSetter {
   StaticLogFormatSetter() { spdlog::set_pattern("[%C-%m-%d %s:%#] %v"); }
 };
 
+// Set the global spdlog pattern in global variable initialization.
 [[maybe_unused]] inline StaticLogFormatSetter _static_formatter_setter;
 
 }  // namespace Internal

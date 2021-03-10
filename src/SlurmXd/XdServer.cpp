@@ -310,6 +310,28 @@ Status SlurmXdServiceImpl::RevokeResourceToken(
   return Status::OK;
 }
 
+XdServer::XdServer(const std::string &listen_address,
+                   const resource_t &total_resource)
+    : m_listen_address_(listen_address),
+      m_resource_total_(total_resource),
+      m_resource_avail_(total_resource),
+      m_resource_in_use_() {
+  m_service_impl_ = std::make_unique<SlurmXdServiceImpl>();
+
+  grpc::ServerBuilder builder;
+  builder.AddListeningPort(m_listen_address_,
+                           grpc::InsecureServerCredentials());
+  builder.RegisterService(m_service_impl_.get());
+
+  m_server_ = builder.BuildAndStart();
+  SLURMX_INFO("SlurmXd is listening on {}", m_listen_address_);
+
+  TaskManager::GetInstance().SetSigintCallback([p_server = m_server_.get()] {
+    p_server->Shutdown();
+    SLURMX_TRACE("Grpc Server Shutdown() was called.");
+  });
+}
+
 SlurmxErr XdServer::CheckValidityOfResourceUuid(const uuid &resource_uuid) {
   std::lock_guard<std::mutex> lock_guard(m_node_resource_mtx_);
 

@@ -149,4 +149,3 @@ TEST(TaskManager, SigintTermination) {
 }
 
 // Todo: Test TaskManager from grpc.
-// Todo: Test task termination with SIGINT.

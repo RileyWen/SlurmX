@@ -36,6 +36,10 @@ using slurmx_grpc::SrunXStreamReply;
 using slurmx_grpc::SrunXStreamRequest;
 
 class SlurmXdServiceImpl final : public SlurmXd::Service {
+ public:
+  SlurmXdServiceImpl()
+      : m_task_mgr_(TaskManager::GetInstance()), SlurmXd::Service() {}
+
   Status SrunXStream(ServerContext *context,
                      ServerReaderWriter<SrunXStreamReply, SrunXStreamRequest>
                          *stream) override;
@@ -47,11 +51,13 @@ class SlurmXdServiceImpl final : public SlurmXd::Service {
   Status RevokeResourceToken(ServerContext *context,
                              const RevokeResourceTokenRequest *request,
                              RevokeResourceTokenReply *response) override;
+
+  TaskManager &m_task_mgr_;
 };
 
 class XdServer {
  public:
-  XdServer(const std::string &listen_address);
+  XdServer(const std::string &listen_address, const resource_t &total_resource);
 
   inline void Wait() { m_server_->Wait(); }
 
@@ -64,9 +70,9 @@ class XdServer {
 
   std::optional<resource_t> FindResourceByUuid(const uuid &resource_uuid);
 
+ private:
   uint64_t NewTaskSeqNum() { return m_task_seq_++; };
 
- private:
   // total = avail + in-use
   resource_t m_resource_total_;
   resource_t m_resource_avail_;
@@ -83,11 +89,13 @@ class XdServer {
 
   const std::string m_listen_address_;
 
+  std::unique_ptr<SlurmXdServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
+
+  friend class SlurmXdServiceImpl;
 };
+}  // namespace Xd
 
 // The initialization of XdServer requires some parameters.
 // We can't use the Singleton pattern here. So we use one global variable.
-inline std::unique_ptr<XdServer> g_server;
-
-}  // namespace Xd
+inline std::unique_ptr<Xd::XdServer> g_server;

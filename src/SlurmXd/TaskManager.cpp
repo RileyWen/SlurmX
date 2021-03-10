@@ -340,8 +340,19 @@ void TaskManager::ev_sigint_cb_(int sig, short events, void* user_data) {
 
     if (this_->m_sigint_cb_) this_->m_sigint_cb_();
 
-    for (auto&& elem : this_->m_pid_to_name_map_) {
-      this_->Kill(elem.second, SIGINT);
+    if (this_->m_pid_to_name_map_.empty()) {
+      // If there is no task to kill, stop the loop directly.
+      struct timeval delay = {0, 0};
+      event_base_loopexit(this_->m_ev_base_, &delay);
+    } else {
+      // Todo: Add timer which sends SIGTERM for those tasks who
+      //  will not quit when receiving SIGINT.
+
+      // Send SIGINT to all tasks and the event loop will stop
+      // when the ev_sigchld_cb_ of the last task is called.
+      for (auto&& elem : this_->m_pid_to_name_map_) {
+        this_->Kill(elem.second, SIGINT);
+      }
     }
   } else {
     SLURMX_INFO("SIGINT has been triggered already. Ignoring it.");
