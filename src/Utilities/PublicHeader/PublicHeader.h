@@ -22,8 +22,9 @@ enum class SlurmxErr : uint16_t {
   kConnectionTimeout,
   kConnectionAborted,
 
-  CONNECTION_FAILURE,
-  SIG_INT,
+  kConnectionFailed,
+  kNoTokenReply,
+  kNewTaskFailed,
   __ERR_SIZE
 };
 
