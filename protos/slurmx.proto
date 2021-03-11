@@ -83,7 +83,11 @@ message SrunXStreamReply {
 
 message SlurmXdRegisterRequest {
   Negotiation header = 1;
-  AllocatableResource resource_total = 2;
+
+  // "<Address>:<Port>"
+  string address_port = 2;
+
+  AllocatableResource resource_total = 3;
 }
 
 message SlurmXdRegisterResult {

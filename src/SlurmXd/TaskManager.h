@@ -33,7 +33,7 @@ struct TaskInitInfo {
   std::string executive_path;
   std::forward_list<std::string> arguments;
 
-  CgroupLimit cg_limit;
+  Cgroup::CgroupLimit cg_limit;
 
   /***
    * The callback function called when a task writes to stdout or stderr.
@@ -145,7 +145,7 @@ class TaskManager {
   //  a mapping from pid to task name.
   std::unordered_map<pid_t, std::string> m_pid_to_name_map_;
 
-  CgroupManager& m_cg_mgr_;
+  Cgroup::CgroupManager& m_cg_mgr_;
 
   static void ev_sigchld_cb_(evutil_socket_t sig, short events,
                              void* user_data);

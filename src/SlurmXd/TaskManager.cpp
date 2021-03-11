@@ -1,7 +1,7 @@
 #include "TaskManager.h"
 
 TaskManager::TaskManager()
-    : m_cg_mgr_(CgroupManager::getInstance()),
+    : m_cg_mgr_(Cgroup::CgroupManager::getInstance()),
       m_ev_sigchld_(nullptr),
       m_ev_base_(nullptr),
       m_ev_grpc_event_(nullptr),
@@ -253,8 +253,8 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
 
     // Create cgroup for the new subprocess
     if (!this_->m_cg_mgr_.create_or_open(CgroupStrByPID(child_pid),
-                                         ALL_CONTROLLER_FLAG,
-                                         NO_CONTROLLER_FLAG, false)) {
+                                         Cgroup::ALL_CONTROLLER_FLAG,
+                                         Cgroup::NO_CONTROLLER_FLAG, false)) {
       SLURMX_ERROR(
           "Destroy child task process of \"{}\" due to failure of cgroup "
           "creation.",

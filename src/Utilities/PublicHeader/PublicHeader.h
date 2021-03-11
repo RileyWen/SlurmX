@@ -19,6 +19,8 @@ enum class SlurmxErr : uint16_t {
   kExistingTask,
   kInvalidParam,
   kStop,
+  kConnectionTimeout,
+  kConnectionAborted,
 
   __ERR_SIZE
 };
@@ -38,6 +40,8 @@ constexpr std::array<std::string_view, uint16_t(SlurmxErr::__ERR_SIZE)>
         "Task already exists",
         "Invalid Parameter",
         "The owner object of the function is stopping",
+        "Connection timeout",
+        "Connection aborted",
 };
 
 }

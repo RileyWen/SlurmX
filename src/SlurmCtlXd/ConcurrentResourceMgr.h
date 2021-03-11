@@ -34,7 +34,7 @@ class ConcurrentResourceMgr {
     return ins;
   }
 
-  SlurmxErr RegisterNewSlurmXdNode(const resource_t& spec, uuid* node_uuid);
+  void RegisterNewSlurmXdNode(const uuid& node_uuid, const resource_t& spec);
 
   SlurmxErr AllocateResource(const resource_t& res, uuid* res_uuid);
 

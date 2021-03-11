@@ -10,10 +10,6 @@
 #include "CtlXdGrpcServer.h"
 #include "PublicHeader.h"
 
-std::mutex g_sigint_mtx;
-std::condition_variable g_sigint_cv;
-void signal_handler_func(int signum) { g_sigint_cv.notify_one(); };
-
 int main(int argc, char** argv) {
 #ifndef NDEBUG
   spdlog::set_level(spdlog::level::trace);
@@ -52,28 +48,9 @@ int main(int argc, char** argv) {
   }
 
   std::string server_address{fmt::format("{}:{}", address, port)};
-  CtlXd::SlurmCtlXdServiceImpl service;
+  g_ctlxd_server = std::make_unique<CtlXd::CtlXdServer>(server_address);
 
-  grpc::ServerBuilder builder;
-  builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-  builder.RegisterService(&service);
-
-  std::unique_ptr<grpc::Server> server{builder.BuildAndStart()};
-  SLURMX_INFO("Server listening on {}", server_address);
-
-  signal(SIGINT, signal_handler_func);
-
-  // Avoid the potential deadlock error in absl::mutex
-  std::thread sigint_waiting_thread([p_server = server.get()] {
-    std::unique_lock<std::mutex> lk(g_sigint_mtx);
-    g_sigint_cv.wait(lk);
-
-    SLURMX_TRACE("SIGINT captured. Calling Shutdown() on grpc server...");
-    p_server->Shutdown();
-  });
-  sigint_waiting_thread.detach();
-
-  server->Wait();
+  g_ctlxd_server->Wait();
 
   return 0;
 }

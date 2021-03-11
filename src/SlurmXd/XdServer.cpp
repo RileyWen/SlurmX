@@ -90,7 +90,7 @@ Status SlurmXdServiceImpl::SrunXStream(
               std::optional<resource_t> resource_limit =
                   g_server->FindResourceByUuid(resource_uuid);
 
-              CgroupLimit cg_limit{
+              Cgroup::CgroupLimit cg_limit{
                   .cpu_core_limit = resource_limit.value().cpu_count,
                   .memory_limit_bytes = resource_limit.value().memory_bytes,
                   .memory_sw_limit_bytes =

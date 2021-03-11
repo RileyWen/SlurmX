@@ -21,6 +21,8 @@
 #include "PublicHeader.h"
 #include "libcgroup.h"
 
+namespace Cgroup {
+
 static pthread_mutex_t g_cgroups_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 class CgroupManager;  // Forward Declaration
@@ -238,7 +240,7 @@ class Cgroup {
   };
   void setCgroup(struct cgroup &cgroup);
 
-  friend class ::CgroupManager;
+  friend class ::Cgroup::CgroupManager;
 };
 
 }  // namespace Internal
@@ -311,3 +313,5 @@ class CgroupManager {
 
   static MutexGuard getGuard() { return MutexGuard(g_cgroups_mutex); }
 };
+
+}  // namespace Cgroup

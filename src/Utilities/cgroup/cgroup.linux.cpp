@@ -6,6 +6,8 @@
 
 #include "cgroup.linux.h"
 
+namespace Cgroup {
+
 CgroupManager *CgroupManager::m_singleton_ = nullptr;
 
 /*
@@ -625,3 +627,5 @@ bool CgroupManipulator::set_controller_value_(
 }
 
 }  // namespace Internal
+
+}  // namespace Cgroup

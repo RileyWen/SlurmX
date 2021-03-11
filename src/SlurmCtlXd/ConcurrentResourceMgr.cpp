@@ -2,24 +2,21 @@
 
 namespace CtlXd {
 
-SlurmxErr ConcurrentResourceMgr::RegisterNewSlurmXdNode(const resource_t &spec,
-                                                        uuid *node_uuid) {
+void ConcurrentResourceMgr::RegisterNewSlurmXdNode(const uuid &node_uuid,
+                                                   const resource_t &spec) {
   std::lock_guard<std::mutex> guard(m_mut_);
 
   m_resource_total_ += spec;
   m_resource_avail_ += spec;
 
   SlurmXdNode node{
-      .node_uuid = *node_uuid,
+      .node_uuid = node_uuid,
       .res_total = spec,
       .res_avail = spec,
       .res_in_use = {},
   };
 
-  *node_uuid = m_uuid_gen_();
-  m_node_map_.emplace(*node_uuid, std::move(node));
-
-  return SlurmxErr::kOk;
+  m_node_map_.emplace(node_uuid, std::move(node));
 }
 
 SlurmxErr ConcurrentResourceMgr::AllocateResource(const resource_t &res,

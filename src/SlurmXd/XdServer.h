@@ -35,10 +35,9 @@ using slurmx_grpc::SlurmXd;
 using slurmx_grpc::SrunXStreamReply;
 using slurmx_grpc::SrunXStreamRequest;
 
-class SlurmXdServiceImpl final : public SlurmXd::Service {
+class SlurmXdServiceImpl : public SlurmXd::Service {
  public:
-  SlurmXdServiceImpl()
-      : m_task_mgr_(TaskManager::GetInstance()), SlurmXd::Service() {}
+  SlurmXdServiceImpl() : m_task_mgr_(TaskManager::GetInstance()) {}
 
   Status SrunXStream(ServerContext *context,
                      ServerReaderWriter<SrunXStreamReply, SrunXStreamRequest>
@@ -52,6 +51,7 @@ class SlurmXdServiceImpl final : public SlurmXd::Service {
                              const RevokeResourceTokenRequest *request,
                              RevokeResourceTokenReply *response) override;
 
+ private:
   TaskManager &m_task_mgr_;
 };
 

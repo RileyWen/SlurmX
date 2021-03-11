@@ -5,6 +5,7 @@
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_hash.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <chrono>
 #include <memory>
 
 #include "PublicHeader.h"
@@ -24,14 +25,20 @@ using slurmx_grpc::SlurmXdRegisterResult;
 
 class CtlXdClient {
  public:
-  explicit CtlXdClient(const std::string& server_address)
-      : m_ctlxd_channel_(grpc::CreateChannel(
-            server_address, grpc::InsecureChannelCredentials())),
-        m_stub_(SlurmCtlXd::NewStub(m_ctlxd_channel_)) {}
+  CtlXdClient() = default;
 
-  // Todo: Add exception handling over bad connections!
+  /***
+   * Connect the CtlXdClient to SlurmCtlXd.
+   * @param server_address The "[Address]:[Port]" of SlurmCtlXd.
+   * @return
+   * If SlurmCtlXd is successfully connected, kOk is returned. <br>
+   * If SlurmCtlXd cannot be connected within 3s, kConnectionTimeout is
+   * returned.
+   */
+  SlurmxErr Connect(const std::string& server_address);
 
-  SlurmxErr RegisterOnCtlXd(const resource_t& resource);
+  SlurmxErr RegisterOnCtlXd(const resource_t& resource,
+                            const std::string& my_addr_port);
 
   const uuid& GetNodeUuid() const { return m_node_uuid_; };
 
@@ -44,3 +51,5 @@ class CtlXdClient {
 };
 
 }  // namespace Xd
+
+inline std::unique_ptr<Xd::CtlXdClient> g_ctlxd_client;
