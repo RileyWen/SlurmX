@@ -23,6 +23,9 @@ enum class SlurmxErr : uint16_t {
   __ERR_SIZE
 };
 
+inline const char* kCtlXdDefaultPort = "10011";
+inline const char* kXdDefaultPort = "10010";
+
 namespace Internal {
 
 constexpr std::array<std::string_view, uint16_t(SlurmxErr::__ERR_SIZE)>
@@ -63,7 +66,7 @@ bool operator<(const resource_t& lhs, const resource_t& rhs);
 namespace Internal {
 
 struct StaticLogFormatSetter {
-  StaticLogFormatSetter() { spdlog::set_pattern("[%C-%m-%d %s:%#] %v"); }
+  StaticLogFormatSetter() { spdlog::set_pattern("[%^%L%$ %C-%m-%d %s:%#] %v"); }
 };
 
 // Set the global spdlog pattern in global variable initialization.

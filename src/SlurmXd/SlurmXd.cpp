@@ -19,7 +19,7 @@ int main(int argc, char** argv) {
     ("l,listen", "listening address",
         cxxopts::value<std::string>()->default_value("0.0.0.0"))
     ("p,port", "listening port",
-        cxxopts::value<std::string>()->default_value("10010"))
+        cxxopts::value<std::string>()->default_value(kXdDefaultPort))
     ("ncpu", "# of total cpu core", cxxopts::value<uint32_t>())
     ("nmem", "# of total memory in bytes", cxxopts::value<uint64_t>())
   ;
