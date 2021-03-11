@@ -45,6 +45,9 @@ constexpr std::array<std::string_view, uint16_t(SlurmxErr::__ERR_SIZE)>
         "The owner object of the function is stopping",
         "Connection timeout",
         "Connection aborted",
+        "Connection Failed",
+        "Can not get token from SlurmCtlXd",
+        "New Task create failed",
 };
 
 }

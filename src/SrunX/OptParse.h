@@ -10,7 +10,7 @@
 
 using boost::uuids::uuid;
 
-class opt_parse {
+class OptParse {
  public:
   struct AllocatableResource {
     uint64_t cpu_core_limit;
@@ -24,9 +24,13 @@ class opt_parse {
     uuid resource_uuid;
   };
 
-  cxxopts::ParseResult parse(int argc, char **argv);
+  SlurmxErr err;
+  SlurmxErr Parse(int argc, char **argv);
 
-  uint64_t memory_parse_client(std::string str,
+
+  cxxopts::ParseResult GetResult(int argc, char **argv);
+
+  uint64_t MemoryParseClient(std::string str,
                                const cxxopts::ParseResult &result);
 
   TaskInfo GetTaskInfo(const cxxopts::ParseResult &result, uuid resource_uuid);

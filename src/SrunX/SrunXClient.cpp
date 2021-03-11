@@ -1,21 +1,12 @@
 #include "SrunXClient.h"
 
 SlurmxErr SrunXClient::Init(int argc, char** argv) {
-  enum class SrunX_State {
-    SEND_REQUIREMENT_TO_SLURMCTLXD = 0,
-    NEGOTIATION_TO_SLURMXD,
-    NEWTASK_TO_SLURMXD,
-    WAIT_FOR_REPLY_OR_SEND_SIG,
-    ABORT,
-    FINISH
-  };
-
   bool ok;
   err = SlurmxErr::kOk;
-  SrunX_State state = SrunX_State::SEND_REQUIREMENT_TO_SLURMCTLXD;
+  state = SrunX_State::SEND_REQUIREMENT_TO_SLURMCTLXD;
   ResourceAllocReply resourceAllocReply;
   ClientContext context;
-  cxxopts::ParseResult result = parser.parse(argc, argv);
+  cxxopts::ParseResult result = parser.GetResult(argc, argv);
   Status status;
   m_stream_ = m_stub_->SrunXStream(&m_context_);
   m_fg_ = 0;
@@ -29,9 +20,9 @@ SlurmxErr SrunXClient::Init(int argc, char** argv) {
         slurmx_grpc::AllocatableResource allocatableResource;
         allocatableResource.set_cpu_core_limit(result["ncpu"].as<uint64_t>());
         allocatableResource.set_memory_sw_limit_bytes(
-            parser.memory_parse_client("nmemory_swap", result));
+            parser.MemoryParseClient("nmemory_swap", result));
         allocatableResource.set_memory_limit_bytes(
-            parser.memory_parse_client("nmemory", result));
+            parser.MemoryParseClient("nmemory", result));
         AllocatableResource->CopyFrom(allocatableResource);
 
         status = m_stub_ctld_->AllocateResource(&context, resourceAllocRequest,
@@ -46,14 +37,14 @@ SlurmxErr SrunXClient::Init(int argc, char** argv) {
                          to_string(resource_uuid));
             state = SrunX_State::NEGOTIATION_TO_SLURMXD;
           } else {
-            SLURMX_DEBUG("Error ! Can not get token for reason: {}",
-                         resourceAllocReply.reason());
+            SLURMX_INFO("Error ! Can not get token for reason: {}",
+                        resourceAllocReply.reason());
             err = SlurmxErr::kNoTokenReply;
             state = SrunX_State::ABORT;
           }
         } else {
-          SLURMX_DEBUG("{}:{}\nSlurmxctld RPC failed", status.error_code(),
-                       status.error_message());
+          SLURMX_INFO("{}:{}\nSlurmxctld RPC failed", status.error_code(),
+                      status.error_message());
           err = SlurmxErr::kConnectionFailed;
           state = SrunX_State::ABORT;
         }
@@ -98,38 +89,12 @@ SlurmxErr SrunXClient::Init(int argc, char** argv) {
         m_client_wait_thread_ =
             std::thread(&SrunXClient::m_client_wait_func_, this);
         signal(SIGINT, ModifySignalFlag);
+        m_client_read_thread_ =
+            std::thread(&SrunXClient::m_client_read_func_, this);
 
-        SrunXStreamReply reply;
-        ok = m_stream_->Read(&reply);
-        if (ok) {
-          if (reply.type() == SrunXStreamReply::IoRedirection) {
-            SLURMX_INFO("reply_buf:{}", reply.io_redirection().buf());
-          } else if (reply.type() == SrunXStreamReply::ExitStatus) {
-            if (reply.task_exit_status().reason() == TaskExitStatus::Signal) {
-              SLURMX_INFO("Srunxclient: Slurmxd exit for sigint .");
-            } else {
-              SLURMX_INFO("Srunxclient: Slurmxd exit for normal .");
-            }
-            state = SrunX_State::FINISH;
+        m_client_wait_thread_.detach();
+        m_client_read_thread_.join();
 
-          } else {
-            if (reply.new_task_result().ok()) {
-              SLURMX_DEBUG("New Task Success!");
-            } else {
-              SLURMX_DEBUG("New Task Failed, For the reason {} .",
-                           reply.new_task_result().reason());
-              err = SlurmxErr::kNewTaskFailed;
-              state = SrunX_State::ABORT;
-            }
-          }
-        } else {
-          SLURMX_DEBUG(
-              "Connection error when trying reading negotiation from peer {}",
-              context.peer());
-          err = SlurmxErr::kConnectionFailed;
-          state = SrunX_State::ABORT;
-        }
-        m_client_wait_thread_.join();
       } break;
 
       case SrunX_State::ABORT:
@@ -152,28 +117,54 @@ void SrunXClient::m_client_wait_func_() {
       SrunXStreamRequest request;
       request.set_type(SrunXStreamRequest::Signal);
       request.set_signum(2);
-
       m_stream_->Write(request);
       break;
     }
   }
 }
 
+void SrunXClient::m_client_read_func_() {
+  SrunXStreamReply reply;
+  while (m_stream_->Read(&reply)) {
+    if (reply.type() == SrunXStreamReply::IoRedirection) {
+      SLURMX_INFO("reply_buf:{}", reply.io_redirection().buf());
+    } else if (reply.type() == SrunXStreamReply::ExitStatus) {
+      if (reply.task_exit_status().reason() == TaskExitStatus::Signal) {
+        SLURMX_INFO("Srunxclient: Slurmxd exit for sigint.");
+      } else {
+        SLURMX_INFO("Srunxclient: Slurmxd exit for normal.");
+      }
+      state = SrunX_State::FINISH;
+      break;
+
+    } else {
+      if (reply.new_task_result().ok()) {
+        SLURMX_INFO("New Task Success!");
+      } else {
+        SLURMX_INFO("New Task Failed, For the reason {} .",
+                    reply.new_task_result().reason());
+        err = SlurmxErr::kNewTaskFailed;
+      }
+    }
+  }
+}
+
 void SrunXClient::ModifySignalFlag(int signo) {
-  SLURMX_DEBUG("Srunxclient: Press down 'Ctrl+C'");
+  SLURMX_INFO("Srunxclient: Press down 'Ctrl+C'");
   m_fg_ = 1;
 }
 
-std::atomic_int SrunXClient::m_fg_;
-SlurmxErr SrunXClient::err;
-std::unique_ptr<grpc::ClientReaderWriter<SrunXStreamRequest, SrunXStreamReply>>
-    SrunXClient::m_stream_ = nullptr;
-
-int main(int argc, char **argv){
-  SrunXClient client(grpc::CreateChannel("localhost:50051",
-                                         grpc::InsecureChannelCredentials()),
-                     grpc::CreateChannel("localhost:50052",
-                                         grpc::InsecureChannelCredentials()));
-  SlurmxErr err = client.Init(argc,argv);
-  SLURMX_INFO("SlurmxErr code: {}", err);
-}
+// std::atomic_int SrunXClient::m_fg_;
+// SlurmxErr SrunXClient::err;
+// std::unique_ptr<grpc::ClientReaderWriter<SrunXStreamRequest,
+// SrunXStreamReply>>
+//    SrunXClient::m_stream_ = nullptr;
+//
+// int main(int argc, char **argv){
+//  SrunXClient client(grpc::CreateChannel("localhost:50051",
+//                                         grpc::InsecureChannelCredentials()),
+//                     grpc::CreateChannel("localhost:50052",
+//                                         grpc::InsecureChannelCredentials()));
+//  SlurmxErr err = client.Init(argc,argv);
+//  SLURMX_INFO("SlurmxErr code: {}", err);
+//}

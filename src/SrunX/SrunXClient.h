@@ -13,7 +13,7 @@
 #include <thread>
 #include <vector>
 
-#include "../src/SrunX/opt_parse.h"
+#include "../src/SrunX/OptParse.h"
 #include "PublicHeader.h"
 #include "protos/slurmx.grpc.pb.h"
 
@@ -40,21 +40,33 @@ class SrunXClient {
 
   SlurmxErr Init(int argc, char* argv[]);
 
-  opt_parse parser;
+  enum class SrunX_State {
+    SEND_REQUIREMENT_TO_SLURMCTLXD = 0,
+    NEGOTIATION_TO_SLURMXD,
+    NEWTASK_TO_SLURMXD,
+    WAIT_FOR_REPLY_OR_SEND_SIG,
+    ABORT,
+    FINISH
+  };
+
+  OptParse parser;
 
  private:
   void m_client_wait_func_();
+  void m_client_read_func_();
 
   static void ModifySignalFlag(int signo);
 
   std::unique_ptr<SlurmXd::Stub> m_stub_;
   std::unique_ptr<SlurmCtlXd::Stub> m_stub_ctld_;
-  static std::unique_ptr<
+  std::unique_ptr<
       grpc::ClientReaderWriter<SrunXStreamRequest, SrunXStreamReply>>
       m_stream_;
   static std::atomic_int m_fg_;
-  static SlurmxErr err;
+  SlurmxErr err;
   std::thread m_client_wait_thread_;
+  std::thread m_client_read_thread_;
   ClientContext m_context_;
   uuid resource_uuid{};
+  SrunX_State state;
 };

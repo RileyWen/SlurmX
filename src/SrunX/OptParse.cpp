@@ -1,6 +1,6 @@
-#include "opt_parse.h"
+#include "OptParse.h"
 
-cxxopts::ParseResult opt_parse::parse(int argc, char **argv) {
+cxxopts::ParseResult OptParse::GetResult(int argc, char **argv) {
   try {
     cxxopts::Options options(argv[0], " - srunX command line options");
     options.positional_help("task_name [Task Args...]").show_positional_help();
@@ -38,7 +38,7 @@ cxxopts::ParseResult opt_parse::parse(int argc, char **argv) {
     exit(1);
   }
 }
-uint64_t opt_parse::memory_parse_client(std::string str,
+uint64_t OptParse::MemoryParseClient(std::string str,
                                         const cxxopts::ParseResult &result) {
   auto nmemory = result[str].as<std::string>();
   std::regex Rnmemory("^[0-9]+[mMgG]?$");
@@ -92,7 +92,7 @@ uint64_t opt_parse::memory_parse_client(std::string str,
     return nmemory_byte;
   }
 }
-opt_parse::TaskInfo opt_parse::GetTaskInfo(const cxxopts::ParseResult &result,
+OptParse::TaskInfo OptParse::GetTaskInfo(const cxxopts::ParseResult &result,
                                            uuid resource_uuid) {
   TaskInfo task;
 
@@ -111,7 +111,7 @@ opt_parse::TaskInfo opt_parse::GetTaskInfo(const cxxopts::ParseResult &result,
   task.resource_uuid = resource_uuid;
   return task;
 }
-opt_parse::AllocatableResource opt_parse::GetAllocatableResource(
+OptParse::AllocatableResource OptParse::GetAllocatableResource(
     const cxxopts::ParseResult &result) {
   AllocatableResource allocatableResource;
 
@@ -125,17 +125,17 @@ opt_parse::AllocatableResource opt_parse::GetAllocatableResource(
     allocatableResource.cpu_core_limit = parameter_bytes;
   }
 
-  parameter_bytes = memory_parse_client("nmemory", result);
+  parameter_bytes = MemoryParseClient("nmemory", result);
   allocatableResource.memory_limit_bytes = parameter_bytes;
 
-  parameter_bytes = memory_parse_client("nmemory_swap", result);
+  parameter_bytes = MemoryParseClient("nmemory_swap", result);
   allocatableResource.memory_sw_limit_bytes = parameter_bytes;
 
   return allocatableResource;
 }
-void opt_parse::PrintTaskInfo(
-    const opt_parse::TaskInfo task,
-    const opt_parse::AllocatableResource allocatableResource) {
+void OptParse::PrintTaskInfo(
+    const OptParse::TaskInfo task,
+    const OptParse::AllocatableResource allocatableResource) {
   std::string args;
 
   for (auto arg : task.arguments) {
@@ -149,4 +149,14 @@ void opt_parse::PrintTaskInfo(
       task.executive_path, args, allocatableResource.cpu_core_limit,
       allocatableResource.memory_limit_bytes,
       allocatableResource.memory_sw_limit_bytes);
+}
+
+SlurmxErr OptParse::Parse(int argc, char **argv) {
+
+  auto result = GetResult(argc,argv);
+
+
+
+  return err ;
+
 }
