@@ -604,7 +604,9 @@ TEST(SrunX, Ctrl_C_Interrupt) {
                                          grpc::InsecureChannelCredentials()),
                      grpc::CreateChannel("localhost:50052",
                                          grpc::InsecureChannelCredentials()));
-  EXPECT_EQ(client.Init(argc, const_cast<char**>(argv)), SlurmxErr::kOk);
+  client.Init(argc, const_cast<char**>(argv));
+
+  EXPECT_EQ(client.Run(), SlurmxErr::kOk);
 
   // Simulate the user pressing ctrl+C
   shutdown.join();
@@ -647,7 +649,8 @@ TEST(SrunX, Normal_EXit) {
                                          grpc::InsecureChannelCredentials()),
                      grpc::CreateChannel("localhost:50052",
                                          grpc::InsecureChannelCredentials()));
-  EXPECT_EQ(client.Init(argc, const_cast<char**>(argv)), SlurmxErr::kOk);
+  client.Init(argc, const_cast<char**>(argv));
+  EXPECT_EQ(client.Run(), SlurmxErr::kOk);
 
   server->Shutdown();
   server_ctld->Shutdown();
@@ -689,8 +692,8 @@ TEST(SrunX, NewTask_Failed) {
                                          grpc::InsecureChannelCredentials()),
                      grpc::CreateChannel("localhost:50052",
                                          grpc::InsecureChannelCredentials()));
-  EXPECT_EQ(client.Init(argc, const_cast<char**>(argv)),
-            SlurmxErr::kNewTaskFailed);
+  client.Init(argc, const_cast<char**>(argv));
+  EXPECT_EQ(client.Run(), SlurmxErr::kNewTaskFailed);
 
   server->Shutdown();
   server_ctld->Shutdown();
@@ -730,8 +733,8 @@ TEST(SrunX, No_Token_Reply) {
                                          grpc::InsecureChannelCredentials()),
                      grpc::CreateChannel("localhost:50052",
                                          grpc::InsecureChannelCredentials()));
-  EXPECT_EQ(client.Init(argc, const_cast<char**>(argv)),
-            SlurmxErr::kNoTokenReply);
+  client.Init(argc, const_cast<char**>(argv));
+  EXPECT_EQ(client.Run(), SlurmxErr::kNoTokenReply);
 
   server->Shutdown();
   server_ctld->Shutdown();
@@ -751,6 +754,23 @@ TEST(SrunX, Connection_Failed) {
                                          grpc::InsecureChannelCredentials()),
                      grpc::CreateChannel("localhost:50052",
                                          grpc::InsecureChannelCredentials()));
+  client.Init(argc, const_cast<char**>(argv));
+  client.parser.PrintTaskInfo();
+  EXPECT_EQ(client.Run(), SlurmxErr::kConnectionFailed);
+}
+
+TEST(SrunX, Parse_Failed) {
+  // command line
+  int argc = 16;
+  const char* argv[] = {"./srunX", "-c",   "-1",   "-s",  "2",    "-m",
+                        "200M",    "-w",   "102G", "-f",  "100m", "-b",
+                        "1g",      "task", "arg1", "arg2"};
+  // srunX client
+  SrunXClient client(grpc::CreateChannel("localhost:50051",
+                                         grpc::InsecureChannelCredentials()),
+                     grpc::CreateChannel("localhost:50052",
+                                         grpc::InsecureChannelCredentials()));
+
   EXPECT_EQ(client.Init(argc, const_cast<char**>(argv)),
-            SlurmxErr::kConnectionFailed);
+            SlurmxErr::kOptParseFailed);
 }

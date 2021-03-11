@@ -25,6 +25,10 @@ enum class SlurmxErr : uint16_t {
   kConnectionFailed,
   kNoTokenReply,
   kNewTaskFailed,
+  kOptParseTypeErr,
+  kOptParseRangeErr,
+  kOptParseZeroErr,
+  kOptParseFailed,
   __ERR_SIZE
 };
 
@@ -45,9 +49,14 @@ constexpr std::array<std::string_view, uint16_t(SlurmxErr::__ERR_SIZE)>
         "The owner object of the function is stopping",
         "Connection timeout",
         "Connection aborted",
+
         "Connection Failed",
         "Can not get token from SlurmCtlXd",
         "New Task create failed",
+        "The parameter has wrong type",
+        "The parameter has wrong range",
+        "The parameter is zero",
+        "Can not parse the parameter",
 };
 
 }

@@ -25,19 +25,18 @@ class OptParse {
   };
 
   SlurmxErr err;
-  SlurmxErr Parse(int argc, char **argv);
-
+  AllocatableResource allocatableResource;
+  TaskInfo taskinfo;
 
   cxxopts::ParseResult GetResult(int argc, char **argv);
 
-  uint64_t MemoryParseClient(std::string str,
-                               const cxxopts::ParseResult &result);
+  SlurmxErr MemoryParseClient(std::string str,
+                              const cxxopts::ParseResult &result,
+                              uint64_t &nmemory_byte);
 
-  TaskInfo GetTaskInfo(const cxxopts::ParseResult &result, uuid resource_uuid);
-
-  AllocatableResource GetAllocatableResource(
-      const cxxopts::ParseResult &result);
-
-  void PrintTaskInfo(const TaskInfo task,
-                     const AllocatableResource allocatableResource);
+  void GetTaskInfo(TaskInfo &task);
+  void GetAllocatableResource(AllocatableResource &allocatableResource);
+  void AddUuid(uuid uuid);
+  SlurmxErr Parse(int argc, char **argv);
+  void PrintTaskInfo();
 };

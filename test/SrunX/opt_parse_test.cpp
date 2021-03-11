@@ -6,9 +6,8 @@ TEST(SrunX, OptHelpMessage) {
   int argc = 2;
   const char* argv[] = {"./srunX", "--help"};
   OptParse parser;
-
-  EXPECT_EXIT(parser.GetResult(argc, const_cast<char**>(argv)),
-              testing::ExitedWithCode(0), "");
+  OptParse::AllocatableResource allocatableResource;
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)), SlurmxErr::kOk);
 }
 
 TEST(SrunX, OptTest_C_true) {
@@ -18,12 +17,11 @@ TEST(SrunX, OptTest_C_true) {
   OptParse parser;
 
   SLURMX_INFO("cpu input:{}", argv[2]);
-  EXPECT_EQ(
-      parser
-          .GetAllocatableResource(
-                    parser.GetResult(argc, const_cast<char**>(argv)))
-          .cpu_core_limit,
-      (uint64_t)atoi(argv[2]));
+  OptParse::AllocatableResource allocatableResource;
+  parser.Parse(argc, const_cast<char**>(argv));
+  parser.GetAllocatableResource(allocatableResource);
+
+  EXPECT_EQ(allocatableResource.cpu_core_limit, (uint64_t)atoi(argv[2]));
 }
 
 TEST(SrunX, OptTest_C_Zero) {
@@ -33,9 +31,8 @@ TEST(SrunX, OptTest_C_Zero) {
   OptParse parser;
 
   SLURMX_INFO("cpu input:{}", argv[2]);
-  ASSERT_DEATH(parser.GetAllocatableResource(
-                   parser.GetResult(argc, const_cast<char**>(argv))),
-               "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseZeroErr);
 }
 
 TEST(SrunX, OptTest_C_negative) {
@@ -46,9 +43,8 @@ TEST(SrunX, OptTest_C_negative) {
   OptParse parser;
 
   SLURMX_INFO("cpu input:{}", argv[2]);
-  //  ASSERT_DEATH(parser.parse(argc, const_cast<char**>(argv)),
-  //               "");
-  ASSERT_DEATH(parser.GetResult(argc, const_cast<char**>(argv)), "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseFailed);
 }
 
 TEST(SrunX, OptTest_C_decimal) {
@@ -59,7 +55,8 @@ TEST(SrunX, OptTest_C_decimal) {
   OptParse parser;
 
   SLURMX_INFO("cpu input:{}", argv[2]);
-  ASSERT_DEATH(parser.GetResult(argc, const_cast<char**>(argv)), "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseFailed);
 }
 
 TEST(SrunX, OptTest_C_errortype1) {
@@ -70,7 +67,8 @@ TEST(SrunX, OptTest_C_errortype1) {
   OptParse parser;
 
   SLURMX_INFO("cpu input:{}", argv[2]);
-  ASSERT_DEATH(parser.GetResult(argc, const_cast<char**>(argv)), "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseFailed);
 }
 
 TEST(SrunX, OptTest_C_errortype2) {
@@ -81,7 +79,8 @@ TEST(SrunX, OptTest_C_errortype2) {
   OptParse parser;
 
   SLURMX_INFO("cpu input:{}", argv[2]);
-  ASSERT_DEATH(parser.GetResult(argc, const_cast<char**>(argv)), "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseFailed);
 }
 
 TEST(SrunX, OptTest_C_errortype3) {
@@ -92,7 +91,8 @@ TEST(SrunX, OptTest_C_errortype3) {
   OptParse parser;
 
   SLURMX_INFO("cpu input:{}", argv[2]);
-  ASSERT_DEATH(parser.GetResult(argc, const_cast<char**>(argv)), "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseFailed);
 }
 
 TEST(SrunX, OptTest_Memory_range) {
@@ -102,9 +102,8 @@ TEST(SrunX, OptTest_Memory_range) {
   OptParse parser;
 
   SLURMX_INFO("memory input:{}", argv[2]);
-  ASSERT_DEATH(parser.GetAllocatableResource(
-                   parser.GetResult(argc, const_cast<char**>(argv))),
-               "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseRangeErr);
 }
 
 TEST(SrunX, OptTest_Memory_true_k) {
@@ -114,12 +113,10 @@ TEST(SrunX, OptTest_Memory_true_k) {
   OptParse parser;
 
   SLURMX_INFO("memory input:{}", argv[2]);
-  EXPECT_EQ(
-      parser
-          .GetAllocatableResource(
-                    parser.GetResult(argc, const_cast<char**>(argv)))
-          .memory_limit_bytes,
-      (uint64_t)131072);
+  OptParse::AllocatableResource allocatableResource;
+  parser.Parse(argc, const_cast<char**>(argv));
+  parser.GetAllocatableResource(allocatableResource);
+  EXPECT_EQ(allocatableResource.memory_limit_bytes, (uint64_t)131072);
 }
 
 TEST(SrunX, OptTest_Memory_true_m) {
@@ -129,12 +126,10 @@ TEST(SrunX, OptTest_Memory_true_m) {
   OptParse parser;
 
   SLURMX_INFO("memory input:{}", argv[2]);
-  EXPECT_EQ(
-      parser
-          .GetAllocatableResource(
-                    parser.GetResult(argc, const_cast<char**>(argv)))
-          .memory_limit_bytes,
-      (uint64_t)134217728);
+  OptParse::AllocatableResource allocatableResource;
+  parser.Parse(argc, const_cast<char**>(argv));
+  parser.GetAllocatableResource(allocatableResource);
+  EXPECT_EQ(allocatableResource.memory_limit_bytes, (uint64_t)134217728);
 }
 
 TEST(SrunX, OptTest_Memory_true_g) {
@@ -144,12 +139,10 @@ TEST(SrunX, OptTest_Memory_true_g) {
   OptParse parser;
 
   SLURMX_INFO("memory input:{}", argv[2]);
-  EXPECT_EQ(
-      parser
-          .GetAllocatableResource(
-                    parser.GetResult(argc, const_cast<char**>(argv)))
-          .memory_limit_bytes,
-      (uint64_t)137438953472);
+  OptParse::AllocatableResource allocatableResource;
+  parser.Parse(argc, const_cast<char**>(argv));
+  parser.GetAllocatableResource(allocatableResource);
+  EXPECT_EQ(allocatableResource.memory_limit_bytes, (uint64_t)137438953472);
 }
 
 TEST(SrunX, OptTest_Memory_zero) {
@@ -159,9 +152,8 @@ TEST(SrunX, OptTest_Memory_zero) {
   OptParse parser;
 
   SLURMX_INFO("memory input:{}", argv[2]);
-  ASSERT_DEATH(parser.GetAllocatableResource(
-                   parser.GetResult(argc, const_cast<char**>(argv))),
-               "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseZeroErr);
 }
 
 TEST(SrunX, OptTest_Memory_errortype1) {
@@ -171,9 +163,8 @@ TEST(SrunX, OptTest_Memory_errortype1) {
   OptParse parser;
 
   SLURMX_INFO("memory input:{}", argv[2]);
-  ASSERT_DEATH(parser.GetAllocatableResource(
-                   parser.GetResult(argc, const_cast<char**>(argv))),
-               "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseTypeErr);
 }
 
 TEST(SrunX, OptTest_Memory_errortype2) {
@@ -184,12 +175,8 @@ TEST(SrunX, OptTest_Memory_errortype2) {
   OptParse parser;
 
   SLURMX_INFO("memory input:{}", argv[2]);
-  ASSERT_DEATH(
-      {
-        parser.GetAllocatableResource(
-            parser.GetResult(argc, const_cast<char**>(argv)));
-      },
-      "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseTypeErr);
 }
 TEST(SrunX, OptTest_Memory_errortype4) {
   int argc = 3;
@@ -199,12 +186,8 @@ TEST(SrunX, OptTest_Memory_errortype4) {
   OptParse parser;
 
   SLURMX_INFO("memory input:{}", argv[2]);
-  ASSERT_DEATH(
-      {
-        parser.GetAllocatableResource(
-            parser.GetResult(argc, const_cast<char**>(argv)));
-      },
-      "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseTypeErr);
 }
 TEST(SrunX, OptTest_Memory_errortype5) {
   int argc = 3;
@@ -214,9 +197,8 @@ TEST(SrunX, OptTest_Memory_errortype5) {
   OptParse parser;
 
   SLURMX_INFO("memory input:{}", argv[2]);
-  ASSERT_DEATH(parser.GetAllocatableResource(
-                   parser.GetResult(argc, const_cast<char**>(argv))),
-               "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseTypeErr);
 }
 
 TEST(SrunX, OptTest_Task_true) {
@@ -224,13 +206,11 @@ TEST(SrunX, OptTest_Task_true) {
   const char* argv[] = {"./srunX", "task"};
 
   OptParse parser;
-  uuid uuid;
-
+  OptParse::TaskInfo task;
+  parser.Parse(argc, const_cast<char**>(argv));
+  parser.GetTaskInfo(task);
   SLURMX_INFO("task input:{}", argv[1]);
-  EXPECT_EQ(
-      parser.GetTaskInfo(parser.GetResult(argc, const_cast<char**>(argv)), uuid)
-          .executive_path,
-      argv[1]);
+  ASSERT_EQ(task.executive_path, argv[1]);
 }
 
 TEST(SrunX, OptTest_Task_errortype1) {
@@ -238,13 +218,10 @@ TEST(SrunX, OptTest_Task_errortype1) {
   const char* argv[] = {"./srunX", "task."};
 
   OptParse parser;
-  uuid uuid;
-
+  OptParse::TaskInfo task;
   SLURMX_INFO("task input:{}", argv[1]);
-  ASSERT_DEATH(
-      parser.GetTaskInfo(
-                   parser.GetResult(argc, const_cast<char**>(argv)), uuid),
-      "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseTypeErr);
 }
 
 TEST(SrunX, OptTest_Task_errortype2) {
@@ -252,13 +229,10 @@ TEST(SrunX, OptTest_Task_errortype2) {
   const char* argv[] = {"./srunX", "task-"};
 
   OptParse parser;
-  uuid uuid;
-
+  OptParse::TaskInfo task;
   SLURMX_INFO("task input:{}", argv[1]);
-  ASSERT_DEATH(
-      parser.GetTaskInfo(
-                   parser.GetResult(argc, const_cast<char**>(argv)), uuid),
-      "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseTypeErr);
 }
 
 TEST(SrunX, OptTest_Task_errortype3) {
@@ -266,13 +240,10 @@ TEST(SrunX, OptTest_Task_errortype3) {
   const char* argv[] = {"./srunX", "task/"};
 
   OptParse parser;
-  uuid uuid;
-
+  OptParse::TaskInfo task;
   SLURMX_INFO("task input:{}", argv[1]);
-  ASSERT_DEATH(
-      parser.GetTaskInfo(
-                   parser.GetResult(argc, const_cast<char**>(argv)), uuid),
-      "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseTypeErr);
 }
 
 TEST(SrunX, OptTest_Task_errortype4) {
@@ -281,13 +252,10 @@ TEST(SrunX, OptTest_Task_errortype4) {
   const char* argv[] = {"./srunX", "task\\"};
 
   OptParse parser;
-  uuid uuid;
-
+  OptParse::TaskInfo task;
   SLURMX_INFO("task input:{}", argv[1]);
-  ASSERT_DEATH(
-      parser.GetTaskInfo(
-                   parser.GetResult(argc, const_cast<char**>(argv)), uuid),
-      "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseTypeErr);
 }
 
 TEST(SrunX, OptTest_Task_errortype5) {
@@ -296,13 +264,10 @@ TEST(SrunX, OptTest_Task_errortype5) {
   const char* argv[] = {"./srunX", "task|"};
 
   OptParse parser;
-  uuid uuid;
-
+  OptParse::TaskInfo task;
   SLURMX_INFO("task input:{}", argv[1]);
-  ASSERT_DEATH(
-      parser.GetTaskInfo(
-                   parser.GetResult(argc, const_cast<char**>(argv)), uuid),
-      "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseTypeErr);
 }
 
 TEST(SrunX, OptTest_Task_errortype6) {
@@ -310,11 +275,8 @@ TEST(SrunX, OptTest_Task_errortype6) {
   const char* argv[] = {"./srunX", "task*"};
 
   OptParse parser;
-  uuid uuid;
-
+  OptParse::TaskInfo task;
   SLURMX_INFO("task input:{}", argv[1]);
-  ASSERT_DEATH(
-      parser.GetTaskInfo(
-                   parser.GetResult(argc, const_cast<char**>(argv)), uuid),
-      "");
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
+            SlurmxErr::kOptParseTypeErr);
 }

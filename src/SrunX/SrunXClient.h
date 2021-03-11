@@ -40,6 +40,8 @@ class SrunXClient {
 
   SlurmxErr Init(int argc, char* argv[]);
 
+  SlurmxErr Run();
+
   enum class SrunX_State {
     SEND_REQUIREMENT_TO_SLURMCTLXD = 0,
     NEGOTIATION_TO_SLURMXD,
@@ -50,6 +52,8 @@ class SrunXClient {
   };
 
   OptParse parser;
+  OptParse::AllocatableResource allocatableResource;
+  OptParse::TaskInfo taskinfo;
 
  private:
   void m_client_wait_func_();
@@ -67,6 +71,6 @@ class SrunXClient {
   std::thread m_client_wait_thread_;
   std::thread m_client_read_thread_;
   ClientContext m_context_;
-  uuid resource_uuid{};
+  uuid resource_uuid;
   SrunX_State state;
 };

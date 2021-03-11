@@ -1,16 +1,22 @@
 #include "SrunXClient.h"
 
-SlurmxErr SrunXClient::Init(int argc, char** argv) {
+SlurmxErr SrunXClient::Init(int argc, char* argv[]) {
+  SlurmxErr err_parse;
+  err_parse = parser.Parse(argc, argv);
+  parser.GetTaskInfo(this->taskinfo);
+  parser.GetAllocatableResource(this->allocatableResource);
+  m_stream_ = m_stub_->SrunXStream(&m_context_);
+  m_fg_ = 0;
+  return err_parse;
+}
+
+SlurmxErr SrunXClient::Run() {
   bool ok;
   err = SlurmxErr::kOk;
   state = SrunX_State::SEND_REQUIREMENT_TO_SLURMCTLXD;
-  ResourceAllocReply resourceAllocReply;
   ClientContext context;
-  cxxopts::ParseResult result = parser.GetResult(argc, argv);
   Status status;
-  m_stream_ = m_stub_->SrunXStream(&m_context_);
-  m_fg_ = 0;
-
+  ResourceAllocReply resourceAllocReply;
   while (true) {
     switch (state) {
       case SrunX_State::SEND_REQUIREMENT_TO_SLURMCTLXD: {
@@ -18,11 +24,12 @@ SlurmxErr SrunXClient::Init(int argc, char** argv) {
         slurmx_grpc::AllocatableResource* AllocatableResource =
             resourceAllocRequest.mutable_required_resource();
         slurmx_grpc::AllocatableResource allocatableResource;
-        allocatableResource.set_cpu_core_limit(result["ncpu"].as<uint64_t>());
+        allocatableResource.set_cpu_core_limit(
+            this->allocatableResource.cpu_core_limit);
         allocatableResource.set_memory_sw_limit_bytes(
-            parser.MemoryParseClient("nmemory_swap", result));
+            this->allocatableResource.memory_sw_limit_bytes);
         allocatableResource.set_memory_limit_bytes(
-            parser.MemoryParseClient("nmemory", result));
+            this->allocatableResource.memory_limit_bytes);
         AllocatableResource->CopyFrom(allocatableResource);
 
         status = m_stub_ctld_->AllocateResource(&context, resourceAllocRequest,
@@ -35,6 +42,7 @@ SlurmxErr SrunXClient::Init(int argc, char** argv) {
                       resource_uuid.data);
             SLURMX_DEBUG("Srunxclient: Get the token {} from the slurmxctld.",
                          to_string(resource_uuid));
+            parser.AddUuid(resource_uuid);
             state = SrunX_State::NEGOTIATION_TO_SLURMXD;
           } else {
             SLURMX_INFO("Error ! Can not get token for reason: {}",
@@ -69,15 +77,15 @@ SlurmxErr SrunXClient::Init(int argc, char** argv) {
 
         slurmx_grpc::TaskInfo* taskInfo = request.mutable_task_info();
         slurmx_grpc::TaskInfo taskinfo;
-        std::string str = result["task"].as<std::string>();
+        std::string str = this->taskinfo.executive_path;
         taskinfo.set_executive_path(str);
 
-        for (std::string arg :
-             result["positional"].as<std::vector<std::string>>()) {
+        for (std::string arg : this->taskinfo.arguments) {
           taskinfo.add_arguments(arg);
         }
 
-        taskinfo.set_resource_uuid(resource_uuid.data, resource_uuid.size());
+        taskinfo.set_resource_uuid(this->taskinfo.resource_uuid.data,
+                                   resource_uuid.size());
         taskInfo->CopyFrom(taskinfo);
 
         m_stream_->Write(request);
