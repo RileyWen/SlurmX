@@ -26,9 +26,11 @@ class OptParse {
 
   SlurmxErr err;
   AllocatableResource allocatableResource;
+  std::string Xdserver_addr_port;
+  std::string CtlXdserver_addr_port;
   TaskInfo taskinfo;
 
-  cxxopts::ParseResult GetResult(int argc, char **argv);
+  cxxopts::ParseResult GetResult(int argc, char **argv, bool &help_flag);
 
   SlurmxErr MemoryParseClient(std::string str,
                               const cxxopts::ParseResult &result,
@@ -36,7 +38,6 @@ class OptParse {
 
   void GetTaskInfo(TaskInfo &task);
   void GetAllocatableResource(AllocatableResource &allocatableResource);
-  void AddUuid(uuid uuid);
   SlurmxErr Parse(int argc, char **argv);
   void PrintTaskInfo();
 };

@@ -7,112 +7,138 @@ TEST(SrunX, OptHelpMessage) {
   const char* argv[] = {"./srunX", "--help"};
   OptParse parser;
   OptParse::AllocatableResource allocatableResource;
-  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)), SlurmxErr::kOk);
+  ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)), SlurmxErr::kOptHelp);
 }
 
 TEST(SrunX, OptTest_C_true) {
-  int argc = 3;
-  const char* argv[] = {"./srunX", "-c", "10"};
-
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "10",    "-m",
+                        "200M",    "-w", "102G",    "task", "arg1",  "arg2"};
   OptParse parser;
 
-  SLURMX_INFO("cpu input:{}", argv[2]);
+  SLURMX_INFO("cpu input:{}", argv[10]);
   OptParse::AllocatableResource allocatableResource;
   parser.Parse(argc, const_cast<char**>(argv));
   parser.GetAllocatableResource(allocatableResource);
 
-  EXPECT_EQ(allocatableResource.cpu_core_limit, (uint64_t)atoi(argv[2]));
+  EXPECT_EQ(allocatableResource.cpu_core_limit, (uint64_t)atoi(argv[10]));
 }
 
 TEST(SrunX, OptTest_C_Zero) {
-  int argc = 3;
-  const char* argv[] = {"./srunX", "-c", "0"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "0",     "-m",
+                        "200M",    "-w", "102G",    "task", "arg1",  "arg2"};
 
   OptParse parser;
 
-  SLURMX_INFO("cpu input:{}", argv[2]);
+  SLURMX_INFO("cpu input:{}", argv[10]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseZeroErr);
 }
 
 TEST(SrunX, OptTest_C_negative) {
-  int argc = 3;
-
-  const char* argv[] = {"./srunX", "-c", "-1"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "-1",    "-m",
+                        "200M",    "-w", "102G",    "task", "arg1",  "arg2"};
 
   OptParse parser;
 
-  SLURMX_INFO("cpu input:{}", argv[2]);
+  SLURMX_INFO("cpu input:{}", argv[10]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseFailed);
 }
 
 TEST(SrunX, OptTest_C_decimal) {
-  int argc = 3;
-
-  const char* argv[] = {"./srunX", "-c", "0.5"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "0.5",   "-m",
+                        "200M",    "-w", "102G",    "task", "arg1",  "arg2"};
 
   OptParse parser;
 
-  SLURMX_INFO("cpu input:{}", argv[2]);
+  SLURMX_INFO("cpu input:{}", argv[10]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseFailed);
 }
 
 TEST(SrunX, OptTest_C_errortype1) {
-  int argc = 3;
-
-  const char* argv[] = {"./srunX", "-c", "2m"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "2m",    "-m",
+                        "200M",    "-w", "102G",    "task", "arg1",  "arg2"};
 
   OptParse parser;
 
-  SLURMX_INFO("cpu input:{}", argv[2]);
+  SLURMX_INFO("cpu input:{}", argv[10]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseFailed);
 }
 
 TEST(SrunX, OptTest_C_errortype2) {
-  int argc = 3;
-
-  const char* argv[] = {"./srunX", "-c", "m"};
-
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "m",     "-m",
+                        "200M",    "-w", "102G",    "task", "arg1",  "arg2"};
   OptParse parser;
 
-  SLURMX_INFO("cpu input:{}", argv[2]);
+  SLURMX_INFO("cpu input:{}", argv[10]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseFailed);
 }
 
 TEST(SrunX, OptTest_C_errortype3) {
-  int argc = 3;
-
-  const char* argv[] = {"./srunX", "-c", "0M1"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "0M1",   "-m",
+                        "200M",    "-w", "102G",    "task", "arg1",  "arg2"};
 
   OptParse parser;
 
-  SLURMX_INFO("cpu input:{}", argv[2]);
+  SLURMX_INFO("cpu input:{}", argv[10]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseFailed);
 }
 
 TEST(SrunX, OptTest_Memory_range) {
-  int argc = 3;
-  const char* argv[] = {"./srunX", "-m", "18446744073709551615m"};
+  int argc = 18;
+  const char* argv[] = {"./srunX",
+                        "-s",
+                        "0.0.0.0",
+                        "-p",
+                        "50051",
+                        "-S",
+                        "0.0.0.0",
+                        "-P",
+                        "50052",
+                        "-c",
+                        "10",
+                        "-m",
+                        "18446744073709551615m",
+                        "-w",
+                        "102G",
+                        "task",
+                        "arg1",
+                        "arg2"};
 
   OptParse parser;
 
-  SLURMX_INFO("memory input:{}", argv[2]);
+  SLURMX_INFO("memory input:{}", argv[12]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseRangeErr);
 }
 
 TEST(SrunX, OptTest_Memory_true_k) {
-  int argc = 3;
-  const char* argv[] = {"./srunX", "-m", "128"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "10",    "-m",
+                        "128",     "-w", "102G",    "task", "arg1",  "arg2"};
 
   OptParse parser;
 
-  SLURMX_INFO("memory input:{}", argv[2]);
+  SLURMX_INFO("memory input:{}", argv[12]);
   OptParse::AllocatableResource allocatableResource;
   parser.Parse(argc, const_cast<char**>(argv));
   parser.GetAllocatableResource(allocatableResource);
@@ -120,12 +146,14 @@ TEST(SrunX, OptTest_Memory_true_k) {
 }
 
 TEST(SrunX, OptTest_Memory_true_m) {
-  int argc = 3;
-  const char* argv[] = {"./srunX", "-m", "128m"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "10",    "-m",
+                        "128m",    "-w", "102G",    "task", "arg1",  "arg2"};
 
   OptParse parser;
 
-  SLURMX_INFO("memory input:{}", argv[2]);
+  SLURMX_INFO("memory input:{}", argv[12]);
   OptParse::AllocatableResource allocatableResource;
   parser.Parse(argc, const_cast<char**>(argv));
   parser.GetAllocatableResource(allocatableResource);
@@ -133,8 +161,10 @@ TEST(SrunX, OptTest_Memory_true_m) {
 }
 
 TEST(SrunX, OptTest_Memory_true_g) {
-  int argc = 3;
-  const char* argv[] = {"./srunX", "-m", "128g"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "10",    "-m",
+                        "128g",    "-w", "102G",    "task", "arg1",  "arg2"};
 
   OptParse parser;
 
@@ -146,31 +176,36 @@ TEST(SrunX, OptTest_Memory_true_g) {
 }
 
 TEST(SrunX, OptTest_Memory_zero) {
-  int argc = 3;
-  const char* argv[] = {"./srunX", "-m", "0"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "10",    "-m",
+                        "0",       "-w", "102G",    "task", "arg1",  "arg2"};
 
   OptParse parser;
 
-  SLURMX_INFO("memory input:{}", argv[2]);
+  SLURMX_INFO("memory input:{}", argv[12]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseZeroErr);
 }
 
 TEST(SrunX, OptTest_Memory_errortype1) {
-  int argc = 3;
-  const char* argv[] = {"./srunX", "-m", "m12"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "10",    "-m",
+                        "m12",     "-w", "102G",    "task", "arg1",  "arg2"};
 
   OptParse parser;
 
-  SLURMX_INFO("memory input:{}", argv[2]);
+  SLURMX_INFO("memory input:{}", argv[12]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseTypeErr);
 }
 
 TEST(SrunX, OptTest_Memory_errortype2) {
-  int argc = 3;
-
-  const char* argv[] = {"./srunX", "-m", "2.5m"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "10",    "-m",
+                        "2.5m",    "-w", "102G",    "task", "arg1",  "arg2"};
 
   OptParse parser;
 
@@ -179,104 +214,118 @@ TEST(SrunX, OptTest_Memory_errortype2) {
             SlurmxErr::kOptParseTypeErr);
 }
 TEST(SrunX, OptTest_Memory_errortype4) {
-  int argc = 3;
-
-  const char* argv[] = {"./srunX", "-m", "125mm"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "10",    "-m",
+                        "128mm",   "-w", "102G",    "task", "arg1",  "arg2"};
 
   OptParse parser;
 
-  SLURMX_INFO("memory input:{}", argv[2]);
+  SLURMX_INFO("memory input:{}", argv[12]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseTypeErr);
 }
 TEST(SrunX, OptTest_Memory_errortype5) {
-  int argc = 3;
-
-  const char* argv[] = {"./srunX", "-m", "125p"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "10",    "-m",
+                        "128y",    "-w", "102G",    "task", "arg1",  "arg2"};
 
   OptParse parser;
 
-  SLURMX_INFO("memory input:{}", argv[2]);
+  SLURMX_INFO("memory input:{}", argv[12]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseTypeErr);
 }
 
 TEST(SrunX, OptTest_Task_true) {
-  int argc = 3;
-  const char* argv[] = {"./srunX", "task"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",   "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",   "10",    "-m",
+                        "128m",    "-w", "102G",    "task", "arg1",  "arg2"};
 
   OptParse parser;
   OptParse::TaskInfo task;
   parser.Parse(argc, const_cast<char**>(argv));
   parser.GetTaskInfo(task);
-  SLURMX_INFO("task input:{}", argv[1]);
-  ASSERT_EQ(task.executive_path, argv[1]);
+  SLURMX_INFO("task input:{}", argv[15]);
+  ASSERT_EQ(task.executive_path, argv[15]);
 }
 
 TEST(SrunX, OptTest_Task_errortype1) {
-  int argc = 3;
-  const char* argv[] = {"./srunX", "task."};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",    "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",    "10",    "-m",
+                        "128m",    "-w", "102G",    "task.", "arg1",  "arg2"};
 
   OptParse parser;
   OptParse::TaskInfo task;
-  SLURMX_INFO("task input:{}", argv[1]);
+  SLURMX_INFO("task input:{}", argv[15]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseTypeErr);
 }
 
 TEST(SrunX, OptTest_Task_errortype2) {
-  int argc = 3;
-  const char* argv[] = {"./srunX", "task-"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",    "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",    "10",    "-m",
+                        "128m",    "-w", "102G",    "task-", "arg1",  "arg2"};
 
   OptParse parser;
   OptParse::TaskInfo task;
-  SLURMX_INFO("task input:{}", argv[1]);
+  SLURMX_INFO("task input:{}", argv[15]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseTypeErr);
 }
 
 TEST(SrunX, OptTest_Task_errortype3) {
-  int argc = 3;
-  const char* argv[] = {"./srunX", "task/"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",    "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",    "10",    "-m",
+                        "128m",    "-w", "102G",    "task/", "arg1",  "arg2"};
 
   OptParse parser;
   OptParse::TaskInfo task;
-  SLURMX_INFO("task input:{}", argv[1]);
+  SLURMX_INFO("task input:{}", argv[15]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseTypeErr);
 }
 
 TEST(SrunX, OptTest_Task_errortype4) {
-  int argc = 3;
-
-  const char* argv[] = {"./srunX", "task\\"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",     "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",     "10",    "-m",
+                        "128m",    "-w", "102G",    "task\\", "arg1",  "arg2"};
 
   OptParse parser;
   OptParse::TaskInfo task;
-  SLURMX_INFO("task input:{}", argv[1]);
+  SLURMX_INFO("task input:{}", argv[15]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseTypeErr);
 }
 
 TEST(SrunX, OptTest_Task_errortype5) {
-  int argc = 3;
-
-  const char* argv[] = {"./srunX", "task|"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",    "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",    "10",    "-m",
+                        "128m",    "-w", "102G",    "task|", "arg1",  "arg2"};
 
   OptParse parser;
   OptParse::TaskInfo task;
-  SLURMX_INFO("task input:{}", argv[1]);
+  SLURMX_INFO("task input:{}", argv[15]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseTypeErr);
 }
 
 TEST(SrunX, OptTest_Task_errortype6) {
-  int argc = 3;
-  const char* argv[] = {"./srunX", "task*"};
+  int argc = 18;
+  const char* argv[] = {"./srunX", "-s", "0.0.0.0", "-p",    "50051", "-S",
+                        "0.0.0.0", "-P", "50052",   "-c",    "10",    "-m",
+                        "128m",    "-w", "102G",    "task*", "arg1",  "arg2"};
 
   OptParse parser;
   OptParse::TaskInfo task;
-  SLURMX_INFO("task input:{}", argv[1]);
+  SLURMX_INFO("task input:{}", argv[15]);
   ASSERT_EQ(parser.Parse(argc, const_cast<char**>(argv)),
             SlurmxErr::kOptParseTypeErr);
 }
