@@ -77,8 +77,7 @@ SlurmxErr OptParse::MemoryParseClient(std::string str,
         SLURMX_DEBUG("{} out of the range!", str);
         return SlurmxErr::kOptParseRangeErr;
       }
-      nmemory_byte =
-          (uint64_t)std::stoi(nmemory.substr(0, nmemory.length())) * 1024;
+      nmemory_byte = (uint64_t)std::stoi(nmemory) * 1024;
       if (nmemory_byte == 0) {
         SLURMX_DEBUG("{} can not be zero!", str);
         return SlurmxErr::kOptParseZeroErr;

@@ -24,7 +24,6 @@ SlurmxErr SrunXClient::Init(int argc, char* argv[]) {
   m_stub_ctld_ = SlurmCtlXd::NewStub(channel_ctld);
 
   m_stream_ = m_stub_->SrunXStream(&m_context_);
-  m_fg_ = 0;
   return SlurmxErr::kOk;
 }
 

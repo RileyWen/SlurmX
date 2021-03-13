@@ -405,9 +405,6 @@ class SrunCtldServiceImpl_No_Token_Reply final : public SlurmCtlXd::Service {
   }
 };
 
-std::atomic_int SrunXClient::m_fg_;
-std::condition_variable SrunXClient::m_cv_;
-std::mutex SrunXClient::m_cv_m_;
 std::unique_ptr<grpc::ClientReaderWriter<SrunXStreamRequest, SrunXStreamReply>>
     SrunXClient::m_stream_;
 
