@@ -1,17 +1,10 @@
 #include "SrunXClient.h"
 
-SlurmxErr SrunXClient::Init(int argc, char* argv[]) {
-  SlurmxErr err_parse;
-  err_parse = parser.Parse(argc, argv);
-  if (err_parse != SlurmxErr::kOk) {
-    return err_parse;
-  }
-  parser.GetTaskInfo(this->taskinfo);
-  parser.GetAllocatableResource(this->allocatableResource);
-
-  channel = grpc::CreateChannel(parser.Xdserver_addr_port,
+SlurmxErr SrunXClient::Init(std::string Xdserver_addr_port,
+                            std::string CtlXdserver_addr_port) {
+  channel = grpc::CreateChannel(Xdserver_addr_port,
                                 grpc::InsecureChannelCredentials());
-  channel_ctld = grpc::CreateChannel(parser.CtlXdserver_addr_port,
+  channel_ctld = grpc::CreateChannel(CtlXdserver_addr_port,
                                      grpc::InsecureChannelCredentials());
   using namespace std::chrono_literals;
   bool ok;

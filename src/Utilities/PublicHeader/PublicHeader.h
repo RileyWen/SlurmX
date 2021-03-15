@@ -25,19 +25,6 @@ enum class SlurmxErr : uint16_t {
   kRpcFailed,
   kNoTokenReply,
   kNewTaskFailed,
-  kOptParseTypeErr,
-  kOptParseRangeErr,
-  kOptParseZeroErr,
-  kOptParseFailed,
-  kNoAddress,
-  kNoPort,
-  kAddressInvalid,
-  kPortInvalid,
-  kNoCpu,
-  kNoMem,
-  kNoMemSw,
-  kNoTask,
-  kOptHelp,
   __ERR_SIZE
 };
 
@@ -63,20 +50,6 @@ constexpr std::array<std::string_view, uint16_t(SlurmxErr::__ERR_SIZE)>
         "PRC Failed",
         "Can not get token from SlurmCtlXd",
         "New Task create failed",
-        "The parameter has wrong type",
-        "The parameter has wrong range",
-        "The parameter is zero",
-        "Can not parse the parameter",
-        "Address must be specified",
-        "Port must be specified",
-        "Address is invalid",
-        "Port is invalid",
-        "CPU must be specified",
-        "Memory must be specified",
-        "Memory-swap must be specified",
-        "task must be specified",
-        "Return with option help",
-
 
 };
 

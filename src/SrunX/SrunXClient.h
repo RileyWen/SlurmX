@@ -9,11 +9,11 @@
 #include <cxxopts.hpp>
 #include <iostream>
 #include <memory>
+#include <regex>
 #include <string>
 #include <thread>
 #include <vector>
 
-#include "../src/SrunX/OptParse.h"
 #include "PublicHeader.h"
 #include "protos/slurmx.grpc.pb.h"
 
@@ -33,14 +33,10 @@ using slurmx_grpc::TaskExitStatus;
 
 class SrunXClient {
  public:
-  //  SrunXClient(const std::shared_ptr<Channel>& channel,
-  //              const std::shared_ptr<Channel>& channel_ctld)
-  //      : m_stub_(SlurmXd::NewStub(channel)),
-  //        m_stub_ctld_(SlurmCtlXd::NewStub(channel_ctld)) {}
-
   SrunXClient() = default;
 
-  SlurmxErr Init(int argc, char* argv[]);
+  SlurmxErr Init(std::string Xdserver_addr_port,
+                 std::string CtlXdserver_addr_port);
 
   SlurmxErr Run();
 
@@ -53,9 +49,19 @@ class SrunXClient {
     FINISH
   };
 
-  OptParse parser;
-  OptParse::AllocatableResource allocatableResource;
-  OptParse::TaskInfo taskinfo;
+  struct AllocatableResource {
+    uint64_t cpu_core_limit;
+    uint64_t memory_limit_bytes;
+    uint64_t memory_sw_limit_bytes;
+  };
+
+  struct TaskInfo {
+    std::string executive_path;
+    std::vector<std::string> arguments;
+    uuid resource_uuid;
+  };
+  AllocatableResource allocatableResource;
+  TaskInfo taskinfo;
 
  private:
   static void SendSignal(int signo);
@@ -65,7 +71,6 @@ class SrunXClient {
       grpc::ClientReaderWriter<SrunXStreamRequest, SrunXStreamReply>>
       m_stream_;
   SlurmxErr err;
-
   ClientContext m_context_;
   SrunX_State state;
 
