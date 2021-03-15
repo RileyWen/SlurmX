@@ -37,8 +37,7 @@ class CtlXdClient {
    */
   SlurmxErr Connect(const std::string& server_address);
 
-  SlurmxErr RegisterOnCtlXd(const resource_t& resource,
-                            const std::string& my_addr_port);
+  SlurmxErr RegisterOnCtlXd(const resource_t& resource, uint32_t my_port);
 
   const uuid& GetNodeUuid() const { return m_node_uuid_; };
 

@@ -10,6 +10,7 @@
 #include <sys/wait.h>
 
 #include <atomic>
+#include <boost/algorithm/string.hpp>
 #include <forward_list>
 #include <functional>
 #include <future>

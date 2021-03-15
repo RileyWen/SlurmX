@@ -12,6 +12,7 @@ target_link_libraries(slurmctlxd
         Utility_PublicHeader
         proto
         Boost::boost
+        Boost::thread
         libevent::core
         cxxopts::cxxopts
         Threads::Threads

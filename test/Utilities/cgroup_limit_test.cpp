@@ -101,13 +101,14 @@ TEST(cgroup, cpu_core_limit) {
   } else {
     const std::string cg_path{"riley_cgroup"};
 
-    CgroupManager& cm = CgroupManager::getInstance();
-    cm.create_or_open(cg_path, ALL_CONTROLLER_FLAG, NO_CONTROLLER_FLAG, false);
+    Cgroup::CgroupManager& cm = Cgroup::CgroupManager::getInstance();
+    cm.create_or_open(cg_path, Cgroup::ALL_CONTROLLER_FLAG,
+                      Cgroup::NO_CONTROLLER_FLAG, false);
 
     auto cg_info_wrapper = cm.find_cgroup(cg_path);
     auto& cg_struct = *(cg_info_wrapper.value().get().cgroup_ptr);
 
-    Internal::CgroupManipulator cg_limit(cg_struct);
+    Cgroup::Internal::CgroupManipulator cg_limit(cg_struct);
 
     cg_limit.set_cpu_core_limit(2);
 
@@ -178,13 +179,14 @@ TEST(cgroup, memory_limit) {
 
     const std::string cg_path{"riley_cgroup"};
 
-    CgroupManager& cm = CgroupManager::getInstance();
-    cm.create_or_open(cg_path, ALL_CONTROLLER_FLAG, NO_CONTROLLER_FLAG, false);
+    Cgroup::CgroupManager& cm = Cgroup::CgroupManager::getInstance();
+    cm.create_or_open(cg_path, Cgroup::ALL_CONTROLLER_FLAG,
+                      Cgroup::NO_CONTROLLER_FLAG, false);
 
     auto cg_info_wrapper = cm.find_cgroup(cg_path);
     auto& cg_struct = *(cg_info_wrapper.value().get().cgroup_ptr);
 
-    Internal::CgroupManipulator cg_limit(cg_struct);
+    Cgroup::Internal::CgroupManipulator cg_limit(cg_struct);
     cg_limit.set_memory_limit_bytes(10 * MB);
     cg_limit.set_memory_sw_limit_bytes(10 * MB);
 

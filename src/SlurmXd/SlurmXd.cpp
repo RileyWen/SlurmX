@@ -106,15 +106,16 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  err =
-      g_ctlxd_client->RegisterOnCtlXd(resource_in_cmd, server_listen_addr_port);
-  if (err != SlurmxErr::kOk) {
-    SLURMX_ERROR("Exit due to registration error...");
-    return 1;
-  }
-
   g_server =
       std::make_unique<Xd::XdServer>(server_listen_addr_port, resource_in_cmd);
+
+  err = g_ctlxd_client->RegisterOnCtlXd(resource_in_cmd, std::stoul(port));
+  if (err != SlurmxErr::kOk) {
+    SLURMX_ERROR("Exit due to registration error... Shutting down server...");
+    g_server->Shutdown();
+    g_server->Wait();
+    return 1;
+  }
 
   g_server->Wait();
 

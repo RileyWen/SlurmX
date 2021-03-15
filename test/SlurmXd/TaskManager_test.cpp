@@ -148,4 +148,45 @@ TEST(TaskManager, SigintTermination) {
   RemoveTestProg(test_prog_path);
 }
 
+TEST(TaskManager, LsOutput) {
+  spdlog::set_level(spdlog::level::trace);
+  SlurmxErr err;
+
+  auto output_callback = [&](std::string&& buf) {
+    SLURMX_DEBUG("Output from callback: {}", buf);
+  };
+
+  auto finish_callback = [&](bool is_terminated_by_signal, int value) {
+    SLURMX_DEBUG("Task ended. Normal exit: {}. Value: {}",
+                 !is_terminated_by_signal, value);
+
+    // Kill by SIGINT
+    EXPECT_EQ(is_terminated_by_signal, false);
+
+    // signum of SIGINT is 2
+    EXPECT_EQ(value, 0);
+  };
+
+  TaskManager& tm = TaskManager::GetInstance();
+  TaskInitInfo info_1{
+      "RileyTest",           "/bin/ls",       {"/"},
+      {.cpu_core_limit = 2}, output_callback, finish_callback,
+  };
+
+  err = tm.AddTaskAsync(std::move(info_1));
+  EXPECT_EQ(err, SlurmxErr::kOk);
+
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(2s);
+
+  // Emulate ctrl+C.
+  // This call will trigger the SIGINT handler in TaskManager.
+  // We expect that all task will be terminated.
+  kill(getpid(), SIGINT);
+
+  tm.Wait();
+
+  SLURMX_TRACE("Exiting test...");
+}
+
 // Todo: Test TaskManager from grpc.

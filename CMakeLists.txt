@@ -10,7 +10,7 @@ set(THIRD_PARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
 
 find_package(Threads REQUIRED)
 find_package(fmt 7.1.3 REQUIRED HINTS ${THIRD_PARTY_DIR}/fmt)
-find_package(Boost 1.71 REQUIRED)
+find_package(Boost 1.71 REQUIRED COMPONENTS thread)
 find_package(GTest CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/google-test)
 
 find_package(spdlog 1.8.2 REQUIRED HINTS ${THIRD_PARTY_DIR}/spdlog)

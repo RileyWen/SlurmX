@@ -100,6 +100,7 @@ Status SlurmXdServiceImpl::SrunXStream(
               // (stream->Write() just return false rather than throwing an
               // exception).
               auto output_callback = [stream](std::string &&buf) {
+                SLURMX_TRACE("Output Callback called. buf: {}", buf);
                 slurmx_grpc::SrunXStreamReply reply;
                 reply.set_type(
                     slurmx_grpc::SrunXStreamReply_Type_IoRedirection);
@@ -109,12 +110,16 @@ Status SlurmXdServiceImpl::SrunXStream(
                 *reply_buf = std::move(buf);
 
                 stream->Write(reply);
+
+                SLURMX_TRACE("stream->Write() done.");
               };
 
               // Call stream->WriteLast() and cause the grpc thread
               // that owns 'stream' to stop the connection handling and quit.
               auto finish_callback = [stream](bool is_terminated_by_signal,
                                               int value) {
+                SLURMX_TRACE("Finish Callback called. signaled: {}, value: {}",
+                             is_terminated_by_signal, value);
                 slurmx_grpc::SrunXStreamReply reply;
                 reply.set_type(slurmx_grpc::SrunXStreamReply_Type_ExitStatus);
 
@@ -127,6 +132,7 @@ Status SlurmXdServiceImpl::SrunXStream(
                 stat->set_value(value);
 
                 stream->WriteLast(reply, grpc::WriteOptions());
+                SLURMX_TRACE("WriteLast is called.");
               };
 
               TaskInitInfo task_info{

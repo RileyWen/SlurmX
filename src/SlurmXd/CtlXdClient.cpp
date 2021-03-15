@@ -7,10 +7,10 @@
 namespace Xd {
 
 SlurmxErr CtlXdClient::RegisterOnCtlXd(const resource_t& resource,
-                                       const std::string& my_addr_port) {
+                                       uint32_t my_port) {
   SlurmXdRegisterRequest req;
 
-  *req.mutable_address_port() = my_addr_port;
+  req.set_port(my_port);
 
   AllocatableResource* resource_total = req.mutable_resource_total();
   resource_total->set_cpu_core_limit(resource.cpu_count);

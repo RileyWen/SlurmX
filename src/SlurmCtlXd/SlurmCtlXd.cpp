@@ -6,7 +6,6 @@
 #include <mutex>
 #include <thread>
 
-#include "ConcurrentResourceMgr.h"
 #include "CtlXdGrpcServer.h"
 #include "PublicHeader.h"
 

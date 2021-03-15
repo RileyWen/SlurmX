@@ -158,6 +158,7 @@ void TaskManager::ev_sigchld_cb_(evutil_socket_t sig, short events,
       this_->m_cg_mgr_.destroy(CgroupStrByPID(pid));
 
       if (this_->m_is_ending_now_ && this_->m_pid_to_name_map_.empty()) {
+        SLURMX_TRACE("ev_sigchld_cb_ has reaped all child. Stop event loop.");
         struct timeval delay = {0, 0};
         event_base_loopexit(this_->m_ev_base_, &delay);
       }
@@ -206,9 +207,6 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
 
     SLURMX_DEBUG("Subprocess start running....");
 
-    dup2(anon_pipe.GetChildEndFd(), 1);  // stdout -> pipe
-    dup2(anon_pipe.GetChildEndFd(), 2);  // stderr -> pipe
-
     // We use u_char here, since the size of u_char is standard-defined.
     u_char val;
 
@@ -219,9 +217,6 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
     // Use abort to avoid the wrong call to destructor of CgroupManager, which
     // deletes all cgroup in system.
     if (val == E_PIPE_SUICIDE) abort();
-
-    // Release the file descriptor before calling exec()
-    anon_pipe.CloseChildEnd();
 
     // Set pgid to the root process of task.
     setpgid(0, 0);
@@ -234,8 +229,21 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
     }
     argv.push_back(nullptr);
 
+    SLURMX_TRACE("execv: {} {}", task_init_info.executive_path,
+                 boost::algorithm::join(task_init_info.arguments, ", "));
+
+    dup2(anon_pipe.GetChildEndFd(), 1);  // stdout -> pipe
+    dup2(anon_pipe.GetChildEndFd(), 2);  // stderr -> pipe
+
+    // Release the file descriptor before calling exec()
+    anon_pipe.CloseChildEnd();
+
     execv(task_init_info.executive_path.c_str(),
           const_cast<char* const*>(argv.data()));
+
+    // Error occurred since execv returned.
+    SLURMX_ERROR("execv failed: {}", strerror(errno));
+    abort();
   } else {  // Parent proc
     SLURMX_TRACE("Child proc: pid {}", child_pid);
 
@@ -297,6 +305,8 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
       return;
     }
 
+    SLURMX_TRACE("New task {} is ready. Asking subprocess to execv...",
+                 new_task->init_info.name);
     // Tell subprocess that the parent process is ready. Then the
     // subprocess should continue to exec().
     pipe_uchar_val = E_PIPE_OK;

@@ -59,6 +59,8 @@ class XdServer {
  public:
   XdServer(const std::string &listen_address, const resource_t &total_resource);
 
+  inline void Shutdown() { m_server_->Shutdown(); }
+
   inline void Wait() { m_server_->Wait(); }
 
   SlurmxErr GrantResourceToken(const uuid &resource_uuid,
