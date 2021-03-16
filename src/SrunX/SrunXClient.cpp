@@ -49,7 +49,7 @@ SlurmxErr SrunXClient::Run() {
             std::copy(resourceallocreply.resource_uuid().begin(),
                       resourceallocreply.resource_uuid().end(),
                       resource_uuid.data);
-            SLURMX_DEBUG("Srunxclient: Get the token {} from the slurmxctld.",
+            SLURMX_DEBUG("Get the token {} from the slurmxctld.",
                          to_string(resource_uuid));
             this->taskinfo.resource_uuid = resource_uuid;
             m_state_ = SrunX_State::NEGOTIATION_TO_SLURMXD;
@@ -111,8 +111,13 @@ SlurmxErr SrunXClient::Run() {
             fmt::print("{}", reply.io_redirection().buf());
           } else if (reply.type() ==
                      slurmx_grpc::SrunXStreamReply_Type_ExitStatus) {
-            SLURMX_DEBUG("Srunxclient: Slurmxd exit for signal {}.",
-                         reply.task_exit_status().reason());
+            if(reply.task_exit_status().reason()==slurmx_grpc::TaskExitStatus::Signal){
+              SLURMX_DEBUG("Task terminated with signum : {}",
+                           reply.task_exit_status().value());
+            } else{
+              SLURMX_DEBUG("Task finished with exit code: {}",
+                           reply.task_exit_status().value());
+            }
             //notify wait thread, prevent from main thread block.
             std::unique_lock<std::mutex> lk(m_cv_m_);
             m_exit_fg_ = 1;
@@ -146,7 +151,7 @@ SlurmxErr SrunXClient::Run() {
 }
 
 void SrunXClient::m_modify_signal_flag_(int signo) {
-  SLURMX_TRACE("Srunxclient: Press down 'Ctrl+C'");
+  SLURMX_TRACE("Press down 'Ctrl+C'");
   std::unique_lock<std::mutex> lk(m_cv_m_);
   m_signal_fg_ = 1;
   m_cv_.notify_all();
