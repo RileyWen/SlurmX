@@ -4,6 +4,9 @@ SlurmxErr SrunXClient::Init(std::string Xdserver_addr_port,
                             std::string CtlXdserver_addr_port) {
   // catch Ctrl+C signal and send the signal to slurmxd server
   signal(SIGINT, m_modify_signal_flag_);
+  // create a thread to listening Ctrl+C signal
+  m_client_wait_thread_ =
+      std::thread(&SrunXClient::m_client_wait_func_, this);
   m_channel_ = grpc::CreateChannel(Xdserver_addr_port,
                                    grpc::InsecureChannelCredentials());
   m_channel_ctld_ = grpc::CreateChannel(CtlXdserver_addr_port,
@@ -100,10 +103,6 @@ SlurmxErr SrunXClient::Run() {
 
       case SrunX_State::WAIT_FOR_REPLY_OR_SEND_SIG: {
         SrunXStreamReply reply;
-        // create a thread to listening Ctrl+C signal
-        m_client_wait_thread_ =
-            std::thread(&SrunXClient::m_client_wait_func_, this);
-        m_client_wait_thread_.detach();
         bool ok;
         ok = m_stream_->Read(&reply);
         if (ok) {
@@ -171,6 +170,7 @@ void SrunXClient::m_client_wait_func_() {
 }
 
 void SrunXClient::Wait() {
+  m_client_wait_thread_.join();
   m_stream_->WritesDone();
   m_stream_->Finish();
 }
