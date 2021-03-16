@@ -73,7 +73,7 @@ Status SlurmXdServiceImpl::SrunXStream(
               result->set_ok(false);
               result->set_reason("Resource uuid is invalid");
 
-              stream->WriteLast(reply, grpc::WriteOptions());
+              stream->Write(reply, grpc::WriteOptions());
 
               state = StreamState::kFinish;
             } else {
@@ -114,10 +114,11 @@ Status SlurmXdServiceImpl::SrunXStream(
                 SLURMX_TRACE("stream->Write() done.");
               };
 
-              // Call stream->WriteLast() and cause the grpc thread
+              // Call stream->Write() and cause the grpc thread
               // that owns 'stream' to stop the connection handling and quit.
-              auto finish_callback = [stream](bool is_terminated_by_signal,
-                                              int value) {
+              auto finish_callback = [stream /*, context*/](
+                                         bool is_terminated_by_signal,
+                                         int value) {
                 SLURMX_TRACE("Finish Callback called. signaled: {}, value: {}",
                              is_terminated_by_signal, value);
                 slurmx_grpc::SrunXStreamReply reply;
@@ -131,8 +132,21 @@ Status SlurmXdServiceImpl::SrunXStream(
                         : slurmx_grpc::TaskExitStatus_ExitReason_Normal);
                 stat->set_value(value);
 
-                stream->WriteLast(reply, grpc::WriteOptions());
-                SLURMX_TRACE("WriteLast is called.");
+                // stream->WriteLast() shall not be used here.
+                // On the server side, WriteLast cause all the Write() to be
+                // blocked until the this service handler returned.
+                // WriteLast() should actually be called on the client side.
+                stream->Write(reply, grpc::WriteOptions());
+
+                // If this line is appended, when SrunX has no response to
+                // WriteLast, the connection can stop anyway. Otherwise, the
+                // connection will stop (i.e. stream->Read() returns false) only
+                // if 1. SrunX calls stream->WriteLast() or 2. the underlying
+                // channel is broken. However, the 2 situations is all
+                // situations that we will meet, so the following line should
+                // not be added except when debugging.
+                //
+                // context->TryCancel();
               };
 
               TaskInitInfo task_info{
@@ -173,7 +187,7 @@ Status SlurmXdServiceImpl::SrunXStream(
                   result->set_reason(
                       fmt::format("Unknown failure. Code: ", uint16_t(err)));
 
-                stream->WriteLast(reply, grpc::WriteOptions());
+                stream->Write(reply, grpc::WriteOptions());
                 state = StreamState::kFinish;
               }
             }
@@ -206,8 +220,9 @@ Status SlurmXdServiceImpl::SrunXStream(
           }
         } else {
           // If the task ends, the callback which handles the end of a task in
-          // TaskManager will call stream->WriteLast() to end the stream. Then
-          // the stream->Read() returns with ok = false.
+          // TaskManager will send the task end message to client. The client
+          // will call stream->Write() to end the stream. Then the
+          // stream->Read() returns with ok = false.
 
           state = StreamState::kFinish;
         }
