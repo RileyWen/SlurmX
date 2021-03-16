@@ -4,6 +4,11 @@
 std::unique_ptr<grpc::ClientReaderWriter<SrunXStreamRequest, SrunXStreamReply>>
     SrunXClient::m_stream_;
 int main(int argc, char **argv) {
+
+  std::thread shutdown([]() {
+    sleep(3);
+    kill(getpid(), SIGINT);
+  });
 #ifndef NDEBUG
   spdlog::set_level(spdlog::level::trace);
 #endif
@@ -23,13 +28,13 @@ int main(int argc, char **argv) {
       cxxopts::value<std::string>())("w,memory_swap",
                                      "limiting the swap memory usage of task",
                                      cxxopts::value<std::string>())(
-      "t,task", "task", cxxopts::value<std::string>())("help", "Print help")(
+      "t,task_executive_path", "task executive_path", cxxopts::value<std::string>())("help", "Print help")(
       "positional",
       "Positional arguments: these are the arguments that are entered "
       "without an option",
       cxxopts::value<std::vector<std::string>>()->default_value(" "));
 
-  options.parse_positional({"task", "positional"});
+  options.parse_positional({"task_executive_path", "positional"});
   auto result = options.parse(argc, argv);
   if (result.count("help")) {
     SLURMX_INFO("\n{}", options.help());
@@ -51,8 +56,8 @@ int main(int argc, char **argv) {
     SLURMX_DEBUG("memory_swap must be specified.\n{}", options.help());
     return 1;
   }
-  if (result.count("task") == 0) {
-    SLURMX_DEBUG("task must be specified.\n{}", options.help());
+  if (result.count("task_executive_path") == 0) {
+    SLURMX_DEBUG("task executive path must be specified.\n{}", options.help());
     return 1;
   }
   if (result.count("Xdserver-address") == 0) {
@@ -144,16 +149,9 @@ int main(int argc, char **argv) {
   client.allocatableResource.memory_sw_limit_bytes =
       parameter_bytes_memory_swap;
 
-  std::regex rexecutive_path("^\\w*$");
-  std::string str = result["task"].as<std::string>();
-  if (std::regex_match(str, rexecutive_path)) {
-    client.taskinfo.executive_path = str;
-  } else {
-    SLURMX_DEBUG(
-        "Task name can only contain letters, numbers, and underscores!\n{}",
-        options.help());
-    return 1;
-  }
+  std::string str = result["task_executive_path"].as<std::string>();
+  client.taskinfo.executive_path = str;
+
   for (auto arg : result["positional"].as<std::vector<std::string>>()) {
     client.taskinfo.arguments.push_back(arg);
   }
@@ -203,6 +201,7 @@ int main(int argc, char **argv) {
   }
 
   err = client.Run();
+  shutdown.join();
   if (err != SlurmxErr::kOk) {
     SLURMX_ERROR("{}", SlurmxErrStr(err));
     return 1;

@@ -104,16 +104,27 @@ SlurmxErr SrunXClient::Run() {
       }
 
       case SrunX_State::WAIT_FOR_REPLY_OR_SEND_SIG: {
+        SLURMX_INFO("wait");
         signal(SIGINT, SendSignal);
         SrunXStreamReply reply;
-        while (m_stream_->Read(&reply)) {
+//        m_client_wait_thread_ =
+//            std::thread(&SrunXClient::m_client_wait_func_, this);
+//        signal(SIGINT, ModifySignalFlag);
+//        m_client_wait_thread_.detach();
+        bool ok;
+        ok = m_stream_->Read(&reply);
+        SLURMX_INFO("m_stream_ ok is {}",ok);
+        if (ok) {
+          SLURMX_INFO("reply type is : {}",reply.type());
           if (reply.type() == SrunXStreamReply::IoRedirection) {
             SLURMX_INFO("reply_buf:{}", reply.io_redirection().buf());
-          } else if (reply.type() == SrunXStreamReply::ExitStatus) {
+//            reply.clear_payload();
+          } else if (reply.type() == slurmx_grpc::SrunXStreamReply_Type_ExitStatus) {
             SLURMX_INFO("Srunxclient: Slurmxd exit for signal {}.",
                         reply.task_exit_status().reason());
+            SLURMX_INFO("12312");
             state = SrunX_State::FINISH;
-          } else {
+          } else if(reply.type()==slurmx_grpc::SrunXStreamReply_Type_NewTaskResult){
             if (reply.new_task_result().ok()) {
               SLURMX_INFO("New Task Success!");
             } else {
@@ -122,6 +133,9 @@ SlurmxErr SrunXClient::Run() {
               err = SlurmxErr::kNewTaskFailed;
             }
           }
+        } else{
+          SLURMX_INFO("stream broken!");
+          state = SrunX_State::FINISH;
         }
       } break;
 
@@ -132,6 +146,7 @@ SlurmxErr SrunXClient::Run() {
         return err;
 
       case SrunX_State::FINISH:
+        SLURMX_INFO("finish");
         m_stream_->WritesDone();
         status = m_stream_->Finish();
         return err;
@@ -141,7 +156,24 @@ SlurmxErr SrunXClient::Run() {
 
 void SrunXClient::SendSignal(int signo) {
   SrunXStreamRequest request;
+  SLURMX_INFO("Ctrl C");
   request.set_type(SrunXStreamRequest::Signal);
   request.set_signum(2);
   m_stream_->Write(request);
 }
+
+//void SrunXClient::ModifySignalFlag(int signo) {
+//  SLURMX_INFO("Srunxclient: Press down 'Ctrl+C'");
+//  std::unique_lock<std::mutex> lk(m_cv_m_);
+//  m_fg_=1;
+//  m_cv_.notify_all();
+//}
+//
+//void SrunXClient::m_client_wait_func_() {
+//  std::unique_lock<std::mutex> lk(m_cv_m_);
+//  m_cv_.wait(lk,[]{return m_fg_==1;});
+//  SrunXStreamRequest request;
+//  request.set_type(SrunXStreamRequest::Signal);
+//  request.set_signum(2);
+//  m_stream_->Write(request);
+//}

@@ -2,7 +2,7 @@ file(GLOB_RECURSE TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 
 add_executable(slurmx_test
         ${CMAKE_SOURCE_DIR}/src/SlurmXd/TaskManager.cpp
-        ${CMAKE_SOURCE_DIR}/src/SrunX/SrunXClient.cpp
+#        ${CMAKE_SOURCE_DIR}/src/SrunX/SrunXClient.cpp
         ${TEST_SRC})
 target_link_libraries(slurmx_test
         GTest::gtest

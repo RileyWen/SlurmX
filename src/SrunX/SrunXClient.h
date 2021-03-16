@@ -65,6 +65,10 @@ class SrunXClient {
 
  private:
   static void SendSignal(int signo);
+//  static void ModifySignalFlag(int signo);
+//  void m_client_wait_func_();
+
+
   std::unique_ptr<SlurmXd::Stub> m_stub_;
   std::unique_ptr<SlurmCtlXd::Stub> m_stub_ctld_;
   static std::unique_ptr<
@@ -73,6 +77,10 @@ class SrunXClient {
   SlurmxErr err;
   ClientContext m_context_;
   SrunX_State state;
+//  static std::atomic_int m_fg_;
+//  std::thread m_client_wait_thread_;
+//  static std::condition_variable m_cv_;
+//  static std::mutex m_cv_m_;
 
   std::shared_ptr<Channel> channel;
   std::shared_ptr<Channel> channel_ctld;
