@@ -162,7 +162,7 @@ Status SlurmXdServiceImpl::SrunXStream(
               };
 
               TaskInitInfo task_info{
-                  .name = std::move(task_name),
+                  .name = task_name,
                   .executive_path = request.task_info().executive_path(),
                   .arguments = arguments,
                   .cg_limit = cg_limit,
@@ -229,7 +229,14 @@ Status SlurmXdServiceImpl::SrunXStream(
             // If ctrl+C is pressed before the task ends, inform TaskManager
             // of the interrupt and wait for TaskManager to stop the Task.
 
-            TaskManager::GetInstance().Kill(task_name, request.signum());
+            SLURMX_TRACE("Receive signum {} from client. Killing task {}",
+                         request.signum(), task_name);
+
+            err = TaskManager::GetInstance().Kill(task_name, request.signum());
+            if (err != SlurmxErr::kOk) {
+              SLURMX_ERROR("Failed to kill task {}. Error: {}",
+                           SlurmxErrStr(err));
+            }
 
             // The state machine does not switch the state here.
             // We just use stream->Read() to wait for the task to end.

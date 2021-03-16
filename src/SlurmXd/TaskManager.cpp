@@ -242,7 +242,7 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
           const_cast<char* const*>(argv.data()));
 
     // Error occurred since execv returned.
-    SLURMX_ERROR("execv failed: {}", strerror(errno));
+    fmt::print("execv failed: {}", strerror(errno));
     abort();
   } else {  // Parent proc
     SLURMX_TRACE("Child proc: pid {}", child_pid);

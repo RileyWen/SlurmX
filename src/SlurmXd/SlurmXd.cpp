@@ -9,6 +9,7 @@
 #include "XdServer.h"
 
 int main(int argc, char** argv) {
+  // Todo: Check static level setting.
 #ifndef NDEBUG
   spdlog::set_level(spdlog::level::trace);
 #endif
@@ -105,6 +106,8 @@ int main(int argc, char** argv) {
     SLURMX_ERROR("Cannot connect to SlurmCtlXd.");
     return 1;
   }
+
+  // Todo: Set FD_CLOEXEC on stdin, stdout, stderr
 
   g_server =
       std::make_unique<Xd::XdServer>(server_listen_addr_port, resource_in_cmd);
