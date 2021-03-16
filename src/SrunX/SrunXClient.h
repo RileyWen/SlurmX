@@ -40,6 +40,8 @@ class SrunXClient {
 
   SlurmxErr Run();
 
+  void Wait();
+
   enum class SrunX_State {
     SEND_REQUIREMENT_TO_SLURMCTLXD = 0,
     NEGOTIATION_TO_SLURMXD,
@@ -64,24 +66,23 @@ class SrunXClient {
   TaskInfo taskinfo;
 
  private:
-  static void SendSignal(int signo);
-//  static void ModifySignalFlag(int signo);
-//  void m_client_wait_func_();
-
+  static void m_modify_signal_flag_(int signo);
+  void m_client_wait_func_();
 
   std::unique_ptr<SlurmXd::Stub> m_stub_;
   std::unique_ptr<SlurmCtlXd::Stub> m_stub_ctld_;
   static std::unique_ptr<
       grpc::ClientReaderWriter<SrunXStreamRequest, SrunXStreamReply>>
       m_stream_;
-  SlurmxErr err;
+  SlurmxErr m_err_;
   ClientContext m_context_;
-  SrunX_State state;
-//  static std::atomic_int m_fg_;
-//  std::thread m_client_wait_thread_;
-//  static std::condition_variable m_cv_;
-//  static std::mutex m_cv_m_;
+  SrunX_State m_state_;
+  std::thread m_client_wait_thread_;
+  static std::condition_variable m_cv_;
+  static std::mutex m_cv_m_;
+  static std::atomic_int m_signal_fg_;
+  static std::atomic_int m_exit_fg_;
 
-  std::shared_ptr<Channel> channel;
-  std::shared_ptr<Channel> channel_ctld;
+  std::shared_ptr<Channel> m_channel_;
+  std::shared_ptr<Channel> m_channel_ctld_;
 };
