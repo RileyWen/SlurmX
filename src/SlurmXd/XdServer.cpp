@@ -22,6 +22,10 @@ Status SlurmXdServiceImpl::SrunXStream(
   SrunXStreamRequest request;
   SrunXStreamReply reply;
 
+  // gRPC doesn't support parallel Write() on the same stream.
+  // Use mutex to guarantee serial Write() in SrunXStream.
+  std::mutex stream_w_mtx;
+
   // A task name is bound to one connection.
   std::string task_name;
 
@@ -73,7 +77,9 @@ Status SlurmXdServiceImpl::SrunXStream(
               result->set_ok(false);
               result->set_reason("Resource uuid is invalid");
 
+              stream_w_mtx.lock();
               stream->Write(reply, grpc::WriteOptions());
+              stream_w_mtx.unlock();
 
               state = StreamState::kFinish;
             } else {
@@ -99,24 +105,28 @@ Status SlurmXdServiceImpl::SrunXStream(
               // It's safe to call stream->Write() on a closed stream.
               // (stream->Write() just return false rather than throwing an
               // exception).
-              auto output_callback = [stream](std::string &&buf) {
-                SLURMX_TRACE("Output Callback called. buf: {}", buf);
-                slurmx_grpc::SrunXStreamReply reply;
-                reply.set_type(
-                    slurmx_grpc::SrunXStreamReply_Type_IoRedirection);
+              auto output_callback =
+                  [stream, &write_mtx = stream_w_mtx](std::string &&buf) {
+                    SLURMX_TRACE("Output Callback called. buf: {}", buf);
+                    slurmx_grpc::SrunXStreamReply reply;
+                    reply.set_type(
+                        slurmx_grpc::SrunXStreamReply_Type_IoRedirection);
 
-                std::string *reply_buf =
-                    reply.mutable_io_redirection()->mutable_buf();
-                *reply_buf = std::move(buf);
+                    std::string *reply_buf =
+                        reply.mutable_io_redirection()->mutable_buf();
+                    *reply_buf = std::move(buf);
 
-                stream->Write(reply);
+                    write_mtx.lock();
+                    stream->Write(reply);
+                    write_mtx.unlock();
 
-                SLURMX_TRACE("stream->Write() done.");
-              };
+                    SLURMX_TRACE("stream->Write() done.");
+                  };
 
               // Call stream->Write() and cause the grpc thread
               // that owns 'stream' to stop the connection handling and quit.
-              auto finish_callback = [stream /*, context*/](
+              auto finish_callback = [stream,
+                                      &write_mtx = stream_w_mtx /*, context*/](
                                          bool is_terminated_by_signal,
                                          int value) {
                 SLURMX_TRACE("Finish Callback called. signaled: {}, value: {}",
@@ -136,7 +146,9 @@ Status SlurmXdServiceImpl::SrunXStream(
                 // On the server side, WriteLast cause all the Write() to be
                 // blocked until the this service handler returned.
                 // WriteLast() should actually be called on the client side.
+                write_mtx.lock();
                 stream->Write(reply, grpc::WriteOptions());
+                write_mtx.unlock();
 
                 // If this line is appended, when SrunX has no response to
                 // WriteLast, the connection can stop anyway. Otherwise, the
@@ -168,7 +180,10 @@ Status SlurmXdServiceImpl::SrunXStream(
                 auto *result = reply.mutable_new_task_result();
                 result->set_ok(true);
 
+                stream_w_mtx.lock();
                 stream->Write(reply);
+                stream_w_mtx.unlock();
+
                 state = StreamState::kWaitForEofOrSigOrTaskEnd;
               } else {
                 reply.Clear();
@@ -187,7 +202,10 @@ Status SlurmXdServiceImpl::SrunXStream(
                   result->set_reason(
                       fmt::format("Unknown failure. Code: ", uint16_t(err)));
 
-                stream->Write(reply, grpc::WriteOptions());
+                stream_w_mtx.lock();
+                stream->Write(reply);
+                stream_w_mtx.unlock();
+
                 state = StreamState::kFinish;
               }
             }

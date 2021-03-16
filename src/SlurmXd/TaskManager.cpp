@@ -230,7 +230,7 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
     argv.push_back(nullptr);
 
     SLURMX_TRACE("execv: {} {}", task_init_info.executive_path,
-                 boost::algorithm::join(task_init_info.arguments, ", "));
+                 boost::algorithm::join(task_init_info.arguments, " "));
 
     dup2(anon_pipe.GetChildEndFd(), 1);  // stdout -> pipe
     dup2(anon_pipe.GetChildEndFd(), 2);  // stderr -> pipe
