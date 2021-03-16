@@ -241,8 +241,11 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
     execv(task_init_info.executive_path.c_str(),
           const_cast<char* const*>(argv.data()));
 
-    // Error occurred since execv returned.
-    fmt::print("execv failed: {}", strerror(errno));
+    // Error occurred since execv returned. At this point, errno is set.
+    // CtlXd use SIGABRT to inform the client of this failure.
+    fmt::print(stderr,
+               "[SlurmCtlXd Error] Failed to execute the task. Error: {}\n",
+               strerror(errno));
     abort();
   } else {  // Parent proc
     SLURMX_TRACE("Child proc: pid {}", child_pid);
