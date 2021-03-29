@@ -15,11 +15,13 @@
 #include <thread>
 #include <vector>
 
+#include "CommandLineParse.h"
 #include "PublicHeader.h"
 #include "protos/slurmx.grpc.pb.h"
 
 namespace SrunX {
-constexpr uint32_t kVersion = 1;
+
+constexpr uint32_t kSrunVersion = 1;
 
 using boost::uuids::uuid;
 using grpc::Channel;
@@ -36,56 +38,33 @@ using slurmx_grpc::TaskExitStatus;
 class SrunXClient {
  public:
   SrunXClient() = default;
+  ~SrunXClient();
 
-  SlurmxErr Init(std::string Xdserver_addr_port,
-                 std::string CtlXdserver_addr_port);
+  SlurmxErr Init(std::string xd_addr_port, std::string ctlxd_addr_port);
 
-  SlurmxErr Run();
+  SlurmxErr Run(const CommandLineArgs &cmd_args);
 
   void Wait();
 
-  enum class SrunX_State {
-    SEND_REQUIREMENT_TO_SLURMCTLXD = 0,
-    NEGOTIATION_TO_SLURMXD,
-    NEWTASK_TO_SLURMXD,
-    WAIT_FOR_REPLY_OR_SEND_SIG,
-    ABORT,
-    FINISH
-  };
-
-  struct AllocatableResource {
-    uint64_t cpu_core_limit;
-    uint64_t memory_limit_bytes;
-    uint64_t memory_sw_limit_bytes;
-  };
-
-  struct TaskInfo {
-    std::string executive_path;
-    std::vector<std::string> arguments;
-    uuid resource_uuid;
-  };
-  AllocatableResource allocatableResource;
-  TaskInfo taskinfo;
-
  private:
-  static void m_modify_signal_flag_(int signo);
-  void m_client_wait_func_();
+  static void SigintHandlerFunc(int);
+  void SigintGrpcSendThreadFunc();
 
-  std::unique_ptr<SlurmXd::Stub> m_stub_;
-  std::unique_ptr<SlurmCtlXd::Stub> m_stub_ctld_;
+  std::unique_ptr<SlurmXd::Stub> m_xd_stub_;
+  std::unique_ptr<SlurmCtlXd::Stub> m_ctld_stub_;
+
   inline static std::unique_ptr<
       grpc::ClientReaderWriter<SrunXStreamRequest, SrunXStreamReply>>
       m_stream_;
-  SlurmxErr m_err_;
-  ClientContext m_context_;
-  SrunX_State m_state_;
-  std::thread m_client_wait_thread_;
-  inline static std::condition_variable m_cv_;
-  inline static std::mutex m_cv_m_;
-  inline static std::atomic_int m_signal_fg_;
-  inline static std::atomic_int m_exit_fg_;
+  ClientContext m_stream_context_;
 
-  std::shared_ptr<Channel> m_channel_;
-  std::shared_ptr<Channel> m_channel_ctld_;
+  std::thread m_sigint_grpc_send_thread_;
+  inline static std::atomic_bool s_sigint_received_{false};
+
+  std::atomic_bool m_is_ending_{false};
+  std::atomic_bool m_is_under_destruction_{false};
+
+  std::shared_ptr<Channel> m_xd_channel_;
+  std::shared_ptr<Channel> m_ctld_channel_;
 };
 }  // namespace SrunX

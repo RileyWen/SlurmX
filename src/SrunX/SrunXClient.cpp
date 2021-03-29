@@ -1,192 +1,262 @@
 #include "SrunXClient.h"
+
 namespace SrunX {
 
-SlurmxErr SrunXClient::Init(std::string Xdserver_addr_port,
-                            std::string CtlXdserver_addr_port) {
-  // catch SIGINT signal and call m_modify_signal_flag_ function
-  signal(SIGINT, m_modify_signal_flag_);
-  // create a thread to listen SIGINT signal
-  m_client_wait_thread_ = std::thread(&SrunXClient::m_client_wait_func_, this);
-  m_channel_ = grpc::CreateChannel(Xdserver_addr_port,
-                                   grpc::InsecureChannelCredentials());
-  m_channel_ctld_ = grpc::CreateChannel(CtlXdserver_addr_port,
-                                        grpc::InsecureChannelCredentials());
+SlurmxErr SrunXClient::Init(std::string xd_addr_port,
+                            std::string ctlxd_addr_port) {
   using namespace std::chrono_literals;
-  bool ok = false;
-  if (m_channel_->WaitForConnected(std::chrono::system_clock::now() + 3s) &&
-      m_channel_ctld_->WaitForConnected(std::chrono::system_clock::now() +
-                                        3s)) {
-    ok = true;
-  }
-  m_stub_ = SlurmXd::NewStub(m_channel_);
-  m_stub_ctld_ = SlurmCtlXd::NewStub(m_channel_ctld_);
 
-  m_stream_ = m_stub_->SrunXStream(&m_context_);
+  signal(SIGINT, SigintHandlerFunc);
+  m_sigint_grpc_send_thread_ =
+      std::thread(&SrunXClient::SigintGrpcSendThreadFunc, this);
+
+  m_xd_channel_ =
+      grpc::CreateChannel(xd_addr_port, grpc::InsecureChannelCredentials());
+  m_ctld_channel_ =
+      grpc::CreateChannel(ctlxd_addr_port, grpc::InsecureChannelCredentials());
+
+  bool ok;
+
+  ok = m_xd_channel_->WaitForConnected(std::chrono::system_clock::now() + 3s);
   if (!ok) {
-    std::unique_lock<std::mutex> lk(m_cv_m_);
-    m_exit_fg_ = 1;
-    m_cv_.notify_all();
+    SLURMX_ERROR("Cannot connect to Xd server!");
     return SlurmxErr::kConnectionTimeout;
   }
+
+  ok = m_ctld_channel_->WaitForConnected(std::chrono::system_clock::now() + 3s);
+  if (!ok) {
+    SLURMX_ERROR("Cannot connect to ctlXd server!");
+    return SlurmxErr::kConnectionTimeout;
+  }
+
+  m_xd_stub_ = SlurmXd::NewStub(m_xd_channel_);
+  m_ctld_stub_ = SlurmCtlXd::NewStub(m_ctld_channel_);
+
+  m_stream_ = m_xd_stub_->SrunXStream(&m_stream_context_);
 
   return SlurmxErr::kOk;
 }
 
-SlurmxErr SrunXClient::Run() {
+SlurmxErr SrunXClient::Run(const CommandLineArgs &cmd_args) {
   uuid resource_uuid;
-  m_err_ = SlurmxErr::kOk;
-  m_state_ = SrunX_State::SEND_REQUIREMENT_TO_SLURMCTLXD;
-  ClientContext context;
+  SlurmxErr err = SlurmxErr::kOk;
+
+  enum class SrunxState {
+    kAllocResFromCtlxd = 0,
+    kNegotiationWithSlurmxd,
+    kRequestNewTaskFromSlurmxd,
+    kWaitForNewTaskReply,
+    kWaitForIoRedirectionOrSignal,
+    kAbort,
+    kFinish,
+  };
+
+  SrunxState state = SrunxState::kAllocResFromCtlxd;
   Status status;
-  ResourceAllocReply resourceallocreply;
   while (true) {
-    switch (m_state_) {
-      case SrunX_State::SEND_REQUIREMENT_TO_SLURMCTLXD: {
-        ResourceAllocRequest resourceallocrequest;
-        auto *AllocatableResource =
-            resourceallocrequest.mutable_required_resource();
-        AllocatableResource->set_cpu_core_limit(
-            this->allocatableResource.cpu_core_limit);
-        AllocatableResource->set_memory_sw_limit_bytes(
-            this->allocatableResource.memory_sw_limit_bytes);
-        AllocatableResource->set_memory_limit_bytes(
-            this->allocatableResource.memory_limit_bytes);
-        status = m_stub_ctld_->AllocateResource(&context, resourceallocrequest,
-                                                &resourceallocreply);
+    switch (state) {
+      case SrunxState::kAllocResFromCtlxd: {
+        ClientContext alloc_context;
+        ResourceAllocRequest alloc_req;
+        ResourceAllocReply alloc_reply;
+
+        auto *alloc_res = alloc_req.mutable_required_resource();
+        alloc_res->set_cpu_core_limit(cmd_args.required_resource.cpu_count);
+        alloc_res->set_memory_limit_bytes(
+            cmd_args.required_resource.memory_bytes);
+        alloc_res->set_memory_sw_limit_bytes(
+            cmd_args.required_resource.memory_sw_bytes);
+
+        status = m_ctld_stub_->AllocateResource(&alloc_context, alloc_req,
+                                                &alloc_reply);
 
         if (status.ok()) {
-          if (resourceallocreply.ok()) {
-            std::copy(resourceallocreply.resource_uuid().begin(),
-                      resourceallocreply.resource_uuid().end(),
-                      resource_uuid.data);
-            SLURMX_TRACE("Get the token {} from the slurmxctld.",
+          if (alloc_reply.ok()) {
+            std::copy(alloc_reply.resource_uuid().begin(),
+                      alloc_reply.resource_uuid().end(), resource_uuid.data);
+            SLURMX_TRACE("Resource allocated from CtlXd. UUID: {}",
                          to_string(resource_uuid));
-            this->taskinfo.resource_uuid = resource_uuid;
-            m_state_ = SrunX_State::NEGOTIATION_TO_SLURMXD;
+            state = SrunxState::kNegotiationWithSlurmxd;
           } else {
-            SLURMX_DEBUG("Can not get token for reason: {}",
-                         resourceallocreply.reason());
-            m_err_ = SlurmxErr::kNoTokenReply;
-            m_state_ = SrunX_State::ABORT;
+            SLURMX_ERROR("Failed to allocate required resource from CtlXd: {}",
+                         alloc_reply.reason());
+            err = SlurmxErr::kTokenRequestFailure;
+            state = SrunxState::kAbort;
           }
         } else {
           SLURMX_DEBUG("{}:{}\nSlurmxctld RPC failed", status.error_code(),
                        status.error_message());
-          m_err_ = SlurmxErr::kRpcFailed;
-          m_state_ = SrunX_State::ABORT;
+          err = SlurmxErr::kRpcFailure;
+          state = SrunxState::kAbort;
         }
       } break;
 
-      case SrunX_State::NEGOTIATION_TO_SLURMXD: {
+      case SrunxState::kNegotiationWithSlurmxd: {
         SrunXStreamRequest request;
         request.set_type(SrunXStreamRequest::Negotiation);
 
         auto *result = request.mutable_negotiation();
-        result->set_version(SrunX::kVersion);
+        result->set_version(SrunX::kSrunVersion);
 
         m_stream_->Write(request);
-        m_state_ = SrunX_State::NEWTASK_TO_SLURMXD;
+        state = SrunxState::kRequestNewTaskFromSlurmxd;
       } break;
 
-      case SrunX_State::NEWTASK_TO_SLURMXD: {
+      case SrunxState::kRequestNewTaskFromSlurmxd: {
         SrunXStreamRequest request;
         request.set_type(SrunXStreamRequest::NewTask);
 
         auto *result = request.mutable_task_info();
-        std::string str = this->taskinfo.executive_path;
+        std::string str = cmd_args.executive_path;
         result->set_executive_path(str);
 
-        for (std::string arg : this->taskinfo.arguments) {
+        for (std::string arg : cmd_args.arguments) {
           result->add_arguments(arg);
         }
 
-        result->set_resource_uuid(this->taskinfo.resource_uuid.data,
-                                  resource_uuid.size());
+        result->set_resource_uuid(resource_uuid.data, resource_uuid.size());
 
         m_stream_->Write(request);
-        m_state_ = SrunX_State::WAIT_FOR_REPLY_OR_SEND_SIG;
+        state = SrunxState::kWaitForNewTaskReply;
         break;
       }
 
-      case SrunX_State::WAIT_FOR_REPLY_OR_SEND_SIG: {
+      case SrunxState::kWaitForNewTaskReply: {
         SrunXStreamReply reply;
-        bool ok;
-        ok = m_stream_->Read(&reply);
-        if (ok) {
-          if (reply.type() == SrunXStreamReply::IoRedirection) {
-            fmt::print("{}\n", reply.io_redirection().buf());
-          } else if (reply.type() ==
-                     slurmx_grpc::SrunXStreamReply_Type_ExitStatus) {
-            if (reply.task_exit_status().reason() ==
-                slurmx_grpc::TaskExitStatus::Signal) {
-              fmt::print("The task was terminated with signal {}.",
-                         strsignal(reply.task_exit_status().value()));
-            } else {
-              SLURMX_DEBUG("Task finished with exit code: {}",
-                           reply.task_exit_status().value());
-            }
-            m_state_ = SrunX_State::FINISH;
 
-          } else if (reply.type() ==
-                     slurmx_grpc::SrunXStreamReply_Type_NewTaskResult) {
+        if (m_stream_->Read(&reply)) {
+          if (reply.type() == SrunXStreamReply::NewTaskResult) {
             if (reply.new_task_result().ok()) {
-              SLURMX_DEBUG("The new task starts runing...");
+              SLURMX_TRACE("The new task starts running...");
+              state = SrunxState::kWaitForIoRedirectionOrSignal;
             } else {
               SLURMX_DEBUG("Failed to create the new task. Reason: {}.",
                            reply.new_task_result().reason());
-              m_err_ = SlurmxErr::kNewTaskFailed;
+              err = SlurmxErr::kRpcFailure;
+              state = SrunxState::kFinish;
             }
           }
         } else {
-          SLURMX_DEBUG("Stream is broken!");
-          m_err_ = SlurmxErr::KStreamBroken;
-          m_state_ = SrunX_State::FINISH;
+          SLURMX_DEBUG("Stream is broken while waiting for new task result!");
+          err = SlurmxErr::KStreamBroken;
+          state = SrunxState::kAbort;
         }
-      } break;
 
-      case SrunX_State::ABORT: {
-        std::unique_lock<std::mutex> lk(m_cv_m_);
-        // notify wait thread, prevent main thread blocking.
-        m_exit_fg_ = 1;
-        m_cv_.notify_all();
-        SLURMX_DEBUG("Connection to peer {} aborted.", context.peer());
-        return m_err_;
+        break;
       }
 
-      case SrunX_State::FINISH: {
-        // notify wait thread, prevent main thread blocking.
-        std::unique_lock<std::mutex> lk(m_cv_m_);
-        m_exit_fg_ = 1;
-        m_cv_.notify_all();
-        return m_err_;
+      case SrunxState::kWaitForIoRedirectionOrSignal: {
+        SrunXStreamReply reply;
+
+        if (m_stream_->Read(&reply)) {
+          if (reply.type() == SrunXStreamReply::IoRedirection) {
+            fmt::print("{}", reply.io_redirection().buf());
+
+          } else if (reply.type() == SrunXStreamReply::ExitStatus) {
+            if (reply.task_exit_status().reason() == TaskExitStatus::Signal) {
+              fmt::print("The task was terminated with signal: {}.\n",
+                         strsignal(reply.task_exit_status().value()));
+            } else {
+              SLURMX_DEBUG("Task exit normally with value: {}",
+                           reply.task_exit_status().value());
+            }
+            state = SrunxState::kFinish;
+
+          } else {
+            SLURMX_DEBUG(
+                "Stream is broken when waiting for I/O, signal or exit "
+                "status!");
+            err = SlurmxErr::KStreamBroken;
+            state = SrunxState::kFinish;
+          }
+        }
+        break;
+      }
+
+      case SrunxState::kAbort: {
+        SLURMX_DEBUG("Connection to peer {} aborted.",
+                     m_stream_context_.peer());
+
+        m_stream_->WritesDone();
+        m_is_ending_ = true;
+        return err;
+      }
+
+      case SrunxState::kFinish: {
+        SLURMX_DEBUG("Connection to peer {} finished.",
+                     m_stream_context_.peer());
+
+        m_stream_->WritesDone();
+        m_is_ending_ = true;
+        return err;
       }
     }
   }
 }
 
-void SrunXClient::m_modify_signal_flag_(int signo) {
-  SLURMX_TRACE("Press down 'Ctrl+C'");
-  std::unique_lock<std::mutex> lk(m_cv_m_);
-  m_signal_fg_ = 1;
-  m_cv_.notify_all();
+void SrunXClient::SigintHandlerFunc(int) {
+  static bool ctrl_c_pressed{false};
+
+  if (ctrl_c_pressed) {
+    SLURMX_TRACE("Ctrl+C was already caught. Ignoring it.");
+  } else {
+    SLURMX_TRACE("Ctrl+C is caught.");
+    ctrl_c_pressed = true;
+    s_sigint_received_.store(true, std::memory_order_release);
+  }
 }
 
-void SrunXClient::m_client_wait_func_() {
-  std::unique_lock<std::mutex> lk(m_cv_m_);
-  // The wait will be notified by signal or exitstatus,
-  // but only send msg to slurmXd when notified by signal.
-  m_cv_.wait(lk, [] { return (m_signal_fg_ == 1 || m_exit_fg_ == 1); });
-  if (m_signal_fg_ == 1) {
-    SrunXStreamRequest request;
-    request.set_type(SrunXStreamRequest::Signal);
-    request.set_signum(2);
-    m_stream_->Write(request);
+void SrunXClient::SigintGrpcSendThreadFunc() {
+  // The cv will be notified when SIGINT is caught or m_is_ending_ == true.
+  while (true) {
+    if (s_sigint_received_.load(std::memory_order_relaxed)) {
+      if (m_stream_) {
+        // Send the signal to SlurmXd. Then the state machine will move
+        // forward.
+        SrunXStreamRequest request;
+        request.set_type(SrunXStreamRequest::Signal);
+        request.set_signum(2);
+        m_stream_->Write(request);
+      }
+
+      break;
+    }
+
+    if (m_is_ending_.load(std::memory_order_relaxed)) break;
+
+    std::this_thread::yield();
   }
 }
 
 void SrunXClient::Wait() {
-  m_client_wait_thread_.join();
-  m_stream_->WritesDone();
-  m_stream_->Finish();
+  bool expected = false;
+  bool was_exchanged;
+
+  was_exchanged =
+      m_is_under_destruction_.compare_exchange_strong(expected, true);
+  if (was_exchanged) {
+    // clean up ONLY once
+    if (m_sigint_grpc_send_thread_.joinable())
+      m_sigint_grpc_send_thread_.join();
+    if (m_stream_) {
+      SrunXStreamReply reply;
+
+      // m_stream_->Finish() will block forever if m_stream_ has unread trailing
+      // messages. Use this while loop to make sure of no trailing messages.
+      //
+      // Note: The state machine of SrunX is revised to guarantee no trailing
+      // messages.
+      //  Normally, the Read() should always return false.
+      while (m_stream_->Read(&reply))
+        SLURMX_TRACE("Reading trailing replies: type: {}", reply.type());
+      m_stream_->Finish();
+    }
+  }
 }
+
+SrunXClient::~SrunXClient() {
+  m_is_ending_ = true;
+  Wait();
+}
+
 }  // namespace SrunX

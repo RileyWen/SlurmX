@@ -22,10 +22,10 @@ enum class SlurmxErr : uint16_t {
   kConnectionTimeout,
   kConnectionAborted,
 
-  kRpcFailed,
-  kNoTokenReply,
-  kNewTaskFailed,
+  kRpcFailure,
+  kTokenRequestFailure,
   KStreamBroken,
+
   __ERR_SIZE
 };
 
@@ -47,11 +47,9 @@ constexpr std::array<std::string_view, uint16_t(SlurmxErr::__ERR_SIZE)>
         "Connection timeout",
         "Connection aborted",
 
-        "PRC Failed",
-        "Can not get token from SlurmCtlXd",
-        "New Task create failed",
+        "RPC call failed",
+        "Failed to request required token",
         "Stream is broken",
-
 };
 
 }

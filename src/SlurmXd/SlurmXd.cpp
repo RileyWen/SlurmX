@@ -9,6 +9,7 @@
 #include "XdServer.h"
 
 int main(int argc, char** argv) {
+  // Todo: Add single program instance checking.
   // Todo: Check static level setting.
 #ifndef NDEBUG
   spdlog::set_level(spdlog::level::trace);
