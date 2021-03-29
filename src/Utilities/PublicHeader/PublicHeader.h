@@ -22,6 +22,10 @@ enum class SlurmxErr : uint16_t {
   kConnectionTimeout,
   kConnectionAborted,
 
+  kRpcFailure,
+  kTokenRequestFailure,
+  KStreamBroken,
+
   __ERR_SIZE
 };
 
@@ -42,6 +46,10 @@ constexpr std::array<std::string_view, uint16_t(SlurmxErr::__ERR_SIZE)>
         "The owner object of the function is stopping",
         "Connection timeout",
         "Connection aborted",
+
+        "RPC call failed",
+        "Failed to request required token",
+        "Stream is broken",
 };
 
 }

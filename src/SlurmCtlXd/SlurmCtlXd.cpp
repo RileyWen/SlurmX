@@ -10,6 +10,8 @@
 #include "PublicHeader.h"
 
 int main(int argc, char** argv) {
+  // Todo: Add single program instance checking. The current program will freeze
+  //  when multiple instances are running.
 #ifndef NDEBUG
   spdlog::set_level(spdlog::level::trace);
 #endif

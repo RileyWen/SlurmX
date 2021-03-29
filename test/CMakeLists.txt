@@ -15,8 +15,10 @@ target_link_libraries(slurmx_test
         libevent::core
         proto
         test_proto
+        cxxopts::cxxopts
         )
 add_test(NAME slurm_test COMMAND test/slurmx_test)
+
 
 set(PROTO_SRC_DIR ${CMAKE_SOURCE_DIR}/test/protos)
 file(GLOB_RECURSE PROTO_SRCS ${PROTO_SRC_DIR}/*.proto)
