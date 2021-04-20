@@ -57,8 +57,8 @@ int CgroupManager::initialize() {
                GetControllerStringView(Controller::CPUACCT_CONTROLLER)) {
       m_mounted_controllers_ |=
           (info.hierarchy != 0)
-              ? ControllerFlags{Controller::CPUACCT_CONTROLLER}
-              : NO_CONTROLLERS;
+          ? ControllerFlags{Controller::CPUACCT_CONTROLLER}
+          : NO_CONTROLLERS;
 
     } else if (info.name ==
                GetControllerStringView(Controller::FREEZE_CONTROLLER)) {
@@ -76,6 +76,11 @@ int CgroupManager::initialize() {
                GetControllerStringView(Controller::CPU_CONTROLLER)) {
       m_mounted_controllers_ |=
           (info.hierarchy != 0) ? ControllerFlags{Controller::CPU_CONTROLLER}
+                                : NO_CONTROLLERS;
+    } else if (info.name ==
+               GetControllerStringView(Controller::DEVICES_CONTROLLER)) {
+      m_mounted_controllers_ |=
+          (info.hierarchy != 0) ? ControllerFlags{Controller::DEVICES_CONTROLLER}
                                 : NO_CONTROLLERS;
     }
     ret = cgroup_get_all_controller_next(&handle, &info);
@@ -98,6 +103,9 @@ int CgroupManager::initialize() {
   }
   if (!isMounted(Controller::CPU_CONTROLLER)) {
     SLURMX_WARN("Cgroup controller for CPU is not available.\n");
+  }
+  if (!isMounted(Controller::DEVICES_CONTROLLER)) {
+    SLURMX_WARN("Cgroup controller for DEVICES is not available.\n");
   }
   if (ret != ECGEOF) {
     SLURMX_WARN("Error iterating through cgroups mount information: {}\n",
@@ -225,6 +233,15 @@ bool CgroupManager::create_or_open(const std::string &cgroup_string,
                             has_cgroup, changed_cgroup)) {
     return false;
   }
+  if ((preferred_controllers & Controller::DEVICES_CONTROLLER) &&
+      initialize_controller(
+          *cgroupp, Controller::DEVICES_CONTROLLER,
+          required_controllers & Controller::DEVICES_CONTROLLER, has_cgroup,
+          changed_cgroup)) {
+    return false;
+  }
+
+
 
   int err;
   if (!has_cgroup) {
@@ -310,7 +327,7 @@ bool CgroupManager::destroy(const std::string &cgroup_path) {
     //
     // Todo: Test this part when cgroup is not empty!
     if ((err = cgroup_delete_cgroup_ext(
-             dcg, CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
+        dcg, CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
       SLURMX_WARN("Unable to completely remove cgroup {}: {} {}\n",
                   cgroup_path.c_str(), err, cgroup_strerror(err));
     } else {
@@ -355,8 +372,8 @@ bool CgroupManager::migrate_proc_to_cgroup(pid_t pid,
   struct cgroup_controller *memory_controller;
   if (isMounted(Controller::MEMORY_CONTROLLER) &&
       (err = cgroup_get_current_controller_path(
-           pid, GetControllerStringView(Controller::MEMORY_CONTROLLER).data(),
-           &orig_cgroup_path))) {
+          pid, GetControllerStringView(Controller::MEMORY_CONTROLLER).data(),
+          &orig_cgroup_path))) {
     SLURMX_WARN(
         "Unable to determine current memory cgroup for PID {}. Error {}: {}\n",
         pid, err, cgroup_strerror(err));
@@ -379,8 +396,8 @@ bool CgroupManager::migrate_proc_to_cgroup(pid_t pid,
       goto after_migrate;
     }
     if ((memory_controller = cgroup_get_controller(
-             orig_cgroup,
-             GetControllerStringView(Controller::MEMORY_CONTROLLER).data())) ==
+        orig_cgroup,
+        GetControllerStringView(Controller::MEMORY_CONTROLLER).data())) ==
         nullptr) {
       SLURMX_WARN(
           "Unable to get memory controller of cgroup {}. Error {}: {}\n",
@@ -433,7 +450,7 @@ bool CgroupManager::migrate_proc_to_cgroup(pid_t pid,
     cgroup_free(&orig_cgroup);
   }
 
-after_migrate:
+  after_migrate:
 
   orig_cgroup = NULL;
   err = cgroup_attach_task_pid(
@@ -448,8 +465,8 @@ after_migrate:
       goto after_restore;
     }
     if (((memory_controller = cgroup_add_controller(
-              orig_cgroup,
-              GetControllerStringView(Controller::MEMORY_CONTROLLER).data())) !=
+        orig_cgroup,
+        GetControllerStringView(Controller::MEMORY_CONTROLLER).data())) !=
          nullptr) &&
         (!cgroup_add_value_uint64(memory_controller,
                                   "memory.move_charge_at_immigrate",
@@ -468,7 +485,7 @@ after_migrate:
     cgroup_free(&orig_cgroup);
   }
 
-after_restore:
+  after_restore:
   if (orig_cgroup_path != nullptr) {
     free(orig_cgroup_path);
   }
@@ -578,6 +595,65 @@ bool CgroupManipulator::set_blockio_weight(uint64_t weight) {
                                weight);
 }
 
+bool CgroupManipulator::set_devices_deny(std::string deny_devices){
+  return set_controller_value_(CgroupConstant::Controller::DEVICES_CONTROLLER,
+                               CgroupConstant::ControllerFile::DEVICES_DENY,
+                               deny_devices.c_str());
+}
+bool CgroupManipulator::set_devices_allow(std::string allow_devices){
+  return set_controller_value_(CgroupConstant::Controller::DEVICES_CONTROLLER,
+                               CgroupConstant::ControllerFile::DEVICES_ALLOW,
+                               allow_devices.c_str());
+}
+
+bool CgroupManipulator::set_controller_value_(
+    CgroupConstant::Controller controller,
+    CgroupConstant::ControllerFile controller_file, const char *value) {
+  CgroupManager &cm = CgroupManager::getInstance();
+
+  if (!cm.isMounted(controller)) {
+    SLURMX_WARN("Unable to set {} because cgroup {} is not mounted.\n",
+                CgroupConstant::GetControllerFileStringView(controller_file),
+                CgroupConstant::GetControllerStringView(controller));
+    return false;
+  }
+
+  int err;
+
+  // a bit dirty here
+  auto *cg = const_cast<cgroup *>(&m_cgroup_.getCgroup());
+
+  struct cgroup_controller *cg_controller;
+
+  if ((cg_controller = cgroup_get_controller(
+      cg, CgroupConstant::GetControllerStringView(controller).data())) ==
+      nullptr) {
+    SLURMX_WARN("Unable to get cgroup {} controller for {}.\n",
+                CgroupConstant::GetControllerStringView(controller),
+                m_cgroup_.getCgroupString());
+    return false;
+  }
+
+  if ((err = cgroup_set_value_string(
+      cg_controller,
+      CgroupConstant::GetControllerFileStringView(controller_file).data(),
+      value))) {
+    SLURMX_WARN("Unable to set block IO weight for {}: {} {}\n",
+                m_cgroup_.getCgroupString(), err, cgroup_strerror(err));
+    return false;
+  }
+
+  // Commit cgroup modifications.
+  if ((err = cgroup_modify_cgroup(cg))) {
+    SLURMX_WARN("Unable to commit {} for cgroup {}: {} {}\n",
+                CgroupConstant::GetControllerFileStringView(controller_file),
+                m_cgroup_.getCgroupString(), err, cgroup_strerror(err));
+    return false;
+  }
+
+  return true;
+}
+
 bool CgroupManipulator::set_controller_value_(
     CgroupConstant::Controller controller,
     CgroupConstant::ControllerFile controller_file, uint64_t value) {
@@ -598,7 +674,7 @@ bool CgroupManipulator::set_controller_value_(
   struct cgroup_controller *cg_controller;
 
   if ((cg_controller = cgroup_get_controller(
-           cg, CgroupConstant::GetControllerStringView(controller).data())) ==
+      cg, CgroupConstant::GetControllerStringView(controller).data())) ==
       nullptr) {
     SLURMX_WARN("Unable to get cgroup {} controller for {}.\n",
                 CgroupConstant::GetControllerStringView(controller),
@@ -607,9 +683,9 @@ bool CgroupManipulator::set_controller_value_(
   }
 
   if ((err = cgroup_set_value_uint64(
-           cg_controller,
-           CgroupConstant::GetControllerFileStringView(controller_file).data(),
-           value))) {
+      cg_controller,
+      CgroupConstant::GetControllerFileStringView(controller_file).data(),
+      value))) {
     SLURMX_WARN("Unable to set block IO weight for {}: {} {}\n",
                 m_cgroup_.getCgroupString(), err, cgroup_strerror(err));
     return false;

@@ -206,6 +206,28 @@ TEST(cgroup, memory_limit) {
   }
 }
 
+
+TEST(cgroup, devices_limit) {
+  EXPECT_EQ(system("echo 'test' > /dev/null"),0)<<"Devices 1:3 can not be accessed.";
+
+  const std::string cg_path{"wzd_cgroup"};
+  Cgroup::CgroupManager& cm = Cgroup::CgroupManager::getInstance();
+  cm.create_or_open(cg_path, Cgroup::ALL_CONTROLLER_FLAG,
+                    Cgroup::NO_CONTROLLER_FLAG, false);
+
+  auto cg_info_wrapper = cm.find_cgroup(cg_path);
+  auto& cg_struct = *(cg_info_wrapper.value().get().cgroup_ptr);
+
+  Cgroup::Internal::CgroupManipulator cg_limit(cg_struct);
+  std::string deny_device("c 1:3 rmw");
+  cg_limit.set_devices_deny(deny_device);
+  cm.migrate_proc_to_cgroup(getpid(), cg_path);
+
+  EXPECT_NE(system("echo 'test' > /dev/null"),0)<<"Devices 1:3 should not be accessed.";
+
+  cm.destroy(cg_path);
+}
+
 /*
  * read /proc data into the passed struct pstat
  * returns 0 on success, -1 on error

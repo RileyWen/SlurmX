@@ -35,6 +35,7 @@ enum class Controller : uint64_t {
   FREEZE_CONTROLLER,
   BLOCK_CONTROLLER,
   CPU_CONTROLLER,
+  DEVICES_CONTROLLER,
 
   ControllerCount,
 };
@@ -50,30 +51,36 @@ enum class ControllerFile : uint64_t {
 
   BLOCKIO_WEIGHT,
 
+  DEVICES_DENY,
+  DEVICES_ALLOW,
+
   ControllerFileCount
 };
 
 namespace Internal {
 
 constexpr std::array<std::string_view,
-                     static_cast<size_t>(Controller::ControllerCount)>
+    static_cast<size_t>(Controller::ControllerCount)>
     ControllerStringView{
-        "memory", "cpuacct", "freezer", "blkio", "cpu",
-    };
+    "memory", "cpuacct", "freezer", "blkio", "cpu", "devices",
+};
 
 constexpr std::array<std::string_view,
-                     static_cast<size_t>(ControllerFile::ControllerFileCount)>
+    static_cast<size_t>(ControllerFile::ControllerFileCount)>
     ControllerFileStringView{
-        "cpu.shares",
-        "cpu.cfs_period_us",
-        "cpu.cfs_quota_us",
+    "cpu.shares",
+    "cpu.cfs_period_us",
+    "cpu.cfs_quota_us",
 
-        "memory.limit_in_bytes",
-        "memory.memsw.limit_in_bytes",
-        "memory.soft_limit_in_bytes",
+    "memory.limit_in_bytes",
+    "memory.memsw.limit_in_bytes",
+    "memory.soft_limit_in_bytes",
 
-        "blkio.weight",
-    };
+    "blkio.weight",
+
+    "devices.deny",
+    "devices.allow",
+};
 }  // namespace Internal
 
 constexpr std::string_view GetControllerStringView(Controller controller) {
@@ -186,6 +193,8 @@ struct CgroupLimit {
   uint64_t memory_sw_limit_bytes = 0;
   uint64_t memory_soft_limit_bytes = 0;
   uint64_t blockio_weight = 0;
+  std::string devices_deny;
+  std::string devices_allow;
 };
 
 namespace Internal {
@@ -203,10 +212,16 @@ class CgroupManipulator {
   bool set_cpu_shares(uint64_t share);
   bool set_blockio_weight(uint64_t weight);
 
+  bool set_devices_deny(std::string);
+  bool set_devices_allow(std::string);
+
  private:
   bool set_controller_value_(CgroupConstant::Controller controller,
                              CgroupConstant::ControllerFile controller_file,
                              uint64_t value);
+  bool set_controller_value_(
+      CgroupConstant::Controller controller,
+      CgroupConstant::ControllerFile controller_file, const char *value);
 
   const Cgroup &m_cgroup_;
 };
@@ -257,7 +272,7 @@ class CgroupManager {
     std::unique_ptr<Internal::Cgroup> cgroup_ptr;
 
    private:
-    BOOST_MOVABLE_BUT_NOT_COPYABLE(CgroupInfo);
+   BOOST_MOVABLE_BUT_NOT_COPYABLE(CgroupInfo);
   };
 
  public:
