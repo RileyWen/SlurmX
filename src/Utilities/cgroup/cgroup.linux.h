@@ -219,9 +219,9 @@ class CgroupManipulator {
   bool set_controller_value_(CgroupConstant::Controller controller,
                              CgroupConstant::ControllerFile controller_file,
                              uint64_t value);
-  bool set_controller_value_(
+  bool set_controller_string_(
       CgroupConstant::Controller controller,
-      CgroupConstant::ControllerFile controller_file, const char *value);
+      CgroupConstant::ControllerFile controller_file, const std::string &);
 
   const Cgroup &m_cgroup_;
 };

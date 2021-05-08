@@ -596,19 +596,19 @@ bool CgroupManipulator::set_blockio_weight(uint64_t weight) {
 }
 
 bool CgroupManipulator::set_devices_deny(std::string deny_devices){
-  return set_controller_value_(CgroupConstant::Controller::DEVICES_CONTROLLER,
-                               CgroupConstant::ControllerFile::DEVICES_DENY,
-                               deny_devices.c_str());
+  return set_controller_string_(CgroupConstant::Controller::DEVICES_CONTROLLER,
+                                CgroupConstant::ControllerFile::DEVICES_DENY,
+                                deny_devices);
 }
 bool CgroupManipulator::set_devices_allow(std::string allow_devices){
-  return set_controller_value_(CgroupConstant::Controller::DEVICES_CONTROLLER,
-                               CgroupConstant::ControllerFile::DEVICES_ALLOW,
-                               allow_devices.c_str());
+  return set_controller_string_(CgroupConstant::Controller::DEVICES_CONTROLLER,
+                                CgroupConstant::ControllerFile::DEVICES_ALLOW,
+                                allow_devices);
 }
 
-bool CgroupManipulator::set_controller_value_(
+bool CgroupManipulator::set_controller_string_(
     CgroupConstant::Controller controller,
-    CgroupConstant::ControllerFile controller_file, const char *value) {
+    CgroupConstant::ControllerFile controller_file, const std::string &value) {
   CgroupManager &cm = CgroupManager::getInstance();
 
   if (!cm.isMounted(controller)) {
@@ -637,7 +637,7 @@ bool CgroupManipulator::set_controller_value_(
   if ((err = cgroup_set_value_string(
       cg_controller,
       CgroupConstant::GetControllerFileStringView(controller_file).data(),
-      value))) {
+      value.c_str()))) {
     SLURMX_WARN("Unable to set block IO weight for {}: {} {}\n",
                 m_cgroup_.getCgroupString(), err, cgroup_strerror(err));
     return false;
