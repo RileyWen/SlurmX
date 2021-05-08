@@ -11,6 +11,10 @@
 #include <thread>
 #include <vector>
 
+#include <fstream>
+#include <sys/types.h>
+#include <sys/stat.h>
+
 #include "../../src/SlurmXd/TaskManager.h"
 #include "gtest/gtest.h"
 
@@ -226,6 +230,84 @@ TEST(cgroup, devices_limit) {
   EXPECT_NE(system("echo 'test' > /dev/null"),0)<<"Devices 1:3 should not be accessed.";
 
   cm.destroy(cg_path);
+}
+
+//Only can work on the usb now.
+TEST(cgroup, usb_devices_limit) {
+  //get devices path and mount
+  std::string dev_path, mnt_path;
+  //todo usb path might change
+  dev_path = "/dev/sdd1";
+  mnt_path = "/mnt/wzdtest";
+  std::string test_file = fmt::format("{}/abc.txt", mnt_path);
+  std::string mount_cmdline = fmt::format("mount {} {}", dev_path, mnt_path);
+  std::string umount_cmdline = fmt::format("umount -l {}", mnt_path);
+
+  pid_t child_pid = fork();
+  if (child_pid == 0) {
+    //child pro is added to cgroup deny list
+
+    sleep(5);
+    if( mkdir(mnt_path.c_str() ,S_IRUSR | S_IWUSR | S_IXUSR | S_IRWXG | S_IRWXO)){
+      SPDLOG_INFO("Mkdir mount file failed");
+    }
+    SPDLOG_INFO("Staring mounting.");
+    int status = system(mount_cmdline.c_str());
+
+    std::ofstream outfile(test_file.c_str());
+    if(outfile.is_open()){
+      outfile<<"456";
+      SPDLOG_INFO("Child write to usb devices: 456");
+    }
+
+    SPDLOG_INFO("Unmount device {}.", dev_path);
+    system(umount_cmdline.c_str());
+    if(rmdir(mnt_path.c_str())) {
+      SPDLOG_INFO("Fail to delete mount directory {}.", mnt_path);
+    }
+  }
+  else {
+    SPDLOG_INFO("[Parent] Child pid: {}\n", child_pid);
+
+    const std::string cg_path{"wzd_usb_cgroup"};
+    Cgroup::CgroupManager& cm = Cgroup::CgroupManager::getInstance();
+    cm.create_or_open(cg_path, Cgroup::ALL_CONTROLLER_FLAG,
+                      Cgroup::NO_CONTROLLER_FLAG, false);
+
+    auto cg_info_wrapper = cm.find_cgroup(cg_path);
+    auto& cg_struct = *(cg_info_wrapper.value().get().cgroup_ptr);
+
+    Cgroup::Internal::CgroupManipulator cg_limit(cg_struct);
+    //todo, the major and minor number will change.
+    std::string deny_device("a 8:49 rmw");
+    cg_limit.set_devices_deny(deny_device);
+    cm.migrate_proc_to_cgroup(child_pid, cg_path);
+
+    int child_status;
+    wait(&child_status);
+
+    if( mkdir(mnt_path.c_str() ,S_IRUSR | S_IWUSR | S_IXUSR | S_IRWXG | S_IRWXO)){
+      SPDLOG_INFO("Mkdir mount file failed");
+    }
+    SPDLOG_INFO("Staring mounting.");
+    system(mount_cmdline.c_str());
+
+    std::ifstream inf(test_file.c_str());
+    char buffer[10];
+    if (inf.is_open()){
+      inf.getline(buffer, 10);
+      SPDLOG_INFO("Parent read from usb devices: {}", buffer);
+    }
+    SPDLOG_INFO("Unmount device {}.", dev_path);
+    system(umount_cmdline.c_str());
+    if(rmdir(mnt_path.c_str())) {
+      SPDLOG_INFO("Fail to delete mount directory {}.", mnt_path);
+    }
+
+    cm.destroy(cg_path);
+
+    EXPECT_STRNE(buffer,"456")<<"Devices usb should not be accessed by child.";
+  }
 }
 
 /*
