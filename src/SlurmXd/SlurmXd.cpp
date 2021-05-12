@@ -101,6 +101,8 @@ int main(int argc, char** argv) {
 
   SlurmxErr err;
 
+  g_task_mgr = std::make_unique<Xd::TaskManager>();
+
   g_ctlxd_client = std::make_unique<Xd::CtlXdClient>();
   err = g_ctlxd_client->Connect(ctlxd_addr_port);
   if (err == SlurmxErr::kConnectionTimeout) {
@@ -122,6 +124,11 @@ int main(int argc, char** argv) {
   }
 
   g_server->Wait();
+
+  // Free global variables
+  g_task_mgr.reset();
+  g_server.reset();
+  g_ctlxd_client.reset();
 
   return 0;
 }

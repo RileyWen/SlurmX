@@ -170,8 +170,7 @@ Status SlurmXdServiceImpl::SrunXStream(
                   .finish_callback = std::move(finish_callback),
               };
 
-              err =
-                  TaskManager::GetInstance().AddTaskAsync(std::move(task_info));
+              err = g_task_mgr->AddTaskAsync(std::move(task_info));
               if (err == SlurmxErr::kOk) {
                 reply.Clear();
                 reply.set_type(
@@ -232,7 +231,7 @@ Status SlurmXdServiceImpl::SrunXStream(
             SLURMX_TRACE("Receive signum {} from client. Killing task {}",
                          request.signum(), task_name);
 
-            err = TaskManager::GetInstance().Kill(task_name, request.signum());
+            err = g_task_mgr->Kill(task_name, request.signum());
             if (err != SlurmxErr::kOk) {
               SLURMX_ERROR("Failed to kill task {}. Error: {}",
                            SlurmxErrStr(err));
@@ -372,7 +371,7 @@ XdServer::XdServer(const std::string &listen_address,
   m_server_ = builder.BuildAndStart();
   SLURMX_INFO("SlurmXd is listening on {}", m_listen_address_);
 
-  TaskManager::GetInstance().SetSigintCallback([p_server = m_server_.get()] {
+  g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
     p_server->Shutdown();
     SLURMX_TRACE("Grpc Server Shutdown() was called.");
   });
