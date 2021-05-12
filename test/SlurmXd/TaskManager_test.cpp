@@ -30,7 +30,14 @@ static void RemoveTestProg(const std::string& test_prog_path) {
     SLURMX_ERROR("Error removing test_prog:", strerror(errno));
 }
 
-TEST(TaskManager, NormalExit) {
+class TaskManagerTest : public testing::Test {
+ public:
+  void SetUp() override { g_task_mgr = std::make_unique<Xd::TaskManager>(); }
+
+  void TearDown() override { g_task_mgr.reset(); }
+};
+
+TEST_F(TaskManagerTest, NormalExit) {
   spdlog::set_level(spdlog::level::trace);
   std::string prog_text =
       "#include <iostream>\\n"
@@ -56,13 +63,12 @@ TEST(TaskManager, NormalExit) {
     EXPECT_EQ(value, 1);
   };
 
-  TaskManager& tm = TaskManager::GetInstance();
-  TaskInitInfo info{
+  Xd::TaskInitInfo info{
       "RileyTest",           test_prog_path,  {},
       {.cpu_core_limit = 2}, output_callback, finish_callback,
   };
 
-  SlurmxErr err = tm.AddTaskAsync(std::move(info));
+  SlurmxErr err = g_task_mgr->AddTaskAsync(std::move(info));
   SLURMX_TRACE("err value: {}, reason: {}", uint64_t(err), SlurmxErrStr(err));
 
   using namespace std::chrono_literals;
@@ -71,14 +77,14 @@ TEST(TaskManager, NormalExit) {
   // Emulate ctrl+C
   kill(getpid(), SIGINT);
 
-  tm.Wait();
+  g_task_mgr->Wait();
 
   SLURMX_TRACE("Exiting test...");
 
   RemoveTestProg(test_prog_path);
 }
 
-TEST(TaskManager, SigintTermination) {
+TEST_F(TaskManagerTest, SigintTermination) {
   spdlog::set_level(spdlog::level::trace);
   std::string prog_text =
       "#include <iostream>\\n"
@@ -110,27 +116,26 @@ TEST(TaskManager, SigintTermination) {
     EXPECT_EQ(value, 2);
   };
 
-  TaskManager& tm = TaskManager::GetInstance();
-  TaskInitInfo info_1{
+  Xd::TaskInitInfo info_1{
       "RileyTest",           test_prog_path,  {},
       {.cpu_core_limit = 2}, output_callback, finish_callback,
   };
 
-  err = tm.AddTaskAsync(std::move(info_1));
+  err = g_task_mgr->AddTaskAsync(std::move(info_1));
   EXPECT_EQ(err, SlurmxErr::kOk);
 
-  TaskInitInfo info_2{
+  Xd::TaskInitInfo info_2{
       "RileyTest",           test_prog_path,  {},
       {.cpu_core_limit = 2}, output_callback, finish_callback,
   };
-  err = tm.AddTaskAsync(std::move(info_2));
+  err = g_task_mgr->AddTaskAsync(std::move(info_2));
   EXPECT_EQ(err, SlurmxErr::kExistingTask);
 
-  TaskInitInfo info_3{
+  Xd::TaskInitInfo info_3{
       "RileyTest_2",         test_prog_path,  {},
       {.cpu_core_limit = 2}, output_callback, finish_callback,
   };
-  err = tm.AddTaskAsync(std::move(info_3));
+  err = g_task_mgr->AddTaskAsync(std::move(info_3));
   EXPECT_EQ(err, SlurmxErr::kOk);
 
   using namespace std::chrono_literals;
@@ -141,14 +146,14 @@ TEST(TaskManager, SigintTermination) {
   // We expect that all task will be terminated.
   kill(getpid(), SIGINT);
 
-  tm.Wait();
+  g_task_mgr->Wait();
 
   SLURMX_TRACE("Exiting test...");
 
   RemoveTestProg(test_prog_path);
 }
 
-TEST(TaskManager, LsOutput) {
+TEST_F(TaskManagerTest, LsOutput) {
   spdlog::set_level(spdlog::level::trace);
   SlurmxErr err;
 
@@ -167,13 +172,12 @@ TEST(TaskManager, LsOutput) {
     EXPECT_EQ(value, 0);
   };
 
-  TaskManager& tm = TaskManager::GetInstance();
-  TaskInitInfo info_1{
+  Xd::TaskInitInfo info_1{
       "RileyTest",           "/bin/ls",       {"/"},
       {.cpu_core_limit = 2}, output_callback, finish_callback,
   };
 
-  err = tm.AddTaskAsync(std::move(info_1));
+  err = g_task_mgr->AddTaskAsync(std::move(info_1));
   EXPECT_EQ(err, SlurmxErr::kOk);
 
   using namespace std::chrono_literals;
@@ -184,7 +188,7 @@ TEST(TaskManager, LsOutput) {
   // We expect that all task will be terminated.
   kill(getpid(), SIGINT);
 
-  tm.Wait();
+  g_task_mgr->Wait();
 
   SLURMX_TRACE("Exiting test...");
 }

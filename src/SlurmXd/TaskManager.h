@@ -27,6 +27,8 @@
 #include "protos/slurmx.pb.h"
 #include "spdlog/spdlog.h"
 
+namespace Xd {
+
 // This structure is passed as an argument of AddTaskAsync.
 struct TaskInitInfo {
   std::string name;
@@ -89,10 +91,9 @@ struct grpc_req_new_task_t {
  */
 class TaskManager {
  public:
-  static TaskManager& GetInstance() {
-    static TaskManager singleton;
-    return singleton;
-  }
+  TaskManager();
+
+  ~TaskManager();
 
   /***
    * This function is thread-safe.
@@ -131,10 +132,6 @@ class TaskManager {
   static inline TaskManager* m_instance_ptr_;
 
   std::optional<const Task*> FindTaskByName(const std::string& task_name);
-
-  TaskManager();
-
-  ~TaskManager();
 
   // Note: the two maps below are NOT protected by any mutex.
   //  They should be modified in libev callbacks to avoid races.
@@ -191,3 +188,7 @@ class TaskManager {
 
   std::thread m_ev_loop_thread_;
 };
+
+}  // namespace Xd
+
+inline std::unique_ptr<Xd::TaskManager> g_task_mgr;

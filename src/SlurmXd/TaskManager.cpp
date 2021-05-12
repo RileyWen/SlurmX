@@ -1,5 +1,7 @@
 #include "TaskManager.h"
 
+namespace Xd {
+
 TaskManager::TaskManager()
     : m_cg_mgr_(Cgroup::CgroupManager::getInstance()),
       m_ev_sigchld_(nullptr),
@@ -398,3 +400,5 @@ SlurmxErr TaskManager::Kill(const std::string& task_name, int signum) {
 void TaskManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = cb;
 }
+
+}  // namespace Xd

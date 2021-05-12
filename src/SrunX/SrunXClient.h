@@ -42,13 +42,18 @@ class SrunXClient {
 
   SlurmxErr Init(std::string xd_addr_port, std::string ctlxd_addr_port);
 
-  SlurmxErr Run(const CommandLineArgs &cmd_args);
+  SlurmxErr Run(const CommandLineArgs& cmd_args);
 
   void Wait();
 
  private:
-  static void SigintHandlerFunc(int);
-  void SigintGrpcSendThreadFunc();
+  static void SigintHandlerFunc_(int);
+  void SigintGrpcSendThreadFunc_();
+
+  SlurmxErr RequestResourceToken_(const CommandLineArgs& cmd_args,
+                                  uuid* resource_uuid);
+  SlurmxErr EstablishSrunXStream_(const CommandLineArgs& cmd_args,
+                                  const uuid& resource_uuid);
 
   std::unique_ptr<SlurmXd::Stub> m_xd_stub_;
   std::unique_ptr<SlurmCtlXd::Stub> m_ctld_stub_;
