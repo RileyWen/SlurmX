@@ -13,7 +13,8 @@ grpc::Status CtlXd::SlurmCtlXdServiceImpl::RegisterSlurmXd(
 
   std::vector<std::string> peer_slices;
   // ["ipv4", "<address>, "<port>"]
-  boost::algorithm::split(peer_slices, context->peer(), boost::is_any_of(":"));
+  std::string peer = context->peer();
+  boost::algorithm::split(peer_slices, peer, boost::is_any_of(":"));
   m_ctlxd_server_->RegisterNewXd(
       fmt::format("{}:{}", peer_slices[1], request->port()), spec, &node_uuid);
 

@@ -1,17 +1,21 @@
 #pragma once
 
 #include <grpc++/grpc++.h>
+#include <signal.h>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/thread/shared_mutex.hpp>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
-#include <boost/uuid/uuid_hash.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <condition_variable>
 #include <mutex>
 #include <thread>
 #include <vector>
+
+#if Boost_MINOR_VERSION >= 71
+#include <boost/uuid/uuid_hash.hpp>
+#endif
 
 #include "PublicHeader.h"
 #include "protos/slurmx.grpc.pb.h"
@@ -89,7 +93,7 @@ struct SlurmXdNode {
 
   // Store the information of the slices of allocated resource.
   // One uuid represents one shard of allocated resource.
-  std::unordered_map<uuid, resource_t> resc_shards;
+  std::unordered_map<uuid, resource_t, boost::hash<uuid>> resc_shards;
 };
 
 /***
@@ -133,13 +137,14 @@ class CtlXdServer {
   /**
    * A map from uuid to node information.
    */
-  std::unordered_map<uuid, SlurmXdNode> m_xd_node_map_;
+  std::unordered_map<uuid, SlurmXdNode, boost::hash<uuid>> m_xd_node_map_;
   std::mutex m_xd_node_mtx_;
 
   /**
    * A map from uuid to grpc client stubs.
    */
-  std::unordered_map<uuid, std::unique_ptr<XdClient>> m_xd_stub_maps_;
+  std::unordered_map<uuid, std::unique_ptr<XdClient>, boost::hash<uuid>>
+      m_xd_stub_maps_;
   boost::shared_mutex m_xd_stub_shared_mtx_;
 
   boost::uuids::random_generator_mt19937 m_uuid_gen_;

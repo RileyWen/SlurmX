@@ -3,10 +3,13 @@
 #include <grpc++/grpc++.h>
 
 #include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_hash.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <chrono>
 #include <memory>
+
+#if Boost_MINOR_VERSION >= 71
+#include <boost/uuid/uuid_hash.hpp>
+#endif
 
 #include "PublicHeader.h"
 #include "protos/slurmx.grpc.pb.h"

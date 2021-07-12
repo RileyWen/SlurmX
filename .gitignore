@@ -6,4 +6,7 @@ cmake-build-*
 third_party/*
 
 # Header only
-!third_party/concurrentqueue
+!dependencies/pre_installed
+dependencies/online
+dependencies/tarballs
+dependencies/.extracted

@@ -4,13 +4,16 @@
 
 #include <atomic>
 #include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_hash.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <thread>
 #include <unordered_map>
+
+#if Boost_MINOR_VERSION >= 71
+#include <boost/uuid/uuid_hash.hpp>
+#endif
 
 #include "PublicHeader.h"
 #include "TaskManager.h"
@@ -79,7 +82,7 @@ class XdServer {
 
   // It is used to record allocated resources (from slurmctlxd)
   //  in this node.
-  std::unordered_map<uuid, resource_t> m_resource_uuid_map_;
+  std::unordered_map<uuid, resource_t, boost::hash<uuid>> m_resource_uuid_map_;
 
   // The mutex which protects the accounting of resource on this node.
   std::mutex m_node_resource_mtx_;

@@ -6,34 +6,39 @@ set(CMAKE_CXX_STANDARD 17)
 #set(CMAKE_VERBOSE_MAKEFILE ON)
 
 # Find third-party libraries
-set(THIRD_PARTY_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party)
+set(DEPENDENCIES_PRE_INSTALLED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/pre_installed)
+set(DEPENDENCIES_ONLINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/online)
 
 find_package(Threads REQUIRED)
-find_package(fmt 7.1.3 REQUIRED HINTS ${THIRD_PARTY_DIR}/fmt)
-find_package(Boost 1.71 REQUIRED COMPONENTS thread)
-find_package(GTest CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/google-test)
+find_package(fmt 7.1.3 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/fmt)
 
-find_package(spdlog 1.8.2 REQUIRED HINTS ${THIRD_PARTY_DIR}/spdlog)
+find_package(Boost 1.67 REQUIRED COMPONENTS thread)
+add_definitions(-DBoost_MINOR_VERSION=${Boost_MINOR_VERSION})
+
+find_package(GTest CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/google-test)
+
+find_package(spdlog 1.8.2 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/spdlog)
 add_definitions(-DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
 
-find_package(Libevent REQUIRED HINTS ${THIRD_PARTY_DIR}/libevent)
+find_package(Libevent REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/libevent)
 
-find_package(cxxopts 2.2.0 REQUIRED HINTS ${THIRD_PARTY_DIR}/cxxopts)
+find_package(cxxopts 2.2.0 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/cxxopts)
 
-find_package(Protobuf CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/grpc)
-find_package(gRPC CONFIG REQUIRED HINTS ${THIRD_PARTY_DIR}/grpc)
+find_package(absl CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/abseil)
+find_package(Protobuf CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/grpc)
+find_package(gRPC CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/grpc)
 get_target_property(GRPC_CPP_PLUGIN_LOCATION gRPC::grpc_cpp_plugin LOCATION)
 
 find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
 
-list(APPEND CMAKE_PREFIX_PATH "${THIRD_PARTY_DIR}/libuv")
-pkg_check_modules(libuv REQUIRED IMPORTED_TARGET libuv>=1.40.0)
+list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/libuv")
+pkg_check_modules(libuv IMPORTED_TARGET libuv>=1.40.0)
 
 # concurrent queue has no cmake config files. Add it manually as a header-only library.
 add_library(concurrentqueue INTERFACE)
-target_include_directories(concurrentqueue INTERFACE ${THIRD_PARTY_DIR}/concurrentqueue/include)
+target_include_directories(concurrentqueue INTERFACE ${DEPENDENCIES_PRE_INSTALLED_DIR}/concurrentqueue/include)
 
 LIST(APPEND THIRD_PARTY_LIBS proto fmt::fmt)
 
@@ -75,3 +80,5 @@ protobuf_generate(
         PLUGIN "protoc-gen-grpc=${GRPC_CPP_PLUGIN_LOCATION}"
         GENERATE_EXTENSIONS .grpc.pb.h .grpc.pb.cc
 )
+
+target_link_libraries(proto absl::base absl::synchronization)
