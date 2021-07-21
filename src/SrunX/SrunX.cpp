@@ -25,14 +25,12 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  std::string xd_addr_port =
-      fmt::format("{}:{}", args.xd_address, args.xd_port);
   std::string ctlxd_addr_port =
       fmt::format("{}:{}", args.ctlxd_address, args.ctlxd_port);
 
   SrunX::SrunXClient client;
 
-  err = client.Init(xd_addr_port, ctlxd_addr_port);
+  err = client.Init(ctlxd_addr_port);
   if (err != SlurmxErr::kOk) {
     SLURMX_ERROR("{}", SlurmxErrStr(err));
     return 1;

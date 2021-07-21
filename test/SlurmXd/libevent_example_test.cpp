@@ -51,8 +51,9 @@ static void sigchld_handler(int sig) {
     SPDLOG_INFO("SIGCHLD received too early. PID: {}", pid);
 }
 
-struct LibEvent : testing::Test {
-  LibEvent() : m_ev_sigchld_(nullptr), m_ev_base_(nullptr), testing::Test() {}
+struct LibEventTest : testing::Test {
+  LibEventTest()
+      : m_ev_sigchld_(nullptr), m_ev_base_(nullptr), testing::Test() {}
 
   void SetUp() override {
     signal(SIGCHLD, sigchld_handler);
@@ -76,7 +77,7 @@ struct LibEvent : testing::Test {
   }
 
   static void read_uv_stream(struct bufferevent *bev, void *user_data) {
-    auto *this_ = reinterpret_cast<LibEvent *>(user_data);
+    auto *this_ = reinterpret_cast<LibEventTest *>(user_data);
 
     size_t buf_len = evbuffer_get_length(bev->input);
     SPDLOG_INFO("Trying to read buffer(len: {})...", buf_len);
@@ -93,7 +94,7 @@ struct LibEvent : testing::Test {
 
   static void sigchld_handler_func(evutil_socket_t sig, short events,
                                    void *user_data) {
-    auto *this_ = reinterpret_cast<LibEvent *>(user_data);
+    auto *this_ = reinterpret_cast<LibEventTest *>(user_data);
 
     SPDLOG_INFO("SIGCHLD received...");
     int status;
@@ -112,7 +113,7 @@ struct LibEvent : testing::Test {
   std::string m_expected_str_;
 };
 
-TEST_F(LibEvent, IoRedirectAndDynamicTaskAdding) {
+TEST_F(LibEventTest, IoRedirectAndDynamicTaskAdding) {
   std::string test_prog_path = "/tmp/slurmxd_test_" + RandomFileNameStr();
   std::string prog_text =
       "#include <iostream>\\n"

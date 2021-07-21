@@ -1,5 +1,7 @@
 #include "XdServer.h"
 
+#include "CtlXdClient.h"
+
 namespace Xd {
 
 using boost::uuids::uuid;
@@ -28,6 +30,8 @@ Status SlurmXdServiceImpl::SrunXStream(
 
   // A task name is bound to one connection.
   std::string task_name;
+  // A resource uuid is bound to one task.
+  uuid resource_uuid;
 
   StreamState state = StreamState::kNegotiation;
   while (true) {
@@ -35,12 +39,20 @@ Status SlurmXdServiceImpl::SrunXStream(
       case StreamState::kNegotiation:
         ok = stream->Read(&request);
         if (ok) {
-          if (request.type() !=
-              slurmx_grpc::SrunXStreamRequest_Type_Negotiation) {
+          if (request.type() != SrunXStreamRequest::NegotiationRequest) {
             SLURMX_DEBUG("Expect negotiation from peer {}, but none.",
                          context->peer());
             state = StreamState::kAbort;
           } else {
+            SLURMX_DEBUG("Negotiation from peer: {}", context->peer());
+            reply.Clear();
+            reply.set_type(SrunXStreamReply::NegotiationReply);
+            reply.mutable_negotiation_reply()->set_ok(true);
+
+            stream_w_mtx.lock();
+            stream->Write(reply);
+            stream_w_mtx.unlock();
+
             state = StreamState::kNewTask;
           }
         } else {
@@ -54,12 +66,11 @@ Status SlurmXdServiceImpl::SrunXStream(
       case StreamState::kNewTask:
         ok = stream->Read(&request);
         if (ok) {
-          if (request.type() != slurmx_grpc::SrunXStreamRequest_Type_NewTask) {
+          if (request.type() != SrunXStreamRequest::NewTask) {
             SLURMX_DEBUG("Expect new_task from peer {}, but none.",
                          context->peer());
             state = StreamState::kAbort;
           } else {
-            uuid resource_uuid;
             std::copy(request.task_info().resource_uuid().begin(),
                       request.task_info().resource_uuid().end(),
                       resource_uuid.data);
@@ -71,7 +82,7 @@ Status SlurmXdServiceImpl::SrunXStream(
               // The resource uuid provided by Client is invalid. Reject.
 
               reply.Clear();
-              reply.set_type(slurmx_grpc::SrunXStreamReply_Type_NewTaskResult);
+              reply.set_type(SrunXStreamReply::NewTaskResult);
 
               auto *result = reply.mutable_new_task_result();
               result->set_ok(false);
@@ -84,7 +95,7 @@ Status SlurmXdServiceImpl::SrunXStream(
               state = StreamState::kFinish;
             } else {
               task_name = fmt::format("{}_{}", context->peer(),
-                                      g_server->NewTaskSeqNum());
+                                      g_server->NewTaskSeqNum_());
 
               std::forward_list<std::string> arguments;
               auto iter = arguments.before_begin();
@@ -108,9 +119,8 @@ Status SlurmXdServiceImpl::SrunXStream(
               auto output_callback =
                   [stream, &write_mtx = stream_w_mtx](std::string &&buf) {
                     SLURMX_TRACE("Output Callback called. buf: {}", buf);
-                    slurmx_grpc::SrunXStreamReply reply;
-                    reply.set_type(
-                        slurmx_grpc::SrunXStreamReply_Type_IoRedirection);
+                    SlurmxGrpc::SrunXStreamReply reply;
+                    reply.set_type(SrunXStreamReply::IoRedirection);
 
                     std::string *reply_buf =
                         reply.mutable_io_redirection()->mutable_buf();
@@ -131,15 +141,14 @@ Status SlurmXdServiceImpl::SrunXStream(
                                          int value) {
                 SLURMX_TRACE("Finish Callback called. signaled: {}, value: {}",
                              is_terminated_by_signal, value);
-                slurmx_grpc::SrunXStreamReply reply;
-                reply.set_type(slurmx_grpc::SrunXStreamReply_Type_ExitStatus);
+                SlurmxGrpc::SrunXStreamReply reply;
+                reply.set_type(SrunXStreamReply::ExitStatus);
 
-                slurmx_grpc::TaskExitStatus *stat =
+                SlurmxGrpc::TaskExitStatus *stat =
                     reply.mutable_task_exit_status();
-                stat->set_reason(
-                    is_terminated_by_signal
-                        ? slurmx_grpc::TaskExitStatus_ExitReason_Signal
-                        : slurmx_grpc::TaskExitStatus_ExitReason_Normal);
+                stat->set_reason(is_terminated_by_signal
+                                     ? SlurmxGrpc::TaskExitStatus::Signal
+                                     : SlurmxGrpc::TaskExitStatus::Normal);
                 stat->set_value(value);
 
                 // stream->WriteLast() shall not be used here.
@@ -154,8 +163,8 @@ Status SlurmXdServiceImpl::SrunXStream(
                 // WriteLast, the connection can stop anyway. Otherwise, the
                 // connection will stop (i.e. stream->Read() returns false) only
                 // if 1. SrunX calls stream->WriteLast() or 2. the underlying
-                // channel is broken. However, the 2 situations is all
-                // situations that we will meet, so the following line should
+                // channel is broken. However, the 2 situations cover all
+                // situations that we can meet, so the following line should
                 // not be added except when debugging.
                 //
                 // context->TryCancel();
@@ -173,8 +182,7 @@ Status SlurmXdServiceImpl::SrunXStream(
               err = g_task_mgr->AddTaskAsync(std::move(task_info));
               if (err == SlurmxErr::kOk) {
                 reply.Clear();
-                reply.set_type(
-                    slurmx_grpc::SrunXStreamReply_Type_NewTaskResult);
+                reply.set_type(SrunXStreamReply::NewTaskResult);
 
                 auto *result = reply.mutable_new_task_result();
                 result->set_ok(true);
@@ -186,8 +194,7 @@ Status SlurmXdServiceImpl::SrunXStream(
                 state = StreamState::kWaitForEofOrSigOrTaskEnd;
               } else {
                 reply.Clear();
-                reply.set_type(
-                    slurmx_grpc::SrunXStreamReply_Type_NewTaskResult);
+                reply.set_type(SrunXStreamReply::NewTaskResult);
 
                 auto *result = reply.mutable_new_task_result();
                 result->set_ok(false);
@@ -220,7 +227,7 @@ Status SlurmXdServiceImpl::SrunXStream(
       case StreamState::kWaitForEofOrSigOrTaskEnd: {
         ok = stream->Read(&request);
         if (ok) {
-          if (request.type() != slurmx_grpc::SrunXStreamRequest_Type_Signal) {
+          if (request.type() != SrunXStreamRequest::Signal) {
             SLURMX_DEBUG("Expect signal from peer {}, but none.",
                          context->peer());
             state = StreamState::kAbort;
@@ -231,9 +238,12 @@ Status SlurmXdServiceImpl::SrunXStream(
             SLURMX_TRACE("Receive signum {} from client. Killing task {}",
                          request.signum(), task_name);
 
+            // Todo: Sometimes, TaskManager can't kill a task, there're some
+            //  problems here.
+
             err = g_task_mgr->Kill(task_name, request.signum());
             if (err != SlurmxErr::kOk) {
-              SLURMX_ERROR("Failed to kill task {}. Error: {}",
+              SLURMX_ERROR("Failed to kill task {}. Error: {}", task_name,
                            SlurmxErrStr(err));
             }
 
@@ -253,14 +263,30 @@ Status SlurmXdServiceImpl::SrunXStream(
         break;
       }
 
-      case StreamState::kAbort:
+      case StreamState::kAbort: {
         SLURMX_DEBUG("Connection from peer {} aborted.", context->peer());
-        return Status::CANCELLED;
 
-      case StreamState::kFinish:
+        // Invalidate resource uuid and free the resource in use.
+        g_server->RevokeResourceToken(resource_uuid);
+
+        // Inform SlurmCtlXd that the task ended.
+        g_ctlxd_client->DeallocateResource(resource_uuid);
+
+        return Status::CANCELLED;
+      }
+
+      case StreamState::kFinish: {
         SLURMX_TRACE("Connection from peer {} finished normally",
                      context->peer());
+
+        // Invalidate resource uuid and free the resource in use.
+        g_server->RevokeResourceToken(resource_uuid);
+
+        // Inform SlurmCtlXd that the task ended.
+        g_ctlxd_client->DeallocateResource(resource_uuid);
+
         return Status::OK;
+      }
 
       default:
         SLURMX_ERROR("Unexpected XdServer State: {}", state);

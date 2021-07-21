@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Statistic">
+    <option name="separateTabsFileTypes" value="cpp;h;java;xml;css;html;js;properties;jsp;txt;php;php4;php5;phtml;inc;py;vue;kt" />
+    <option name="excludeDotArtifactDirectory" value="true" />
+    <option name="excludedDirectories">
+      <list>
+        <option value="$PROJECT_DIR$/cmake-build-debug" />
+        <option value="$PROJECT_DIR$/cmake-build-debug-remote" />
+        <option value="$PROJECT_DIR$/third_party" />
+        <option value="$PROJECT_DIR$/generated" />
+      </list>
+    </option>
+  </component>
+</project>

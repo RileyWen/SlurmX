@@ -5,11 +5,12 @@
 #include <queue>
 #include <thread>
 
+#include "SharedTestImpl/greeter_service_impl.h"
 #include "concurrentqueue/concurrentqueue.h"
 #include "grpc++/grpc++.h"
 #include "gtest/gtest.h"
-#include "protos/grpc_example.grpc.pb.h"
-#include "protos/grpc_example.pb.h"
+#include "protos/math.grpc.pb.h"
+#include "protos/math.pb.h"
 #include "spdlog/spdlog.h"
 
 using grpc::Server;
@@ -60,29 +61,8 @@ class GreeterClient {
   std::unique_ptr<Greeter::Stub> stub_;
 };
 
-// Logic and data behind the server's behavior.
-class GreeterServiceImpl final : public Greeter::Service {
-  Status SayHello(ServerContext* context, const HelloRequest* request,
-                  HelloReply* reply) override {
-    std::string prefix("Hello ");
-    reply->set_message(prefix + request->name());
-    return Status::OK;
-  }
-};
-
 TEST(GrpcExample, Simple) {
-  std::string server_address("localhost:50051");
-  GreeterServiceImpl service;
-
-  ServerBuilder builder;
-  // Listen on the given address without any authentication mechanism.
-  builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
-  // Register "service" as the instance through which we'll communicate with
-  // clients. In this case it corresponds to an *synchronous* service.
-  builder.RegisterService(&service);
-  // Finally assemble the server.
-  std::unique_ptr<Server> server(builder.BuildAndStart());
-  std::cout << "Server listening on " << server_address << std::endl;
+  GreeterSyncServer server("localhost:50051");
 
   // Instantiate the client. It requires a channel, out of which the actual RPCs
   // are created. This channel models a connection to an endpoint (in this case,
@@ -97,11 +77,11 @@ TEST(GrpcExample, Simple) {
   EXPECT_EQ(reply, "Hello world");
 
   // This method is thread-safe.
-  server->Shutdown();
+  server.Shutdown();
 
   // Wait for the server to shutdown. Note that some other thread must be
   // responsible for shutting down the server for this call to ever return.
-  server->Wait();
+  server.Wait();
 }
 
 using grpc::CompletionQueue;

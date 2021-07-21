@@ -10,30 +10,40 @@
 
 int main(int argc, char** argv) {
   // Todo: Add single program instance checking.
-  // Todo: Check static level setting.
-#ifndef NDEBUG
-  spdlog::set_level(spdlog::level::trace);
-#endif
 
   cxxopts::Options options("slurmxd");
 
   // clang-format off
   options.add_options()
-    ("l,listen", "listening address",
-        cxxopts::value<std::string>()->default_value("0.0.0.0"))
-    ("p,port", "listening port",
-        cxxopts::value<std::string>()->default_value(kXdDefaultPort))
-    ("S,server-address", "SlurmCtlXd server address",
-        cxxopts::value<std::string>())
-    ("P,server-port", "SlurmCtlXd server port",
+    ("l,listen", "Listen address format: <IP>:<port>",
+        cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kXdDefaultPort)))
+    ("s,server-address", "SlurmCtlXd address format: <IP>:<port>",
         cxxopts::value<std::string>())
     ("ncpu", "# of total cpu core", cxxopts::value<uint32_t>())
-    ("nmem", "# of total memory in bytes", cxxopts::value<uint64_t>())
+    ("memory", R"(# of total memory. Format: \d+[BKMG])", cxxopts::value<std::string>())
+    ("D,debug-level", "[trace|debug|info|warn|error]", cxxopts::value<std::string>()->default_value("info"))
     ("h,help", "Show help")
   ;
   // clang-format on
 
   auto parsed_args = options.parse(argc, argv);
+
+  // Todo: Check static level setting.
+  const std::string& debug_level = parsed_args["debug-level"].as<std::string>();
+  if (debug_level == "trace")
+    spdlog::set_level(spdlog::level::trace);
+  else if (debug_level == "debug")
+    spdlog::set_level(spdlog::level::debug);
+  else if (debug_level == "info")
+    spdlog::set_level(spdlog::level::info);
+  else if (debug_level == "warn")
+    spdlog::set_level(spdlog::level::warn);
+  else if (debug_level == "error")
+    spdlog::set_level(spdlog::level::err);
+  else {
+    SLURMX_ERROR("Illegal debug-level format.");
+    return 1;
+  }
 
   if (parsed_args.count("help") > 0) {
     fmt::print("{}\n", options.help());
@@ -45,8 +55,8 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  if (parsed_args.count("nmem") == 0) {
-    fmt::print("nmem must be specified.\n{}\n", options.help());
+  if (parsed_args.count("memory") == 0) {
+    fmt::print("memory must be specified.\n{}\n", options.help());
     return 1;
   }
 
@@ -55,56 +65,34 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  if (parsed_args.count("server-port") == 0) {
-    fmt::print("SlurmCtlXd address must be specified.\n{}\n", options.help());
+  const std::string& memory = parsed_args["memory"].as<std::string>();
+  std::regex mem_regex(R"((\d+)([KMBG]))");
+  std::smatch mem_group;
+  if (!std::regex_search(memory, mem_group, mem_regex)) {
+    SLURMX_ERROR("Illegal memory format.");
     return 1;
   }
 
-  std::string address = parsed_args["listen"].as<std::string>();
-  std::string port = parsed_args["port"].as<std::string>();
-  std::string ctlxd_address = parsed_args["server-address"].as<std::string>();
-  std::string ctlxd_port = parsed_args["server-port"].as<std::string>();
-
-  std::regex regex_addr(
-      R"(^((25[0-5]|(2[0-4]|1[0-9]|[1-9]|)[0-9])(\.(?!$)|$)){4}$)");
-
-  std::regex regex_port(R"(^([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|)"
-                        R"(65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$)");
-
-  if (!std::regex_match(address, regex_addr)) {
-    fmt::print("Listening address is invalid.\n{}\n", options.help());
-    return 1;
-  }
-
-  if (!std::regex_match(port, regex_port)) {
-    fmt::print("Listening port is invalid.\n{}\n", options.help());
-    return 1;
-  }
-
-  if (!std::regex_match(ctlxd_address, regex_addr)) {
-    fmt::print("SlurmCtlXd address is invalid.\n{}\n", options.help());
-    return 1;
-  }
-
-  if (!std::regex_match(ctlxd_port, regex_port)) {
-    fmt::print("SlurmCtlXd port is invalid.\n{}\n", options.help());
-    return 1;
-  }
-
-  std::string server_listen_addr_port = fmt::format("{}:{}", address, port);
-  std::string ctlxd_addr_port = fmt::format("{}:{}", ctlxd_address, ctlxd_port);
+  uint64_t memory_bytes = std::stoul(mem_group[1]);
+  if (mem_group[2] == "K")
+    memory_bytes *= 1024;
+  else if (mem_group[2] == "M")
+    memory_bytes *= 1024 * 1024;
+  else if (mem_group[2] == "G")
+    memory_bytes *= 1024 * 1024 * 1024;
 
   resource_t resource_in_cmd;
   resource_in_cmd.cpu_count = parsed_args["ncpu"].as<uint32_t>();
-  resource_in_cmd.memory_bytes = parsed_args["nmem"].as<uint64_t>();
-  resource_in_cmd.memory_sw_bytes = parsed_args["nmem"].as<uint64_t>();
+  resource_in_cmd.memory_bytes = memory_bytes;
+  resource_in_cmd.memory_sw_bytes = memory_bytes;
 
   SlurmxErr err;
 
   g_task_mgr = std::make_unique<Xd::TaskManager>();
 
   g_ctlxd_client = std::make_unique<Xd::CtlXdClient>();
-  err = g_ctlxd_client->Connect(ctlxd_addr_port);
+  err =
+      g_ctlxd_client->Connect(parsed_args["server-address"].as<std::string>());
   if (err == SlurmxErr::kConnectionTimeout) {
     SLURMX_ERROR("Cannot connect to SlurmCtlXd.");
     return 1;
@@ -112,10 +100,18 @@ int main(int argc, char** argv) {
 
   // Todo: Set FD_CLOEXEC on stdin, stdout, stderr
 
-  g_server =
-      std::make_unique<Xd::XdServer>(server_listen_addr_port, resource_in_cmd);
+  const std::string& listen_addr = parsed_args["listen"].as<std::string>();
+  g_server = std::make_unique<Xd::XdServer>(listen_addr, resource_in_cmd);
 
-  err = g_ctlxd_client->RegisterOnCtlXd(resource_in_cmd, std::stoul(port));
+  std::regex addr_port_re(R"(^.*:(\d+)$)");
+  std::smatch port_group;
+  if (!std::regex_match(listen_addr, port_group, addr_port_re)) {
+    SLURMX_ERROR("Illegal CtlXd address format.");
+    return 1;
+  }
+
+  err = g_ctlxd_client->RegisterOnCtlXd(resource_in_cmd,
+                                        std::stoul(port_group[1]));
   if (err != SlurmxErr::kOk) {
     SLURMX_ERROR("Exit due to registration error... Shutting down server...");
     g_server->Shutdown();

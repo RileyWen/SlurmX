@@ -30,13 +30,13 @@ using grpc::ServerContext;
 using grpc::ServerReaderWriter;
 using grpc::Status;
 
-using slurmx_grpc::GrantResourceTokenReply;
-using slurmx_grpc::GrantResourceTokenRequest;
-using slurmx_grpc::RevokeResourceTokenReply;
-using slurmx_grpc::RevokeResourceTokenRequest;
-using slurmx_grpc::SlurmXd;
-using slurmx_grpc::SrunXStreamReply;
-using slurmx_grpc::SrunXStreamRequest;
+using SlurmxGrpc::GrantResourceTokenReply;
+using SlurmxGrpc::GrantResourceTokenRequest;
+using SlurmxGrpc::RevokeResourceTokenReply;
+using SlurmxGrpc::RevokeResourceTokenRequest;
+using SlurmxGrpc::SlurmXd;
+using SlurmxGrpc::SrunXStreamReply;
+using SlurmxGrpc::SrunXStreamRequest;
 
 class SlurmXdServiceImpl : public SlurmXd::Service {
  public:
@@ -73,7 +73,7 @@ class XdServer {
   std::optional<resource_t> FindResourceByUuid(const uuid &resource_uuid);
 
  private:
-  uint64_t NewTaskSeqNum() { return m_task_seq_++; };
+  uint64_t NewTaskSeqNum_() { return m_task_seq_++; };
 
   // total = avail + in-use
   resource_t m_resource_total_;

@@ -11,6 +11,11 @@
 
 #include <atomic>
 #include <boost/algorithm/string.hpp>
+#include <boost/multi_index/global_fun.hpp>
+#include <boost/multi_index/mem_fun.hpp>
+#include <boost/multi_index/member.hpp>
+#include <boost/multi_index/ordered_index.hpp>
+#include <boost/multi_index_container.hpp>
 #include <forward_list>
 #include <functional>
 #include <future>
@@ -31,6 +36,8 @@ namespace Xd {
 
 // This structure is passed as an argument of AddTaskAsync.
 struct TaskInitInfo {
+  /// \b name should NOT be modified after being assigned! It's used as an
+  /// index.
   std::string name;
 
   std::string executive_path;
@@ -60,9 +67,11 @@ struct Task {
 
   // fields below are types of Task runtime information
 
-  // The pid of the root process of a task.
-  // Also the pgid of all processes spawned from the root process.
-  // When a signal is sent to a task, it's sent to this pgid.
+  /// The pid of the root process of a task.
+  /// Also the pgid of all processes spawned from the root process.
+  /// When a signal is sent to a task, it's sent to this pgid.
+  /// \b root_pid should NOT be modified after being assigned! It's used as an
+  /// index.
   pid_t root_pid = {};
 
   // The cgroup name that restrains the Task.
@@ -70,6 +79,69 @@ struct Task {
 
   // The underlying event that handles the output of the task.
   struct bufferevent* ev_buf_event;
+};
+
+namespace Internal {
+
+/*
+ * The implementation of TaskMultiIndexSet.
+ */
+
+using boost::multi_index::indexed_by;
+using boost::multi_index::ordered_unique;
+using boost::multi_index::tag;
+
+struct TaskName {};
+struct Pid {};
+
+struct TaskPtrWrapper {
+  const std::string& name() const { return p_->init_info.name; }
+  pid_t pid() const { return p_->root_pid; }
+
+  std::unique_ptr<Task> p_;
+};
+
+// clang-format off
+typedef boost::multi_index_container<
+    TaskPtrWrapper,
+    indexed_by<
+        ordered_unique<
+          tag<TaskName>,
+          BOOST_MULTI_INDEX_CONST_MEM_FUN(TaskPtrWrapper, const std::string&, name)
+        >,
+        ordered_unique<
+          tag<Pid>,
+          BOOST_MULTI_INDEX_CONST_MEM_FUN(TaskPtrWrapper, pid_t, pid)
+        >
+    >
+> TaskMultiIndexSetInternal;
+// clang-format on
+
+}  // namespace Internal
+
+class TaskMultiIndexSet {
+ public:
+  using iterator_type =
+      Internal::TaskMultiIndexSetInternal::index_iterator<Internal::Pid>::type;
+
+  void Insert(std::unique_ptr<Task>&& task);
+
+  const Task* FindByName(const std::string& name);
+
+  const Task* FindByPid(pid_t pid);
+
+  bool Empty() { return task_set_.empty(); }
+
+  void EraseByName(const std::string& name);
+
+  size_t CountByName(const std::string& name);
+
+  // Adoption for range-based for.
+  iterator_type begin();
+  iterator_type end();
+
+ private:
+  Internal::TaskMultiIndexSetInternal task_set_;
 };
 
 // Used to get the result of new task appending from event loop thread
@@ -108,6 +180,9 @@ class TaskManager {
   // Wait internal libevent base loop to exit...
   void Wait();
 
+  // Ask TaskManager to stop its event loop.
+  void Shutdown();
+
   /***
    * Send a signal to the task (which is a process group).
    * @param task_name the name of the task.
@@ -135,24 +210,19 @@ class TaskManager {
 
   // Note: the two maps below are NOT protected by any mutex.
   //  They should be modified in libev callbacks to avoid races.
-
-  // Users submit tasks by name.
-  std::unordered_map<std::string, std::unique_ptr<Task>> m_name_to_task_map_;
-
-  // But the system tracks process by pid. We need to maintain
-  //  a mapping from pid to task name.
-  std::unordered_map<pid_t, std::string> m_pid_to_name_map_;
+  TaskMultiIndexSet m_task_set_;
 
   Cgroup::CgroupManager& m_cg_mgr_;
 
-  static void ev_sigchld_cb_(evutil_socket_t sig, short events,
-                             void* user_data);
+  static void EvSigchldCb_(evutil_socket_t sig, short events, void* user_data);
 
-  static void ev_sigint_cb_(evutil_socket_t sig, short events, void* user_data);
+  static void EvSigintCb_(evutil_socket_t sig, short events, void* user_data);
 
-  static void ev_grpc_event_cb_(evutil_socket_t, short events, void* user_data);
+  static void EvGrpcEventCb_(evutil_socket_t, short events, void* user_data);
 
-  static void ev_subprocess_read_cb_(struct bufferevent* bev, void* pid_);
+  static void EvSubprocessReadCb_(struct bufferevent* bev, void* pid_);
+
+  static void EvExitEventCb_(evutil_socket_t, short events, void* user_data);
 
   struct sigchld_info_t {
     pid_t pid;
@@ -172,10 +242,9 @@ class TaskManager {
   // The function which will be called when SIGINT is triggered.
   std::function<void()> m_sigint_cb_;
 
-  // When SIGINT is triggered, this variable is set to true.
-  // Then, AddTaskAsyncMethod will not accept any more new tasks
-  // and ev_sigchld_cb_ will stop the event loop when there is
-  // no task running.
+  // When SIGINT is triggered or Shutdown() gets called, this variable is set to
+  // true. Then, AddTaskAsyncMethod will not accept any more new tasks and
+  // ev_sigchld_cb_ will stop the event loop when there is no task running.
   std::atomic_bool m_is_ending_now_;
 
   // When a new task grpc message arrives, the grpc function (which
@@ -186,9 +255,15 @@ class TaskManager {
   int m_grpc_event_fd_;
   moodycamel::ConcurrentQueue<grpc_req_new_task_t> m_gprc_new_task_queue_;
 
+  // When this event is triggered, the event loop will exit.
+  struct event* m_ev_exit_event_;
+  // Use eventfd here because the user-defined event sometimes can't be
+  // triggered by event_activate(). We have no interest in finding out why
+  // event_activate() can't work and just use eventfd as a reliable solution.
+  int m_ev_exit_fd_;
+
   std::thread m_ev_loop_thread_;
 };
-
 }  // namespace Xd
 
 inline std::unique_ptr<Xd::TaskManager> g_task_mgr;

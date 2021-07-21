@@ -7,8 +7,7 @@ cxxopts::Options InitOptions() {
   options.positional_help("<remote path> [Args...]").show_positional_help();
   options.custom_help(
       "[--help] <--cpu <value>> <--memory <value>[MmGg]>\n"
-      "\t  <--memory_swap <value>[MmGg]> <--xdserver-address <address>> \n"
-      "\t  <--xdserver-port <port>> <--ctlxdserver-address <address>> \n"
+      "\t  <--memory_swap <value>[MmGg]>  <--ctlxdserver-address <address>> \n"
       "\t  <--ctlxdserver-port <port>>");
 
   // clang-format off
@@ -21,9 +20,6 @@ cxxopts::Options InitOptions() {
       ("w,memory_swap",
        "Limiting the swap memory usage of task (default:Kb <value>[MmGg] eg:128m)",
        cxxopts::value<std::string>())
-      ("s,xd-address", "SlurmXd server address",
-       cxxopts::value<std::string>())
-      ("p,xd-port", "SlurmXd server port", cxxopts::value<std::string>())
       ("S,ctlxd-address", "SlurmCtlXd server address",
        cxxopts::value<std::string>())
       ("P,ctlxd-port", "SlurmCtlXd server port",
@@ -81,18 +77,8 @@ SlurmxErr CheckValidityOfCommandLineArgs(
       return SlurmxErr::kGenericFailure;
     }
 
-    if (parse_result.count("xd-address") == 0) {
-      fmt::print("SlurmCtlXd address must be specified.\n{}", options.help());
-      return SlurmxErr::kGenericFailure;
-    }
-
     if (parse_result.count("ctlxd-address") == 0) {
       fmt::print("SlurmCtlXd address must be specified.\n{}", options.help());
-      return SlurmxErr::kGenericFailure;
-    }
-
-    if (parse_result.count("xd-port") == 0) {
-      fmt::print("SlurmXd port must be specified.\n{}", options.help());
       return SlurmxErr::kGenericFailure;
     }
 
@@ -101,9 +87,6 @@ SlurmxErr CheckValidityOfCommandLineArgs(
       return SlurmxErr::kGenericFailure;
     }
 
-    const auto& xd_server_address =
-        parse_result["xd-address"].as<std::string>();
-    const auto& xd_server_port = parse_result["xd-port"].as<std::string>();
     const auto& ctlxd_server_address =
         parse_result["ctlxd-address"].as<std::string>();
     const auto& ctlxd_server_port =
@@ -114,16 +97,6 @@ SlurmxErr CheckValidityOfCommandLineArgs(
 
     std::regex regex_port(R"(^([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|)"
                           R"(65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$)");
-
-    if (!std::regex_match(xd_server_address, regex_addr)) {
-      fmt::print("Xd server address is invalid.\n{}", options.help());
-      return SlurmxErr::kGenericFailure;
-    }
-
-    if (!std::regex_match(xd_server_port, regex_port)) {
-      fmt::print("Xd server port is invalid.\n{}", options.help());
-      return SlurmxErr::kGenericFailure;
-    }
 
     if (!std::regex_match(ctlxd_server_address, regex_addr)) {
       fmt::print("CtlXd server address is invalid.\n{}", options.help());
@@ -198,8 +171,6 @@ SlurmxErr ParseCommandLineArgsIntoStruct(
     }
   }
 
-  args->xd_address = parse_result["xd-address"].as<std::string>();
-  args->xd_port = parse_result["xd-port"].as<std::string>();
   args->ctlxd_address = parse_result["ctlxd-address"].as<std::string>();
   args->ctlxd_port = parse_result["ctlxd-port"].as<std::string>();
 

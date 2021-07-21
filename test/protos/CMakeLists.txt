@@ -1,0 +1,37 @@
+file(GLOB_RECURSE PROTO_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/*.proto)
+
+add_library(test_proto ${PROTO_SRCS})
+target_link_libraries(test_proto
+        protobuf::libprotobuf
+        gRPC::grpc
+        gRPC::grpc++)
+
+# The path used for #include
+set(GENERATED_TEST_PATH ${CMAKE_SOURCE_DIR}/generated/test)
+
+# The path where proto cpp/h are generated
+set(GENERATED_TEST_PROTO_PATH ${GENERATED_TEST_PATH}/protos)
+
+file(MAKE_DIRECTORY ${GENERATED_TEST_PROTO_PATH})
+
+target_include_directories(test_proto PUBLIC ${GENERATED_TEST_PATH})
+set_property(DIRECTORY PROPERTY ADDITIONAL_MAKE_CLEAN_FILES
+        "${CMAKE_SOURCE_DIR}/generated/test/*")
+
+# This generates the proto part of .proto file
+protobuf_generate(
+        TARGET test_proto
+        LANGUAGE cpp
+        PROTOC_OUT_DIR ${GENERATED_TEST_PROTO_PATH}
+)
+
+# This generates the grpc part of .proto file
+protobuf_generate(
+        TARGET test_proto
+        LANGUAGE grpc
+        PROTOC_OUT_DIR ${GENERATED_TEST_PROTO_PATH}
+        PLUGIN "protoc-gen-grpc=${GRPC_CPP_PLUGIN_LOCATION}"
+        GENERATE_EXTENSIONS .grpc.pb.h .grpc.pb.cc
+)
+
+target_link_libraries(test_proto absl::base absl::synchronization)

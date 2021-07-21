@@ -30,7 +30,7 @@ bool operator<(const resource_t& lhs, const resource_t& rhs) {
   return false;
 }
 
-resource_t::resource_t(const slurmx_grpc::AllocatableResource& value) {
+resource_t::resource_t(const SlurmxGrpc::AllocatableResource& value) {
   cpu_count = value.cpu_core_limit();
   memory_bytes = value.memory_limit_bytes();
   memory_sw_bytes = value.memory_sw_limit_bytes();

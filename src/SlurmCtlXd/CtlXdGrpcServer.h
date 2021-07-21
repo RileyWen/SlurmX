@@ -1,7 +1,6 @@
 #pragma once
 
 #include <grpc++/grpc++.h>
-#include <signal.h>
 
 #include <boost/algorithm/string.hpp>
 #include <boost/thread/shared_mutex.hpp>
@@ -17,83 +16,46 @@
 #include <boost/uuid/uuid_hash.hpp>
 #endif
 
+#include "CtlXdPublicDefs.h"
 #include "PublicHeader.h"
 #include "protos/slurmx.grpc.pb.h"
 #include "protos/slurmx.pb.h"
+#include "slurmx/Lock.h"
 
 namespace CtlXd {
 
 using boost::uuids::uuid;
 using grpc::Channel;
 using grpc::Server;
-using slurmx_grpc::SlurmXd;
+using SlurmxGrpc::SlurmXd;
 
 class CtlXdServer;
 
-class SlurmCtlXdServiceImpl final : public slurmx_grpc::SlurmCtlXd::Service {
+class SlurmCtlXdServiceImpl final : public SlurmxGrpc::SlurmCtlXd::Service {
  public:
   SlurmCtlXdServiceImpl(CtlXdServer *server) : m_ctlxd_server_(server) {}
 
   grpc::Status RegisterSlurmXd(
       grpc::ServerContext *context,
-      const slurmx_grpc::SlurmXdRegisterRequest *request,
-      slurmx_grpc::SlurmXdRegisterResult *response) override;
+      const SlurmxGrpc::SlurmXdRegisterRequest *request,
+      SlurmxGrpc::SlurmXdRegisterResult *response) override;
 
   grpc::Status AllocateResource(
       grpc::ServerContext *context,
-      const slurmx_grpc::ResourceAllocRequest *request,
-      slurmx_grpc::ResourceAllocReply *response) override;
+      const SlurmxGrpc::ResourceAllocRequest *request,
+      SlurmxGrpc::ResourceAllocReply *response) override;
+
+  grpc::Status DeallocateResource(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::DeallocateResourceRequest *request,
+      SlurmxGrpc::DeallocateResourceReply *response) override;
 
   grpc::Status Heartbeat(grpc::ServerContext *context,
-                         const slurmx_grpc::HeartbeatRequest *request,
-                         slurmx_grpc::HeartbeatReply *response) override;
+                         const SlurmxGrpc::HeartbeatRequest *request,
+                         SlurmxGrpc::HeartbeatReply *response) override;
 
  private:
   CtlXdServer *m_ctlxd_server_;
-};
-
-/**
- * A class that encapsulate the detail of the underlying gRPC stub.
- */
-class XdClient {
- public:
-  XdClient() = default;
-
-  /***
-   * Connect the CtlXdClient to SlurmCtlXd.
-   * @param server_address The "[Address]:[Port]" of SlurmCtlXd.
-   * @return
-   * If SlurmCtlXd is successfully connected, kOk is returned. <br>
-   * If SlurmCtlXd cannot be connected within 3s, kConnectionTimeout is
-   * returned.
-   */
-  SlurmxErr Connect(const std::string &server_address);
-
-  SlurmxErr GrantResourceToken(const uuid &resource_uuid,
-                               const resource_t &resource);
-
- private:
-  // Todo: Add client uuid.
-
-  std::shared_ptr<Channel> m_xd_channel_;
-
-  std::unique_ptr<SlurmXd::Stub> m_stub_;
-};
-
-/**
- * Represent the current resource status on a Xd node.
- */
-struct SlurmXdNode {
-  uuid node_uuid;
-
-  // total = avail + in-use
-  resource_t res_total;
-  resource_t res_avail;
-  resource_t res_in_use;
-
-  // Store the information of the slices of allocated resource.
-  // One uuid represents one shard of allocated resource.
-  std::unordered_map<uuid, resource_t, boost::hash<uuid>> resc_shards;
 };
 
 /***
@@ -110,17 +72,12 @@ class CtlXdServer {
   inline void Wait() { m_server_->Wait(); }
 
  private:
-  /**
-   *
-   * @param[in] addr_port
-   * @param[in] node_res
-   * @param[out] xd_node_uuid
-   * @return
-   */
-  SlurmxErr RegisterNewXd(const std::string addr_port,
-                          const resource_t &node_res, uuid *xd_node_uuid);
+  void XdNodeIsUpCb_(uint32_t index, void *node_data);
+  void XdNodeIsDownCb_(uint32_t index, void *node_data);
 
-  SlurmxErr AllocateResource(const resource_t &res, uuid *res_uuid);
+  SlurmxErr AllocateResource(const resource_t &res,
+                             SlurmxGrpc::ResourceInfo *res_info);
+  SlurmxErr DeallocateResource(uint32_t node_index, const uuid &resource_uuid);
 
   void HeartBeatFromNode(const uuid &node_uuid);
 
@@ -128,24 +85,6 @@ class CtlXdServer {
 
   std::unique_ptr<SlurmCtlXdServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;
-
-  // total = avail + in-use
-  resource_t m_resource_total_;
-  resource_t m_resource_avail_;
-  resource_t m_resource_in_use_;
-
-  /**
-   * A map from uuid to node information.
-   */
-  std::unordered_map<uuid, SlurmXdNode, boost::hash<uuid>> m_xd_node_map_;
-  std::mutex m_xd_node_mtx_;
-
-  /**
-   * A map from uuid to grpc client stubs.
-   */
-  std::unordered_map<uuid, std::unique_ptr<XdClient>, boost::hash<uuid>>
-      m_xd_stub_maps_;
-  boost::shared_mutex m_xd_stub_shared_mtx_;
 
   boost::uuids::random_generator_mt19937 m_uuid_gen_;
 

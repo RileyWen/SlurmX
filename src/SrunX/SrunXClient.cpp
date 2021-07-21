@@ -7,26 +7,17 @@ SrunXClient::~SrunXClient() {
   Wait();
 }
 
-SlurmxErr SrunXClient::Init(std::string xd_addr_port,
-                            std::string ctlxd_addr_port) {
+SlurmxErr SrunXClient::Init(std::string ctlxd_addr_port) {
   using namespace std::chrono_literals;
 
   signal(SIGINT, SigintHandlerFunc_);
   m_sigint_grpc_send_thread_ =
       std::thread(&SrunXClient::SigintGrpcSendThreadFunc_, this);
 
-  m_xd_channel_ =
-      grpc::CreateChannel(xd_addr_port, grpc::InsecureChannelCredentials());
   m_ctld_channel_ =
       grpc::CreateChannel(ctlxd_addr_port, grpc::InsecureChannelCredentials());
 
   bool ok;
-
-  ok = m_xd_channel_->WaitForConnected(std::chrono::system_clock::now() + 3s);
-  if (!ok) {
-    SLURMX_ERROR("Cannot connect to Xd server!");
-    return SlurmxErr::kConnectionTimeout;
-  }
 
   ok = m_ctld_channel_->WaitForConnected(std::chrono::system_clock::now() + 3s);
   if (!ok) {
@@ -34,23 +25,22 @@ SlurmxErr SrunXClient::Init(std::string xd_addr_port,
     return SlurmxErr::kConnectionTimeout;
   }
 
-  m_xd_stub_ = SlurmXd::NewStub(m_xd_channel_);
   m_ctld_stub_ = SlurmCtlXd::NewStub(m_ctld_channel_);
 
   return SlurmxErr::kOk;
 }
 
 SlurmxErr SrunXClient::Run(const CommandLineArgs &cmd_args) {
-  uuid resource_uuid;
+  SlurmxGrpc::ResourceInfo resource_info;
   SlurmxErr err;
 
-  err = RequestResourceToken_(cmd_args, &resource_uuid);
+  err = RequestResourceToken_(cmd_args, &resource_info);
   if (err != SlurmxErr::kOk) {
     m_is_ending_ = true;
     return err;
   }
 
-  err = EstablishSrunXStream_(cmd_args, resource_uuid);
+  err = EstablishSrunXStream_(cmd_args, resource_info);
   m_is_ending_ = true;
 
   return err;
@@ -116,8 +106,8 @@ void SrunXClient::Wait() {
   }
 }
 
-SlurmxErr SrunXClient::RequestResourceToken_(const CommandLineArgs &cmd_args,
-                                             uuid *resource_uuid) {
+SlurmxErr SrunXClient::RequestResourceToken_(
+    const CommandLineArgs &cmd_args, SlurmxGrpc::ResourceInfo *resource_info) {
   ClientContext alloc_context;
   ResourceAllocRequest alloc_req;
   ResourceAllocReply alloc_reply;
@@ -135,10 +125,11 @@ SlurmxErr SrunXClient::RequestResourceToken_(const CommandLineArgs &cmd_args,
 
   if (status.ok()) {
     if (alloc_reply.ok()) {
-      std::copy(alloc_reply.resource_uuid().begin(),
-                alloc_reply.resource_uuid().end(), resource_uuid->data);
-      SLURMX_TRACE("Resource allocated from CtlXd. UUID: {}",
-                   to_string(*resource_uuid));
+      *resource_info = alloc_reply.res_info();
+
+      SLURMX_TRACE("Resource allocated from CtlXd. Node index: {}",
+                   resource_info->node_index());
+
       return SlurmxErr::kOk;
     } else {
       SLURMX_ERROR("Failed to allocate required resource from CtlXd: {}",
@@ -146,14 +137,29 @@ SlurmxErr SrunXClient::RequestResourceToken_(const CommandLineArgs &cmd_args,
       return SlurmxErr::kTokenRequestFailure;
     }
   } else {
-    SLURMX_DEBUG("{}:{}\nSlurmxctld RPC failed", status.error_code(),
+    SLURMX_DEBUG("{}:{}\nSlurmxCtlXd RPC failed", status.error_code(),
                  status.error_message());
     return SlurmxErr::kRpcFailure;
   }
 }
 
-SlurmxErr SrunXClient::EstablishSrunXStream_(const CommandLineArgs &cmd_args,
-                                             const uuid &resource_uuid) {
+SlurmxErr SrunXClient::EstablishSrunXStream_(
+    const CommandLineArgs &cmd_args,
+    const SlurmxGrpc::ResourceInfo &resource_info) {
+  using namespace std::chrono_literals;
+
+  std::string addr_port =
+      fmt::format("{}:{}", resource_info.ipv4_addr(), resource_info.port());
+  m_xd_channel_ =
+      grpc::CreateChannel(addr_port, grpc::InsecureChannelCredentials());
+  bool ok =
+      m_xd_channel_->WaitForConnected(std::chrono::system_clock::now() + 3s);
+  if (!ok) {
+    SLURMX_ERROR("Cannot connect to Xd server: {}", addr_port);
+    return SlurmxErr::kConnectionTimeout;
+  }
+
+  m_xd_stub_ = SlurmXd::NewStub(m_xd_channel_);
   m_stream_ = m_xd_stub_->SrunXStream(&m_stream_context_);
 
   SlurmxErr err = SlurmxErr::kOk;
@@ -173,7 +179,7 @@ SlurmxErr SrunXClient::EstablishSrunXStream_(const CommandLineArgs &cmd_args,
     switch (state) {
       case SrunxState::kNegotiationWithSlurmxd: {
         SrunXStreamRequest request;
-        request.set_type(SrunXStreamRequest::Negotiation);
+        request.set_type(SrunXStreamRequest::NegotiationRequest);
 
         auto *result = request.mutable_negotiation();
         result->set_version(SrunX::kSrunVersion);
@@ -194,7 +200,7 @@ SlurmxErr SrunXClient::EstablishSrunXStream_(const CommandLineArgs &cmd_args,
           result->add_arguments(arg);
         }
 
-        result->set_resource_uuid(resource_uuid.data, resource_uuid.size());
+        result->set_resource_uuid(resource_info.resource_uuid());
 
         m_stream_->Write(request);
         state = SrunxState::kWaitForNewTaskReply;

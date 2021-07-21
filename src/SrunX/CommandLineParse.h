@@ -11,8 +11,6 @@ struct CommandLineArgs {
 
   std::string ctlxd_address;
   std::string ctlxd_port;
-  std::string xd_address;
-  std::string xd_port;
 
   std::string executive_path;
   std::vector<std::string> arguments;

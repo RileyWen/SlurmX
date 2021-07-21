@@ -10,6 +10,20 @@
 #define SLURMX_ERROR(...) SPDLOG_ERROR(__VA_ARGS__)
 #define SLURMX_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
 
+#ifndef NDEBUG
+#define SLURMX_ASSERT(condition, ...) \
+  do {                                \
+    if (!(condition)) {               \
+      SLURMX_CRITICAL(__VA_ARGS__);   \
+      std::terminate();               \
+    }                                 \
+  } while (false)
+#else
+#define ASSERT(condition, message) \
+  do {                             \
+  } while (false)
+#endif
+
 enum class SlurmxErr : uint16_t {
   kOk = 0,
   kGenericFailure,
@@ -25,6 +39,7 @@ enum class SlurmxErr : uint16_t {
   kRpcFailure,
   kTokenRequestFailure,
   KStreamBroken,
+  kInvalidStub,
 
   __ERR_SIZE
 };
@@ -50,6 +65,7 @@ constexpr std::array<std::string_view, uint16_t(SlurmxErr::__ERR_SIZE)>
         "RPC call failed",
         "Failed to request required token",
         "Stream is broken",
+        "Xd node stub is invalid",
 };
 
 }
@@ -65,7 +81,7 @@ struct resource_t {
   uint64_t memory_sw_bytes = 0;
 
   resource_t() = default;
-  resource_t(const slurmx_grpc::AllocatableResource&);
+  resource_t(const SlurmxGrpc::AllocatableResource&);
 
   resource_t& operator+=(const resource_t& rhs);
 

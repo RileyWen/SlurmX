@@ -8,6 +8,19 @@
 
 #include "CtlXdGrpcServer.h"
 #include "PublicHeader.h"
+#include "XdNodeKeeper.h"
+#include "XdNodeMetaContainer.h"
+
+void InitializeCtlXdGlobalVariables() {
+  using namespace CtlXd;
+  g_node_keeper = std::make_unique<XdNodeKeeper>();
+  g_meta_container = std::make_unique<XdNodeMetaContainerSimpleImpl>();
+}
+
+void DestroyCtlXdGlobalVariables() {
+  using namespace CtlXd;
+  g_node_keeper.reset();
+}
 
 int main(int argc, char** argv) {
   // Todo: Add single program instance checking. The current program will freeze
@@ -48,10 +61,14 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  InitializeCtlXdGlobalVariables();
+
   std::string server_address{fmt::format("{}:{}", address, port)};
   g_ctlxd_server = std::make_unique<CtlXd::CtlXdServer>(server_address);
 
   g_ctlxd_server->Wait();
+
+  DestroyCtlXdGlobalVariables();
 
   return 0;
 }

@@ -22,7 +22,7 @@
 // NOTICE: By default, Linux follows an optimistic memory allocation
 //  strategy.  This means that when malloc() returns non-NULL there
 //  is no guarantee that the memory really is available.
-//  see hps://man7.org/linux/man-pages/man3/malloc.3.html
+//  see https://man7.org/linux/man-pages/man3/malloc.3.html
 //
 //  The process exceeding the memory+swap limit will be killed by oom-kill
 //  (Receiving SIGTERM and exiting with return value 9).

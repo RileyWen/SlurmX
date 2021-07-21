@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -x
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
 LIB_DIR="$SCRIPT_DIR/tarballs"
@@ -48,28 +49,30 @@ git submodule update --init
 
 popd
 
+CMAKE_DEFS=("-DCMAKE_CXX_STANDARD=17" "-G" "Ninja")
+
 # GTest
 pushd $LIB_DIR/googletest-release-1.11.0 &&
   mkdir -p build && cd build &&
-  cmake -DCMAKE_INSTALL_PREFIX="$ONLINE_DIR/google-test" -G Ninja .. && ninja install &&
+  cmake -DCMAKE_INSTALL_PREFIX="$ONLINE_DIR/google-test" "${CMAKE_DEFS[@]}" .. && ninja install &&
   popd
 
 # cxxopts
 pushd $LIB_DIR/cxxopts-2.2.1 &&
   mkdir -p build && cd build &&
-  cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/cxxopts -G Ninja .. && ninja install &&
+  cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/cxxopts "${CMAKE_DEFS[@]}" .. && ninja install &&
   popd
 
 # LibEvent
 pushd $LIB_DIR/libevent-2.1.12-stable &&
   mkdir -p build && cd build &&
-  cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/libevent -G Ninja .. && ninja install &&
+  cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/libevent "${CMAKE_DEFS[@]}" .. && ninja install &&
   popd
 
 # GRPC
 pushd $LIB_DIR/grpc-1.38.1 &&
   mkdir -p cmake/build && pushd cmake/build &&
-  cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/grpc -G Ninja \
+  cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/grpc "${CMAKE_DEFS[@]}" \
     ../.. &&
   ninja install &&
   popd &&
@@ -79,7 +82,7 @@ pushd $LIB_DIR/grpc-1.38.1 &&
   pushd third_party/abseil-cpp/cmake/build &&
   cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/abseil \
     -DCMAKE_POSITION_INDEPENDENT_CODE=TRUE \
-    -G Ninja \
+    "${CMAKE_DEFS[@]}" \
     ../.. &&
   ninja install &&
   popd &&
@@ -88,11 +91,12 @@ pushd $LIB_DIR/grpc-1.38.1 &&
 # fmt
 pushd $LIB_DIR/fmt-8.0.1 &&
   mkdir -p build && cd build &&
-  cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/fmt -G Ninja .. && ninja install &&
+  cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/fmt \
+    "${CMAKE_DEFS[@]}" .. && ninja install &&
   popd
 
 # spdlog
 pushd $LIB_DIR/spdlog-1.8.5 &&
   mkdir -p build && cd build &&
-  cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/spdlog -G Ninja .. && ninja install &&
+  cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/spdlog "${CMAKE_DEFS[@]}" .. && ninja install &&
   popd

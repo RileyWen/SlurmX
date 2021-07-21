@@ -3,13 +3,8 @@
 #include <grpc++/grpc++.h>
 
 #include <boost/uuid/uuid.hpp>
-#include <boost/uuid/uuid_io.hpp>
 #include <chrono>
 #include <memory>
-
-#if Boost_MINOR_VERSION >= 71
-#include <boost/uuid/uuid_hash.hpp>
-#endif
 
 #include "PublicHeader.h"
 #include "protos/slurmx.grpc.pb.h"
@@ -17,14 +12,13 @@
 
 namespace Xd {
 
-using boost::uuids::uuid;
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
-using slurmx_grpc::AllocatableResource;
-using slurmx_grpc::SlurmCtlXd;
-using slurmx_grpc::SlurmXdRegisterRequest;
-using slurmx_grpc::SlurmXdRegisterResult;
+using SlurmxGrpc::AllocatableResource;
+using SlurmxGrpc::SlurmCtlXd;
+using SlurmxGrpc::SlurmXdRegisterRequest;
+using SlurmxGrpc::SlurmXdRegisterResult;
 
 class CtlXdClient {
  public:
@@ -42,14 +36,16 @@ class CtlXdClient {
 
   SlurmxErr RegisterOnCtlXd(const resource_t& resource, uint32_t my_port);
 
-  const uuid& GetNodeUuid() const { return m_node_uuid_; };
+  SlurmxErr DeallocateResource(const boost::uuids::uuid& resource_uuid);
+
+  uint32_t GetNodeIndex() const { return m_node_index_; };
 
  private:
   std::shared_ptr<Channel> m_ctlxd_channel_;
 
   std::unique_ptr<SlurmCtlXd::Stub> m_stub_;
 
-  uuid m_node_uuid_;
+  uint32_t m_node_index_;
 };
 
 }  // namespace Xd

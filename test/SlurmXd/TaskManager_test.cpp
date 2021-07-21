@@ -3,7 +3,10 @@
 #include <random>
 
 #include "PublicHeader.h"
+#include "SharedTestImpl/GlobalDefs.h"
 #include "gtest/gtest.h"
+
+using namespace Xd;
 
 static std::string RandomFileNameStr() {
   static std::random_device rd;
@@ -191,6 +194,39 @@ TEST_F(TaskManagerTest, LsOutput) {
   g_task_mgr->Wait();
 
   SLURMX_TRACE("Exiting test...");
+}
+
+TEST_F(TaskManagerTest, Shutdown) {
+  g_task_mgr->Shutdown();
+  g_task_mgr->Wait();
+}
+
+TEST_F(TaskManagerTest, TaskMultiIndexSet) {
+  g_task_mgr->Shutdown();
+
+  TaskMultiIndexSet indexSet;
+
+  auto task1 = std::make_unique<Task>();
+  task1->init_info.name = "Task1";
+  task1->root_pid = 1;
+
+  auto task2 = std::make_unique<Task>();
+  task2->init_info.name = "Task2";
+  task2->root_pid = 2;
+
+  indexSet.Insert(std::move(task1));
+  indexSet.Insert(std::move(task2));
+
+  const Task* p;
+  p = indexSet.FindByName("Task1");
+  ASSERT_NE(p, nullptr);
+  EXPECT_EQ(p->root_pid, 1);
+
+  EXPECT_EQ(p, indexSet.FindByPid(1));
+
+  p = indexSet.FindByPid(2);
+  ASSERT_NE(p, nullptr);
+  EXPECT_EQ(p->init_info.name, "Task2");
 }
 
 // Todo: Test TaskManager from grpc.

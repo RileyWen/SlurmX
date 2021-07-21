@@ -5,6 +5,37 @@ set(CMAKE_CXX_STANDARD 17)
 
 #set(CMAKE_VERBOSE_MAKEFILE ON)
 
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    # Check LTO support
+    include(CheckIPOSupported)
+    check_ipo_supported(RESULT supported OUTPUT error)
+    if (supported)
+        message(STATUS "IPO / LTO enabled")
+        set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+    else ()
+        message(STATUS "IPO / LTO not supported: <${error}>")
+    endif ()
+
+    # static link on c++ libs
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
+
+elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    message(STATUS "IPO / LTO disabled due to gcc bugs.")
+else ()
+    message(STATUS "IPO / LTO disabled for all untested compilers.")
+endif ()
+
+# Set colorized output when ninja build system is used.
+option(FORCE_COLORED_OUTPUT "Always produce ANSI-colored output (GNU/Clang only)." TRUE)
+if (${FORCE_COLORED_OUTPUT})
+    if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+        add_compile_options(-fdiagnostics-color=always)
+    elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+        add_compile_options(-fcolor-diagnostics)
+    endif ()
+endif ()
+
+
 # Find third-party libraries
 set(DEPENDENCIES_PRE_INSTALLED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/pre_installed)
 set(DEPENDENCIES_ONLINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/online)
@@ -12,7 +43,8 @@ set(DEPENDENCIES_ONLINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/online)
 find_package(Threads REQUIRED)
 find_package(fmt 7.1.3 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/fmt)
 
-find_package(Boost 1.67 REQUIRED COMPONENTS thread)
+set(Boost_USE_STATIC_LIBS ON)
+find_package(Boost 1.67 REQUIRED COMPONENTS thread fiber)
 add_definitions(-DBoost_MINOR_VERSION=${Boost_MINOR_VERSION})
 
 find_package(GTest CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/google-test)
@@ -20,6 +52,8 @@ find_package(GTest CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/google-test)
 find_package(spdlog 1.8.2 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/spdlog)
 add_definitions(-DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
 
+# Link libevent as a static lib
+set(LIBEVENT_STATIC_LINK TRUE)
 find_package(Libevent REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/libevent)
 
 find_package(cxxopts 2.2.0 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/cxxopts)

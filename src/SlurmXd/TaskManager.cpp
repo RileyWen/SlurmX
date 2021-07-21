@@ -7,6 +7,7 @@ TaskManager::TaskManager()
       m_ev_sigchld_(nullptr),
       m_ev_base_(nullptr),
       m_ev_grpc_event_(nullptr),
+      m_ev_exit_event_(nullptr),
       m_is_ending_now_(false) {
   // Only called once. Guaranteed by singleton pattern.
   m_instance_ptr_ = this;
@@ -17,7 +18,7 @@ TaskManager::TaskManager()
     abort();
   }
 
-  m_ev_sigchld_ = evsignal_new(m_ev_base_, SIGCHLD, ev_sigchld_cb_, this);
+  m_ev_sigchld_ = evsignal_new(m_ev_base_, SIGCHLD, EvSigchldCb_, this);
   if (!m_ev_sigchld_) {
     SLURMX_ERROR("Failed to create the SIGCHLD event!");
     abort();
@@ -28,7 +29,7 @@ TaskManager::TaskManager()
     abort();
   }
 
-  m_ev_sigint_ = evsignal_new(m_ev_base_, SIGINT, ev_sigint_cb_, this);
+  m_ev_sigint_ = evsignal_new(m_ev_base_, SIGINT, EvSigintCb_, this);
   if (!m_ev_sigint_) {
     SLURMX_ERROR("Failed to create the SIGCHLD event!");
     abort();
@@ -39,13 +40,13 @@ TaskManager::TaskManager()
     abort();
   }
 
-  if ((m_grpc_event_fd_ = eventfd(0, EFD_SEMAPHORE)) < 0) {
+  if ((m_grpc_event_fd_ = eventfd(0, EFD_SEMAPHORE | EFD_CLOEXEC)) < 0) {
     SLURMX_ERROR("Failed to init the eventfd!");
     abort();
   }
 
   m_ev_grpc_event_ = event_new(m_ev_base_, m_grpc_event_fd_,
-                               EV_PERSIST | EV_READ, ev_grpc_event_cb_, this);
+                               EV_PERSIST | EV_READ, EvGrpcEventCb_, this);
   if (!m_ev_grpc_event_) {
     SLURMX_ERROR("Failed to create the grpc event!");
     abort();
@@ -53,6 +54,23 @@ TaskManager::TaskManager()
 
   if (event_add(m_ev_grpc_event_, nullptr) < 0) {
     SLURMX_ERROR("Could not add the grpc event to base!");
+    abort();
+  }
+
+  if ((m_ev_exit_fd_ = eventfd(0, EFD_CLOEXEC)) < 0) {
+    SLURMX_ERROR("Failed to init the eventfd!");
+    abort();
+  }
+
+  m_ev_exit_event_ = event_new(m_ev_base_, m_ev_exit_fd_, EV_PERSIST | EV_READ,
+                               EvExitEventCb_, this);
+  if (!m_ev_exit_event_) {
+    SLURMX_ERROR("Failed to create the exit event!");
+    abort();
+  }
+
+  if (event_add(m_ev_exit_event_, nullptr) < 0) {
+    SLURMX_ERROR("Could not add the exit event to base!");
     abort();
   }
 
@@ -65,7 +83,13 @@ TaskManager::~TaskManager() {
 
   if (m_ev_sigchld_) event_free(m_ev_sigchld_);
   if (m_ev_sigint_) event_free(m_ev_sigint_);
+
   if (m_ev_grpc_event_) event_free(m_ev_grpc_event_);
+  close(m_grpc_event_fd_);
+
+  if (m_ev_exit_event_) event_free(m_ev_exit_event_);
+  close(m_ev_exit_fd_);
+
   if (m_ev_base_) event_base_free(m_ev_base_);
 }
 
@@ -98,18 +122,18 @@ SlurmxErr TaskManager::AddTaskAsync(TaskInitInfo&& task_init_info) {
 
 std::optional<const Task*> TaskManager::FindTaskByName(
     const std::string& task_name) {
-  auto iter = m_name_to_task_map_.find(task_name);
-  if (iter == m_name_to_task_map_.end()) return std::nullopt;
+  const Task* p = m_task_set_.FindByName(task_name);
+  if (!p) return std::nullopt;
 
-  return iter->second.get();
+  return p;
 }
 
 std::string TaskManager::CgroupStrByPID(pid_t pid) {
   return fmt::format("SlurmX_proc_{}", pid);
 }
 
-void TaskManager::ev_sigchld_cb_(evutil_socket_t sig, short events,
-                                 void* user_data) {
+void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
+                               void* user_data) {
   assert(m_instance_ptr_->m_instance_ptr_ != nullptr);
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
@@ -136,33 +160,30 @@ void TaskManager::ev_sigchld_cb_(evutil_socket_t sig, short events,
         printf("continued\n");
       } */
 
+      // Destroy related Cgroup
+      this_->m_cg_mgr_.destroy(CgroupStrByPID(pid));
+      SLURMX_DEBUG("Received SIGCHLD. Destroying Cgroup for pid {}", pid);
+
       std::string task_name;
-      auto iter = this_->m_pid_to_name_map_.find(pid);
-      if (iter == this_->m_pid_to_name_map_.end()) {
+      const Task* taskPtr = this_->m_task_set_.FindByPid(pid);
+      if (!taskPtr)
         SLURMX_ERROR("Failed to find task name for pid {}.", pid);
-      } else {
-        task_name = iter->second;
+      else {
+        task_name = taskPtr->init_info.name;
+
+        SLURMX_DEBUG(R"(Destroying Task structure for "{}".)", task_name);
+
+        taskPtr->init_info.finish_callback(sigchld_info.is_terminated_by_signal,
+                                           sigchld_info.value);
+
+        bufferevent_free(taskPtr->ev_buf_event);
+
+        this_->m_task_set_.EraseByName(task_name);
       }
 
-      SLURMX_DEBUG("Received SIGCHLD. Destroying Task \"{}\".", task_name);
-
-      this_->m_pid_to_name_map_.erase(pid);
-
-      Task* task = this_->m_name_to_task_map_.find(task_name)->second.get();
-
-      task->init_info.finish_callback(sigchld_info.is_terminated_by_signal,
-                                      sigchld_info.value);
-
-      bufferevent_free(task->ev_buf_event);
-
-      this_->m_name_to_task_map_.erase(task_name);
-
-      this_->m_cg_mgr_.destroy(CgroupStrByPID(pid));
-
-      if (this_->m_is_ending_now_ && this_->m_pid_to_name_map_.empty()) {
-        SLURMX_TRACE("ev_sigchld_cb_ has reaped all child. Stop event loop.");
-        struct timeval delay = {0, 0};
-        event_base_loopexit(this_->m_ev_base_, &delay);
+      if (this_->m_is_ending_now_ && this_->m_task_set_.Empty()) {
+        SLURMX_TRACE("EvSigchldCb_ has reaped all child. Stop event loop.");
+        this_->Shutdown();
       }
     } else if (pid == 0)  // There's no child that needs reaping.
       break;
@@ -174,7 +195,7 @@ void TaskManager::ev_sigchld_cb_(evutil_socket_t sig, short events,
   }
 }
 
-void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
+void TaskManager::EvGrpcEventCb_(int efd, short events, void* user_data) {
   uint64_t u;
   ssize_t s;
   s = read(efd, &u, sizeof(uint64_t));
@@ -194,7 +215,7 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
 
   SLURMX_DEBUG("Receive one grpc req of new task: {}", task_init_info.name);
 
-  if (this_->m_name_to_task_map_.count(task_init_info.name) > 0) {
+  if (this_->m_task_set_.CountByName(task_init_info.name) > 0) {
     req.resp_promise.set_value({SlurmxErr::kExistingTask});
     return;
   };
@@ -289,7 +310,7 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
       if (!anon_pipe.WriteIntegerToChild<u_char>(pipe_uchar_val))
         SLURMX_ERROR("Failed to send E_PIPE_SUICIDE to child.");
     }
-    bufferevent_setcb(new_task->ev_buf_event, ev_subprocess_read_cb_, nullptr,
+    bufferevent_setcb(new_task->ev_buf_event, EvSubprocessReadCb_, nullptr,
                       nullptr, (void*)new_task.get());
     bufferevent_enable(new_task->ev_buf_event, EV_READ);
     bufferevent_disable(new_task->ev_buf_event, EV_WRITE);
@@ -318,20 +339,15 @@ void TaskManager::ev_grpc_event_cb_(int efd, short events, void* user_data) {
     if (!anon_pipe.WriteIntegerToChild<u_char>(pipe_uchar_val))
       SLURMX_ERROR("Failed to send E_PIPE_OK to child.");
 
-    // Insert the task information into pid->name->Task mapping.
-    this_->m_pid_to_name_map_.emplace(new_task->root_pid,
-                                      new_task->init_info.name);
-    this_->m_name_to_task_map_.emplace(std::move(task_name_copy),
-                                       std::move(new_task));
+    this_->m_task_set_.Insert(std::move(new_task));
 
     // Inform the async caller of success.
     req.resp_promise.set_value({SlurmxErr::kOk});
   }
 }
 
-void TaskManager::ev_subprocess_read_cb_(struct bufferevent* bev,
-                                         void* task_ptr_) {
-  auto task_ptr = reinterpret_cast<Task*>(task_ptr_);
+void TaskManager::EvSubprocessReadCb_(struct bufferevent* bev, void* pid_) {
+  auto task_ptr = reinterpret_cast<Task*>(pid_);
 
   size_t buf_len = evbuffer_get_length(bev->input);
 
@@ -345,7 +361,7 @@ void TaskManager::ev_subprocess_read_cb_(struct bufferevent* bev,
   task_ptr->init_info.output_callback(std::move(str));
 }
 
-void TaskManager::ev_sigint_cb_(int sig, short events, void* user_data) {
+void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
   if (!this_->m_is_ending_now_) {
@@ -355,22 +371,51 @@ void TaskManager::ev_sigint_cb_(int sig, short events, void* user_data) {
 
     if (this_->m_sigint_cb_) this_->m_sigint_cb_();
 
-    if (this_->m_pid_to_name_map_.empty()) {
+    if (this_->m_task_set_.Empty()) {
       // If there is no task to kill, stop the loop directly.
-      struct timeval delay = {0, 0};
-      event_base_loopexit(this_->m_ev_base_, &delay);
+      this_->Shutdown();
     } else {
       // Todo: Add timer which sends SIGTERM for those tasks who
       //  will not quit when receiving SIGINT.
 
       // Send SIGINT to all tasks and the event loop will stop
       // when the ev_sigchld_cb_ of the last task is called.
-      for (auto&& elem : this_->m_pid_to_name_map_) {
-        this_->Kill(elem.second, SIGINT);
+      for (auto&& task : this_->m_task_set_) {
+        this_->Kill(task.name(), SIGINT);
       }
     }
   } else {
     SLURMX_INFO("SIGINT has been triggered already. Ignoring it.");
+  }
+}
+
+void TaskManager::EvExitEventCb_(int efd, short events, void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  SLURMX_TRACE("Exit event triggered. Stop event loop.");
+
+  uint64_t u;
+  ssize_t s;
+  s = read(efd, &u, sizeof(uint64_t));
+  if (s != sizeof(uint64_t)) {
+    if (errno != EAGAIN) {
+      SLURMX_ERROR("Failed to read exit_fd: errno {}, {}", errno,
+                   strerror(errno));
+    }
+    return;
+  }
+
+  struct timeval delay = {0, 0};
+  event_base_loopexit(this_->m_ev_base_, &delay);
+}
+
+void TaskManager::Shutdown() {
+  SLURMX_TRACE("Triggering exit event...");
+  m_is_ending_now_ = true;
+  eventfd_t u = 1;
+  ssize_t s = eventfd_write(m_ev_exit_fd_, u);
+  if (s < 0) {
+    SLURMX_ERROR("Failed to write to grpc event fd: {}", strerror(errno));
   }
 }
 
@@ -399,6 +444,49 @@ SlurmxErr TaskManager::Kill(const std::string& task_name, int signum) {
 
 void TaskManager::SetSigintCallback(std::function<void()> cb) {
   m_sigint_cb_ = cb;
+}
+
+void TaskMultiIndexSet::Insert(std::unique_ptr<Task>&& task) {
+  task_set_.insert({std::move(task)});
+}
+
+const Task* TaskMultiIndexSet::FindByName(const std::string& name) {
+  auto& taskNameIndex = task_set_.get<Internal::TaskName>();
+  auto iter = taskNameIndex.find(name);
+  if (iter == taskNameIndex.end()) return nullptr;
+
+  return iter->p_.get();
+}
+
+const Task* TaskMultiIndexSet::FindByPid(pid_t pid) {
+  auto& pidIndex = task_set_.get<Internal::Pid>();
+  auto iter = pidIndex.find(pid);
+  if (iter == pidIndex.end()) return nullptr;
+
+  return iter->p_.get();
+}
+
+void TaskMultiIndexSet::EraseByName(const std::string& name) {
+  auto& taskNameIndex = task_set_.get<Internal::TaskName>();
+  auto iter = taskNameIndex.find(name);
+  if (iter == taskNameIndex.end()) return;
+
+  task_set_.erase(iter);
+}
+
+size_t TaskMultiIndexSet::CountByName(const std::string& name) {
+  auto& taskNameIndex = task_set_.get<Internal::TaskName>();
+  return taskNameIndex.count(name);
+}
+
+TaskMultiIndexSet::iterator_type TaskMultiIndexSet::begin() {
+  auto& pidIndex = task_set_.get<Internal::Pid>();
+  return pidIndex.begin();
+}
+
+TaskMultiIndexSet::iterator_type TaskMultiIndexSet::end() {
+  auto& pidIndex = task_set_.get<Internal::Pid>();
+  return pidIndex.end();
 }
 
 }  // namespace Xd

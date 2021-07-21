@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CMakeWorkspace" PROJECT_DIR="$PROJECT_DIR$" />
+  <component name="CidrRootsConfiguration">
+    <libraryRoots>
+      <file path="$PROJECT_DIR$/dependencies/online/cxxopts" />
+      <file path="$PROJECT_DIR$/dependencies/online/fmt" />
+      <file path="$PROJECT_DIR$/dependencies/online/google-test" />
+      <file path="$PROJECT_DIR$/dependencies/online/grpc" />
+      <file path="$PROJECT_DIR$/dependencies/online/libevent" />
+      <file path="$PROJECT_DIR$/dependencies/online/libuv" />
+      <file path="$PROJECT_DIR$/dependencies/online/range-v3" />
+      <file path="$PROJECT_DIR$/dependencies/online/spdlog" />
+    </libraryRoots>
+    <excludeRoots>
+      <file path="$PROJECT_DIR$/dependencies/online" />
+      <file path="$PROJECT_DIR$/dependencies/tarballs" />
+    </excludeRoots>
+  </component>
+</project>

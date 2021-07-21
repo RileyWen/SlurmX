@@ -27,20 +27,20 @@ using boost::uuids::uuid;
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
-using slurmx_grpc::ResourceAllocReply;
-using slurmx_grpc::ResourceAllocRequest;
-using slurmx_grpc::SlurmCtlXd;
-using slurmx_grpc::SlurmXd;
-using slurmx_grpc::SrunXStreamReply;
-using slurmx_grpc::SrunXStreamRequest;
-using slurmx_grpc::TaskExitStatus;
+using SlurmxGrpc::ResourceAllocReply;
+using SlurmxGrpc::ResourceAllocRequest;
+using SlurmxGrpc::SlurmCtlXd;
+using SlurmxGrpc::SlurmXd;
+using SlurmxGrpc::SrunXStreamReply;
+using SlurmxGrpc::SrunXStreamRequest;
+using SlurmxGrpc::TaskExitStatus;
 
 class SrunXClient {
  public:
   SrunXClient() = default;
   ~SrunXClient();
 
-  SlurmxErr Init(std::string xd_addr_port, std::string ctlxd_addr_port);
+  SlurmxErr Init(std::string ctlxd_addr_port);
 
   SlurmxErr Run(const CommandLineArgs& cmd_args);
 
@@ -51,9 +51,10 @@ class SrunXClient {
   void SigintGrpcSendThreadFunc_();
 
   SlurmxErr RequestResourceToken_(const CommandLineArgs& cmd_args,
-                                  uuid* resource_uuid);
-  SlurmxErr EstablishSrunXStream_(const CommandLineArgs& cmd_args,
-                                  const uuid& resource_uuid);
+                                  SlurmxGrpc::ResourceInfo* resource_info);
+  SlurmxErr EstablishSrunXStream_(
+      const CommandLineArgs& cmd_args,
+      const SlurmxGrpc::ResourceInfo& resource_info);
 
   std::unique_ptr<SlurmXd::Stub> m_xd_stub_;
   std::unique_ptr<SlurmCtlXd::Stub> m_ctld_stub_;
