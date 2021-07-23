@@ -9,32 +9,62 @@
 namespace CtlXd {
 
 /**
- * All methods in this class is synchronized.
+ * All public methods in this class is thread-safe.
  */
 class XdNodeMetaContainerInterface {
  public:
-  using Mutex = slurmx::mutex;
-  using LockGuard = slurmx::lock_guard;
+  using Mutex = slurmx::recursive_mutex;
+  using LockGuard = slurmx::recursive_lock_guard;
 
-  using MetasPtr = slurmx::ScopeExclusivePtr<Metas, Mutex>;
+  using PartitionMetasPtr = slurmx::ScopeExclusivePtr<PartitionMetas, Mutex>;
+  using NodeMetaPtr = slurmx::ScopeExclusivePtr<XdNodeMeta, Mutex>;
 
   virtual ~XdNodeMetaContainerInterface() = default;
 
   virtual void AddNode(const XdNodeStaticMeta& static_meta) = 0;
 
-  virtual void DeleteNodeMeta(uint32_t index) = 0;
+  virtual void DeleteNodeMeta(XdNodeId node_id) = 0;
+
+  /**
+   * Check whether partition exists.
+   */
+  virtual bool PartitionExists(const std::string& partition_name) = 0;
+
+  /**
+   * @return The partition id. If partition name doesn't exist, a new partition
+   * id will be allocated to this partition name.
+   */
+  virtual uint32_t GetPartitionId(const std::string& partition_name) = 0;
+
+  /**
+   * Free all the structures of a partition if this partition is empty.
+   * Otherwise, no operation is performed.
+   * @param partition_id
+   */
+  virtual void TryReleasePartition(uint32_t partition_id) = 0;
+
+  /**
+   * @return Next unique node index in this partition.
+   * Caller Must make sure that the partition exists when calling this function.
+   * If partition id does not exist, 0xFFFFFFFF is returned.
+   */
+  virtual uint32_t AllocNodeIndexInPartition(uint32_t partition_id) = 0;
 
   /**
    * Provide a thread-safe way to access NodeMeta.
    * @return a ScopeExclusivePointerType class. During the initialization of
    * this type, the unique ownership of data pointed by data is acquired. If the
-   * index does not exist, a nullptr is returned and no lock is held. Use bool()
-   * to check it.
+   * partition does not exist, a nullptr is returned and no lock is held. Use
+   * bool() to check it.
    */
-  virtual MetasPtr GetMetasPtr() = 0;
+  virtual PartitionMetasPtr GetPartitionMetasPtr(uint32_t partition_id) = 0;
+
+  virtual NodeMetaPtr GetNodeMetaPtr(XdNodeId node_id) = 0;
 
  protected:
   XdNodeMetaContainerInterface() = default;
+
+  virtual uint32_t GetNextPartitionSeq_() = 0;
 };
 
 class XdNodeMetaContainerSimpleImpl : public XdNodeMetaContainerInterface {
@@ -44,12 +74,44 @@ class XdNodeMetaContainerSimpleImpl : public XdNodeMetaContainerInterface {
 
   void AddNode(const XdNodeStaticMeta& static_meta) override;
 
-  void DeleteNodeMeta(uint32_t index) override;
+  void DeleteNodeMeta(XdNodeId node_id) override;
 
-  MetasPtr GetMetasPtr() override;
+  PartitionMetasPtr GetPartitionMetasPtr(uint32_t partition_id) override;
+
+  NodeMetaPtr GetNodeMetaPtr(XdNodeId node_id) override;
+
+  bool PartitionExists(const std::string& partition_name) override;
+
+  uint32_t GetPartitionId(const std::string& partition_name) override;
+
+  void TryReleasePartition(uint32_t partition_id) override;
+
+  uint32_t AllocNodeIndexInPartition(uint32_t partition_id) override;
 
  private:
-  Metas metas_;
+  /**
+   * This function is not thread-safe.
+   */
+  void TryReleasePartition_(uint32_t partition_id);
+
+  /**
+   * This function is not thread-safe.
+   * @return next unique partition sequence number.
+   */
+  uint32_t GetNextPartitionSeq_() override;
+
+  /**
+   * This function is not thread-safe.
+   */
+  uint32_t GetPartitionId_(const std::string& partition_name);
+
+  std::unordered_map<uint32_t /*partition id*/, PartitionMetas>
+      partition_metas_map_;
+
+  std::unordered_map<std::string /*partition name*/, uint32_t /*partition id*/>
+      partition_name_id_map_;
+  uint32_t partition_seq_ = 0;
+
   Mutex mtx_;
 };
 

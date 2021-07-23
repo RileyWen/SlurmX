@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package SlurmxGrpc;
 
+import "PublicDefs.proto";
+
 message Negotiation {
   uint32 version = 1;
 }
@@ -25,6 +27,8 @@ message AllocatableResource {
 
 message ResourceAllocRequest {
   AllocatableResource required_resource = 1;
+  string partition_name = 2;
+  uint64 time_limit_sec = 3;
 }
 
 message ResourceInfo {
@@ -63,9 +67,16 @@ message TaskExitStatus {
   uint32 value = 2;
 }
 
+message NewlyAllocatedTaskInfo {
+  uint32 job_id = 1;
+}
+
 message NewTaskResult {
   bool ok = 1;
-  string reason = 2;
+  oneof payload{
+    string reason = 2; // Set if task allocation fails.
+    NewlyAllocatedTaskInfo newly_allocated_task_info = 3; // Set if task allocation succeeds.
+  }
 }
 
 message SrunXStreamRequest{
@@ -104,8 +115,11 @@ message SlurmXdRegisterRequest {
   Negotiation header = 1;
 
   uint32 port = 2;
+  string node_name = 3;
+  string partition_name = 4;
 
-  AllocatableResource resource_total = 3;
+  AllocatableResource resource_total = 5;
+  uint64 time_limit_for_task_in_sec = 6;
 
   /* Todo: Add fields describing what tasks the SlurmXd is still running and the current usage of this node in case that
       from CtlXd's view, this node is down due to network problem and however this node is still running.
@@ -116,7 +130,7 @@ message SlurmXdRegisterResult {
   bool ok = 1;
   oneof payload {
     // If ok is true
-    uint32 node_index = 2;
+    XdNodeId node_id = 2;
 
     // If ok is false, reason is set.
     string reason = 3;
@@ -149,7 +163,7 @@ message RevokeResourceTokenReply {
 }
 
 message DeallocateResourceRequest {
-  uint32 node_index = 1;
+  XdNodeId node_id = 1;
   bytes resource_uuid = 2;
 }
 

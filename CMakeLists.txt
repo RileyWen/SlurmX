@@ -74,7 +74,11 @@ pkg_check_modules(libuv IMPORTED_TARGET libuv>=1.40.0)
 add_library(concurrentqueue INTERFACE)
 target_include_directories(concurrentqueue INTERFACE ${DEPENDENCIES_PRE_INSTALLED_DIR}/concurrentqueue/include)
 
-LIST(APPEND THIRD_PARTY_LIBS proto fmt::fmt)
+
+# Enable SubDirList macro
+include(${CMAKE_SOURCE_DIR}/CMakeModule/CMakeMacros.cmake)
+
+add_subdirectory(dependencies/cmake)
 
 # Source Code
 add_subdirectory(src)
@@ -103,16 +107,18 @@ set_property(DIRECTORY PROPERTY ADDITIONAL_MAKE_CLEAN_FILES
 protobuf_generate(
         TARGET proto
         LANGUAGE cpp
-        PROTOC_OUT_DIR ${GENERATED_FILE_PATH}
+        PROTOC_OUT_DIR ${GENERATED_FILE_PATH}/protos
+        IMPORT_DIRS protos
 )
 
 # This generates the grpc part of .proto file
 protobuf_generate(
         TARGET proto
         LANGUAGE grpc
-        PROTOC_OUT_DIR ${GENERATED_FILE_PATH}
+        PROTOC_OUT_DIR ${GENERATED_FILE_PATH}/protos
         PLUGIN "protoc-gen-grpc=${GRPC_CPP_PLUGIN_LOCATION}"
         GENERATE_EXTENSIONS .grpc.pb.h .grpc.pb.cc
+        IMPORT_DIRS protos
 )
 
 target_link_libraries(proto absl::base absl::synchronization)

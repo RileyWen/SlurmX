@@ -8,10 +8,12 @@
 
 namespace Xd {
 
-SlurmxErr CtlXdClient::RegisterOnCtlXd(const resource_t& resource,
+SlurmxErr CtlXdClient::RegisterOnCtlXd(const std::string& partition_name,
+                                       const resource_t& resource,
                                        uint32_t my_port) {
   SlurmXdRegisterRequest req;
 
+  req.set_partition_name(partition_name);
   req.set_port(my_port);
 
   AllocatableResource* resource_total = req.mutable_resource_total();
@@ -26,8 +28,9 @@ SlurmxErr CtlXdClient::RegisterOnCtlXd(const resource_t& resource,
 
   if (status.ok()) {
     if (result.ok()) {
-      m_node_index_ = result.node_index();
-      SLURMX_INFO("Register Node Successfully! Node index: {}", m_node_index_);
+      m_node_id_ = {result.node_id().partition_id(),
+                    result.node_id().node_index()};
+      SLURMX_INFO("Register Node Successfully! Node id: {}", m_node_id_);
 
       return SlurmxErr::kOk;
     }
@@ -70,7 +73,8 @@ SlurmxErr CtlXdClient::DeallocateResource(
   ClientContext context;
   Status status;
 
-  req.set_node_index(this->GetNodeIndex());
+  req.mutable_node_id()->set_partition_id(this->GetNodeId().partition_id);
+  req.mutable_node_id()->set_node_index(this->GetNodeId().node_index);
 
   auto* uuid = req.mutable_resource_uuid();
   uuid->assign(resource_uuid.begin(), resource_uuid.end());

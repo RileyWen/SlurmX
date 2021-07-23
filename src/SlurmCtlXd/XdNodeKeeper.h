@@ -12,6 +12,7 @@
 #include <memory>
 #include <thread>
 
+#include "CtlXdPublicDefs.h"
 #include "PublicHeader.h"
 #include "protos/slurmx.grpc.pb.h"
 #include "protos/slurmx.pb.h"
@@ -22,7 +23,7 @@ namespace CtlXd {
 class XdNodeKeeper;
 
 struct RegisterNodeResult {
-  std::optional<uint32_t> allocated_node_index;
+  std::optional<XdNodeId> node_id;
 };
 
 /**
@@ -37,14 +38,14 @@ class XdNodeStub {
   SlurmxErr GrantResourceToken(const boost::uuids::uuid &resource_uuid,
                                const resource_t &resource);
 
-  void *GetNodeData() { return m_node_data_; };
+  void *GetNodeData() { return m_data_; };
 
-  void SetNodeData(void *data) { m_node_data_ = data; }
+  void SetNodeData(void *data) { m_data_ = data; }
 
   bool Invalid() { return m_invalid_; }
 
  private:
-  uint32_t m_index_;
+  uint32_t m_slot_offset_;
 
   grpc_connectivity_state m_prev_channel_state_;
   std::shared_ptr<grpc::Channel> m_channel_;
@@ -57,9 +58,12 @@ class XdNodeStub {
   uint32_t m_maximum_retry_times_;
   uint32_t m_failure_retry_times_;
 
-  void *m_node_data_;
+  XdNodeId m_node_id_;
 
-  // void* parameter is m_node_data_
+  void *m_data_;
+
+  // void* parameter is m_data_. Used to free m_data_ when XdNodeStub is being
+  // destructed.
   std::function<void(void *)> m_clean_up_cb_;
 
   friend class XdNodeKeeper;
@@ -74,7 +78,7 @@ class XdNodeKeeper {
   /**
    * Request to register a new Xd node. Thread-safe.
    * @param node_addr The address passed to grpc::CreateChannel().
-   * @param node_data The user-specified data pointer which will be passed as a
+   * @param data The user-specified data pointer which will be passed as a
    * parameter from all callbacks.
    * @param clean_up_cb Called when the underlying Xd node structure is
    * destroyed. The parameter `void *` will be `node_data`.
@@ -83,7 +87,7 @@ class XdNodeKeeper {
    * option is set (succeed) or is null (fail).
    */
   std::future<RegisterNodeResult> RegisterXdNode(
-      const std::string &node_addr, void *node_data,
+      const std::string &node_addr, XdNodeId node_id, void *data,
       std::function<void(void *)> clean_up_cb);
 
   uint32_t AvailableNodeCount();
@@ -92,7 +96,7 @@ class XdNodeKeeper {
 
   /**
    * Get the pointer to XdNodeStub.
-   * @param index the index of XdNodeStub
+   * @param node_id the index of XdNodeStub
    * @return nullptr if index points to an invalid slot, the pointer to
    * XdNodeStub otherwise.
    * @attention It's ok to return the pointer of XdNodeStub directly. The
@@ -100,15 +104,15 @@ class XdNodeKeeper {
    * callback register should do necessary synchronization to clean up all the
    * usage of the XdNodeStub pointer before NodeIsDown() returns.
    */
-  XdNodeStub *GetXdFromIndex(uint32_t index);
+  XdNodeStub *GetXdStub(XdNodeId node_id);
 
-  void SetNodeIsUpCb(std::function<void(uint32_t, void *)> cb);
+  void SetNodeIsUpCb(std::function<void(XdNodeId, void *)> cb);
 
-  void SetNodeIsDownCb(std::function<void(uint32_t, void *)> cb);
+  void SetNodeIsDownCb(std::function<void(XdNodeId, void *)> cb);
 
-  void SetNodeIsTempDownCb(std::function<void(uint32_t, void *)> cb);
+  void SetNodeIsTempDownCb(std::function<void(XdNodeId, void *)> cb);
 
-  void SetNodeRecFromTempFailureCb(std::function<void(uint32_t, void *)> cb);
+  void SetNodeRecFromTempFailureCb(std::function<void(XdNodeId, void *)> cb);
 
  private:
   struct InitializingXdTagData {
@@ -129,13 +133,13 @@ class XdNodeKeeper {
 
   void StateMonitorThreadFunc_();
 
-  std::function<void(uint32_t, void *)> m_node_is_up_cb_;
-  std::function<void(uint32_t, void *)> m_node_is_temp_down_cb_;
-  std::function<void(uint32_t, void *)> m_node_rec_from_temp_failure_cb_;
+  std::function<void(XdNodeId, void *)> m_node_is_up_cb_;
+  std::function<void(XdNodeId, void *)> m_node_is_temp_down_cb_;
+  std::function<void(XdNodeId, void *)> m_node_rec_from_temp_failure_cb_;
 
   // Guarantee that the Xd node will not be freed before this callback is
   // called.
-  std::function<void(uint32_t, void *)> m_node_is_down_cb_;
+  std::function<void(XdNodeId, void *)> m_node_is_down_cb_;
 
   slurmx::mutex m_tag_pool_mtx_;
 
@@ -144,7 +148,7 @@ class XdNodeKeeper {
   // CompletionQueue.
   boost::object_pool<CqTag> m_tag_pool_;
 
-  // Protect m_node_vec_ and m_empty_slot_bitset_.
+  // Protect m_node_vec_, m_node_id_slot_offset_map_ and m_empty_slot_bitset_.
   slurmx::mutex m_node_mtx_;
 
   // Contains connection-established nodes only.
@@ -153,6 +157,9 @@ class XdNodeKeeper {
   // Used to track the empty slots in m_node_vec_. We can use find_first() to
   // locate the first empty slot.
   boost::dynamic_bitset<> m_empty_slot_bitset_;
+
+  std::unordered_map<XdNodeId, uint32_t, XdNodeId::Hash>
+      m_node_id_slot_offset_map_;
 
   // Protect m_alive_xd_bitset_
   slurmx::rw_mutex m_alive_xd_rw_mtx_;

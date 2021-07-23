@@ -2,10 +2,12 @@
 #include <spdlog/fmt/bundled/core.h>
 
 #include <random>
+#include <thread>
 
 #include "AnonymousPipe.h"
 #include "event2/bufferevent.h"
 #include "event2/event.h"
+#include "event2/thread.h"
 #include "event2/util.h"
 #include "gtest/gtest.h"
 #include "spdlog/spdlog.h"
@@ -53,7 +55,9 @@ static void sigchld_handler(int sig) {
 
 struct LibEventTest : testing::Test {
   LibEventTest()
-      : m_ev_sigchld_(nullptr), m_ev_base_(nullptr), testing::Test() {}
+      : m_ev_sigchld_(nullptr), m_ev_base_(nullptr), testing::Test() {
+    evthread_use_pthreads();
+  }
 
   void SetUp() override {
     signal(SIGCHLD, sigchld_handler);
@@ -64,7 +68,6 @@ struct LibEventTest : testing::Test {
   }
 
   void TearDown() override {
-    if (m_ev_sigchld_) event_free(m_ev_sigchld_);
     if (m_ev_base_) event_base_free(m_ev_base_);
   }
 
@@ -180,7 +183,40 @@ TEST_F(LibEventTest, IoRedirectAndDynamicTaskAdding) {
 
     event_base_dispatch(m_ev_base_);
     bufferevent_free(ev_buf_event);
+    if (m_ev_sigchld_) event_free(m_ev_sigchld_);
   }
   if (remove(test_prog_path.c_str()) != 0)
     SPDLOG_ERROR("Error removing test_prog:", strerror(errno));
+}
+
+static void CustomEventCb(int sock, short which, void *arg) {
+  static int times = 0;
+  std::this_thread::sleep_for(std::chrono::seconds(3));
+  SLURMX_INFO("CustomEventCb Called");
+  times++;
+  if (times == 2) {
+    timeval val{0, 0};
+    event_base_loopexit(reinterpret_cast<event_base *>(arg), &val);
+  }
+}
+
+TEST_F(LibEventTest, CustomEvent) {
+  struct event *ev = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
+                               CustomEventCb, m_ev_base_);
+  event_add(ev, nullptr);
+
+  std::thread t([=] {
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    event_active(ev, 0, 0);
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    event_active(ev, 0, 0);
+  });
+
+  event_base_dispatch(m_ev_base_);
+
+  SLURMX_INFO("Loop Exit");
+
+  t.join();
+  std::this_thread::sleep_for(std::chrono::seconds(1));
+  event_free(ev);
 }

@@ -10,10 +10,8 @@ namespace slurmx {
 template <typename T, typename Lockable>
 class ScopeExclusivePtr {
  public:
-  ScopeExclusivePtr(T* data, Lockable* lock) noexcept
-      : data_(data), lock_(lock) {
-    if (data_ && lock_) lock_->lock();
-  }
+  ScopeExclusivePtr(T* data, Lockable* lock = nullptr) noexcept
+      : data_(data), lock_(lock) {}
 
   ~ScopeExclusivePtr() noexcept {
     if (lock_) {

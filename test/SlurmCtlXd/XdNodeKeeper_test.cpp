@@ -33,15 +33,17 @@ namespace bi = boost::interprocess;
 
 class MockCtlXdServer {
  public:
-  MOCK_METHOD(void, XdNodeIsUpCb, (uint32_t, void*));
-  MOCK_METHOD(void, XdNodeIsDownCb, (uint32_t, void*));
-  MOCK_METHOD(void, XdNodeIsTempDownCb, (uint32_t, void*));
-  MOCK_METHOD(void, XdNodeRecFromTempFailureCb, (uint32_t, void*));
+  MOCK_METHOD(void, XdNodeIsUpCb, (XdNodeId, void*));
+  MOCK_METHOD(void, XdNodeIsDownCb, (XdNodeId, void*));
+  MOCK_METHOD(void, XdNodeIsTempDownCb, (XdNodeId, void*));
+  MOCK_METHOD(void, XdNodeRecFromTempFailureCb, (XdNodeId, void*));
 };
 
 class XdNodeKeeperTest : public ::testing::Test {
  public:
   void SetUp() override {
+    g_task_mgr = std::make_unique<Xd::TaskManager>();
+
     m_mock_ctlxd_server_ = std::make_unique<MockCtlXdServer>();
 
     m_keeper_ = std::make_unique<CtlXd::XdNodeKeeper>();
@@ -63,6 +65,8 @@ class XdNodeKeeperTest : public ::testing::Test {
   void TearDown() override {
     if (m_keeper_) m_keeper_.reset();
     m_mock_ctlxd_server_.reset();
+    g_task_mgr->Shutdown();
+    g_task_mgr.reset();
   }
 
   std::unique_ptr<MockCtlXdServer> m_mock_ctlxd_server_;
@@ -77,15 +81,13 @@ TEST_F(XdNodeKeeperTest, FailToConnect) {
   res.memory_bytes = 1024 * 1024 * 1024;
   res.memory_sw_bytes = 1024 * 1024 * 1024;
 
-  auto result_future = m_keeper_->RegisterXdNode(server_addr, &res, nullptr);
+  auto result_future =
+      m_keeper_->RegisterXdNode(server_addr, XdNodeId{0, 0}, &res, nullptr);
   CtlXd::RegisterNodeResult result = result_future.get();
-  EXPECT_EQ(result.allocated_node_index.has_value(), false);
+  EXPECT_EQ(result.node_id.has_value(), false);
 }
 
 TEST_F(XdNodeKeeperTest, OneStub_OneAbortedServer) {
-  TaskManager::GetInstance().Shutdown();
-  TaskManager::GetInstance().Wait();
-
   using Xd::XdServer;
   using namespace std::chrono_literals;
 
@@ -101,41 +103,42 @@ TEST_F(XdNodeKeeperTest, OneStub_OneAbortedServer) {
   auto xd_server = std::make_unique<XdServer>(server_addr, res);
   std::this_thread::sleep_for(1s);
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(0, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE("Node #{} is Up", index);
+  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(XdNodeId{0, 0}, _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE("Node {} is Up", node_id);
       }));
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(0, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE("Node #{} is Temp Down", index);
+  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(XdNodeId{0, 0}, _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE("Node {} is Temp Down", node_id);
       }));
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(0, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE("Node #{} is Down", index);
+  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(XdNodeId{0, 0}, _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE("Node {} is Down", node_id);
         has_exited = true;
       }));
 
   Sequence seq;
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq);
 
-  auto result_future = m_keeper_->RegisterXdNode(server_addr, &res, nullptr);
+  auto result_future =
+      m_keeper_->RegisterXdNode(server_addr, XdNodeId{0, 0}, &res, nullptr);
   result_future.wait();
   ASSERT_EQ(result_future.valid(), true);
 
   CtlXd::RegisterNodeResult result = result_future.get();
-  EXPECT_EQ(result.allocated_node_index.has_value(), true);
-  if (result.allocated_node_index.has_value()) {
-    EXPECT_EQ(result.allocated_node_index.value(), 0);
+  EXPECT_EQ(result.node_id.has_value(), true);
+  if (result.node_id.has_value()) {
+    EXPECT_EQ(result.node_id.value(), (XdNodeId{0, 0}));
   }
 
   std::this_thread::sleep_for(3s);
@@ -156,9 +159,6 @@ TEST_F(XdNodeKeeperTest, OneStub_OneAbortedServer) {
 // send. READY -> IDLE transition is expected.
 // e.g. Shutdown by the user command.
 TEST_F(XdNodeKeeperTest, OneStub_OneTempDownServer) {
-  TaskManager::GetInstance().Shutdown();
-  TaskManager::GetInstance().Wait();
-
   using Xd::XdServer;
   using namespace std::chrono_literals;
 
@@ -171,55 +171,58 @@ TEST_F(XdNodeKeeperTest, OneStub_OneTempDownServer) {
   res.memory_bytes = 1024 * 1024 * 1024;
   res.memory_sw_bytes = 1024 * 1024 * 1024;
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(0, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE("Node #{} is Up", index);
+  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(XdNodeId{0, 0}, _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE("Node {} is Up", node_id);
       }));
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(0, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE("Node #{} is Temp Down", index);
+  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(XdNodeId{0, 0}, _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE("Node {} is Temp Down", node_id);
       }));
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeRecFromTempFailureCb(0, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE("Node #{} recovered from temporary failure", index);
+  ON_CALL((*m_mock_ctlxd_server_),
+          XdNodeRecFromTempFailureCb(XdNodeId{0, 0}, _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE("Node {} recovered from temporary failure", node_id);
       }));
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(0, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE("Node #{} is Down", index);
+  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(XdNodeId{0, 0}, _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE("Node {} is Down", node_id);
         has_exited = true;
       }));
 
   Sequence seq;
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeRecFromTempFailureCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_),
+              XdNodeRecFromTempFailureCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq);
 
   auto xd_server = std::make_unique<XdServer>(server_addr, res);
   std::this_thread::sleep_for(1s);
 
-  auto result_future = m_keeper_->RegisterXdNode(server_addr, &res, nullptr);
+  auto result_future =
+      m_keeper_->RegisterXdNode(server_addr, XdNodeId{0, 0}, &res, nullptr);
   result_future.wait();
   ASSERT_EQ(result_future.valid(), true);
 
   CtlXd::RegisterNodeResult result = result_future.get();
-  EXPECT_EQ(result.allocated_node_index.has_value(), true);
-  if (result.allocated_node_index.has_value()) {
-    EXPECT_EQ(result.allocated_node_index.value(), 0);
+  EXPECT_EQ(result.node_id.has_value(), true);
+  if (result.node_id.has_value()) {
+    EXPECT_EQ(result.node_id.value(), (XdNodeId{0, 0}));
   }
 
   std::this_thread::sleep_for(2s);
@@ -251,51 +254,50 @@ TEST_F(XdNodeKeeperTest, OneStub_OneTempAbortedServer) {
   using Xd::XdServer;
   using namespace std::chrono_literals;
 
-  TaskManager::GetInstance().Shutdown();
-  TaskManager::GetInstance().Wait();
-
   slurmx::SetCloseOnExecFromFd(STDERR_FILENO + 1);
 
   std::atomic_bool has_exited = false;
 
   boost::fibers::barrier xd_rec_barrier(2);
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(0, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE("Node #{} is Up", index);
+  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(XdNodeId{0, 0}, _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE("Node {} is Up", node_id);
       }));
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(0, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE("Node #{} is Temp Down", index);
+  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(XdNodeId{0, 0}, _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE("Node {} is Temp Down", node_id);
       }));
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeRecFromTempFailureCb(0, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE("Node #{} recovered from temporary failure", index);
+  ON_CALL((*m_mock_ctlxd_server_),
+          XdNodeRecFromTempFailureCb(XdNodeId{0, 0}, _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE("Node {} recovered from temporary failure", node_id);
         xd_rec_barrier.wait();
       }));
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(0, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE("Node #{} is Down", index);
+  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(XdNodeId{0, 0}, _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE("Node {} is Down", node_id);
         has_exited = true;
       }));
 
   Sequence seq;
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeRecFromTempFailureCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_),
+              XdNodeRecFromTempFailureCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq);
 
@@ -328,14 +330,14 @@ TEST_F(XdNodeKeeperTest, OneStub_OneTempAbortedServer) {
     } else {
       ipc->init_barrier.wait();
       auto result_future =
-          m_keeper_->RegisterXdNode(server_addr, &res, nullptr);
+          m_keeper_->RegisterXdNode(server_addr, XdNodeId{0, 0}, &res, nullptr);
       result_future.wait();
       ASSERT_EQ(result_future.valid(), true);
 
       CtlXd::RegisterNodeResult result = result_future.get();
-      EXPECT_EQ(result.allocated_node_index.has_value(), true);
-      if (result.allocated_node_index.has_value()) {
-        EXPECT_EQ(result.allocated_node_index.value(), 0);
+      EXPECT_EQ(result.node_id.has_value(), true);
+      if (result.node_id.has_value()) {
+        EXPECT_EQ(result.node_id.value(), (XdNodeId{0, 0}));
       }
 
       ipc->terminate_barrier.wait();
@@ -382,9 +384,6 @@ TEST_F(XdNodeKeeperTest, OneStub_OneTempAbortedServer) {
 }
 
 TEST_F(XdNodeKeeperTest, TwoStubs_TwoTempDownServers) {
-  TaskManager::GetInstance().Shutdown();
-  TaskManager::GetInstance().Wait();
-
   using Xd::XdServer;
   using namespace std::chrono_literals;
   using testing::AnyOf;
@@ -409,61 +408,66 @@ TEST_F(XdNodeKeeperTest, TwoStubs_TwoTempDownServers) {
   terminate_barrier_0 = std::make_unique<boost::fibers::barrier>(2);
   terminate_barrier_1 = std::make_unique<boost::fibers::barrier>(2);
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(AnyOf(0, 1), _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE(RED "Node #{} is Up" RESET, index);
+  ON_CALL((*m_mock_ctlxd_server_),
+          XdNodeIsUpCb(AnyOf(XdNodeId{0, 0}, XdNodeId{0, 1}), _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE(RED "Node {} is Up" RESET, node_id);
 
-        if (index == 0) {
+        if (node_id == XdNodeId{0, 0}) {
           terminate_barrier_0->wait();
         } else {
           terminate_barrier_1->wait();
         }
       }));
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(AnyOf(0, 1), _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE(RED "Node #{} is Temp Down" RESET, index);
+  ON_CALL((*m_mock_ctlxd_server_),
+          XdNodeIsTempDownCb(AnyOf(XdNodeId{0, 0}, XdNodeId{0, 1}), _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE(RED "Node {} is Temp Down" RESET, node_id);
         disconnected_count++;
       }));
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeRecFromTempFailureCb(0, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE(RED "Node #{} recovered from temporary failure" RESET,
-                     index);
+  ON_CALL((*m_mock_ctlxd_server_),
+          XdNodeRecFromTempFailureCb(XdNodeId{0, 0}, _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE(RED "Node {} recovered from temporary failure" RESET,
+                     node_id);
         terminate_barrier_0->wait();
       }));
 
-  ON_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(AnyOf(0, 1), _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        SLURMX_TRACE(RED "Node #{} is Down" RESET, index);
+  ON_CALL((*m_mock_ctlxd_server_),
+          XdNodeIsDownCb(AnyOf(XdNodeId{0, 0}, XdNodeId{0, 1}), _))
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        SLURMX_TRACE(RED "Node {} is Down" RESET, node_id);
         exit_count++;
       }));
 
   Sequence seq_0;
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq_0);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq_0);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeRecFromTempFailureCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_),
+              XdNodeRecFromTempFailureCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq_0);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq_0);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq_0);
 
   Sequence seq_1;
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(1, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(XdNodeId{0, 1}, _))
       .Times(1)
       .InSequence(seq_1);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(1, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(XdNodeId{0, 1}, _))
       .Times(1)
       .InSequence(seq_1);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(1, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(XdNodeId{0, 1}, _))
       .Times(1)
       .InSequence(seq_1);
 
@@ -479,15 +483,16 @@ TEST_F(XdNodeKeeperTest, TwoStubs_TwoTempDownServers) {
   // Wait for server 0 initialization.
   init_barrier_0->wait();
 
-  auto result_future = m_keeper_->RegisterXdNode(server_addr_0, &res, nullptr);
+  auto result_future =
+      m_keeper_->RegisterXdNode(server_addr_0, XdNodeId{0, 0}, &res, nullptr);
   result_future.wait();
   ASSERT_EQ(result_future.valid(), true);
 
   // Wait for Xd Node 0 registration result.
   CtlXd::RegisterNodeResult result = result_future.get();
-  EXPECT_EQ(result.allocated_node_index.has_value(), true);
-  if (result.allocated_node_index.has_value()) {
-    EXPECT_EQ(result.allocated_node_index.value(), 0);
+  EXPECT_EQ(result.node_id.has_value(), true);
+  if (result.node_id.has_value()) {
+    EXPECT_EQ(result.node_id.value(), (XdNodeId{0, 0}));
   }
 
   t0.join();
@@ -500,15 +505,16 @@ TEST_F(XdNodeKeeperTest, TwoStubs_TwoTempDownServers) {
     xd_server->Shutdown();
   });
 
-  result_future = m_keeper_->RegisterXdNode(server_addr_1, &res, nullptr);
+  result_future =
+      m_keeper_->RegisterXdNode(server_addr_1, XdNodeId{0, 1}, &res, nullptr);
   result_future.wait();
   ASSERT_EQ(result_future.valid(), true);
 
   // Wait for Xd Node 1 registration result.
   result = result_future.get();
-  EXPECT_EQ(result.allocated_node_index.has_value(), true);
-  if (result.allocated_node_index.has_value()) {
-    EXPECT_EQ(result.allocated_node_index.value(), 1);
+  EXPECT_EQ(result.node_id.has_value(), true);
+  if (result.node_id.has_value()) {
+    EXPECT_EQ(result.node_id.value(), (XdNodeId{0, 1}));
   }
 
   t1.join();
@@ -530,9 +536,6 @@ TEST_F(XdNodeKeeperTest, TwoStubs_TwoTempDownServers) {
 }
 
 TEST_F(XdNodeKeeperTest, CheckReuseOfSlot) {
-  TaskManager::GetInstance().Shutdown();
-  TaskManager::GetInstance().Wait();
-
   using Xd::XdServer;
   using namespace std::chrono_literals;
 
@@ -557,10 +560,11 @@ TEST_F(XdNodeKeeperTest, CheckReuseOfSlot) {
   std::atomic_uint exit_count = 0;
 
   ON_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(_, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        ASSERT_THAT(index, AnyOf(0, 1, 2));
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        ASSERT_THAT(node_id,
+                    AnyOf(XdNodeId{0, 0}, XdNodeId{0, 1}, XdNodeId{0, 2}));
 
-        SLURMX_TRACE(RED "Node #{} is Up" RESET, index);
+        SLURMX_TRACE(RED "Node {} is Up" RESET, node_id);
 
         start_count++;
         if (start_count >= 3 && !has_restarted_1) {
@@ -572,24 +576,27 @@ TEST_F(XdNodeKeeperTest, CheckReuseOfSlot) {
       }));
 
   ON_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(_, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        ASSERT_THAT(index, AnyOf(0, 1, 2));
-        SLURMX_TRACE(RED "Node #{} is Temp Down" RESET, index);
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        ASSERT_THAT(node_id,
+                    AnyOf(XdNodeId{0, 0}, XdNodeId{0, 1}, XdNodeId{0, 2}));
+        SLURMX_TRACE(RED "Node {} is Temp Down" RESET, node_id);
       }));
 
   ON_CALL((*m_mock_ctlxd_server_), XdNodeRecFromTempFailureCb(_, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        ASSERT_THAT(index, AnyOf(0, 1, 2));
-        SLURMX_TRACE(RED "Node #{} recovered from temporary failure" RESET,
-                     index);
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        ASSERT_THAT(node_id,
+                    AnyOf(XdNodeId{0, 0}, XdNodeId{0, 1}, XdNodeId{0, 2}));
+        SLURMX_TRACE(RED "Node {} recovered from temporary failure" RESET,
+                     node_id);
       }));
 
   ON_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(_, _))
-      .WillByDefault(Invoke([&](uint32_t index, void*) {
-        ASSERT_THAT(index, AnyOf(0, 1, 2));
-        SLURMX_TRACE(RED "Node #{} is Down" RESET, index);
-        if (!has_restarted_1 && index == 1) {
-          SLURMX_TRACE(RED "Restarting Node #1 ..." RESET);
+      .WillByDefault(Invoke([&](XdNodeId node_id, void*) {
+        ASSERT_THAT(node_id,
+                    AnyOf(XdNodeId{0, 0}, XdNodeId{0, 1}, XdNodeId{0, 2}));
+        SLURMX_TRACE(RED "Node #{} is Down" RESET, node_id);
+        if (!has_restarted_1 && node_id == XdNodeId{0, 1}) {
+          SLURMX_TRACE(RED "Restarting Node (0,1) ..." RESET);
           restart_barrier_1->wait();
           has_restarted_1 = true;
         } else if (has_restarted_1) {
@@ -598,36 +605,36 @@ TEST_F(XdNodeKeeperTest, CheckReuseOfSlot) {
       }));
 
   Sequence seq_0;
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq_0);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq_0);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(0, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(XdNodeId{0, 0}, _))
       .Times(1)
       .InSequence(seq_0);
 
   Sequence seq_2;
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(2, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(XdNodeId{0, 2}, _))
       .Times(1)
       .InSequence(seq_2);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(2, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(XdNodeId{0, 2}, _))
       .Times(1)
       .InSequence(seq_2);
-  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(2, _))
+  EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(XdNodeId{0, 2}, _))
       .Times(1)
       .InSequence(seq_2);
 
   Sequence seq_1;
   for (int i = 0; i < 2; i++) {
-    EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(1, _))
+    EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(XdNodeId{0, 1}, _))
         .Times(1)
         .InSequence(seq_1);
-    EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(1, _))
+    EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsTempDownCb(XdNodeId{0, 1}, _))
         .Times(1)
         .InSequence(seq_1);
-    EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(1, _))
+    EXPECT_CALL((*m_mock_ctlxd_server_), XdNodeIsDownCb(XdNodeId{0, 1}, _))
         .Times(1)
         .InSequence(seq_1);
   }
@@ -656,34 +663,37 @@ TEST_F(XdNodeKeeperTest, CheckReuseOfSlot) {
   std::future<CtlXd::RegisterNodeResult> result_future;
   CtlXd::RegisterNodeResult result;
 
-  result_future = m_keeper_->RegisterXdNode(server_addr_0, &res, nullptr);
+  result_future =
+      m_keeper_->RegisterXdNode(server_addr_0, XdNodeId{0, 0}, &res, nullptr);
   result_future.wait();
   ASSERT_EQ(result_future.valid(), true);
 
   result = result_future.get();
-  EXPECT_EQ(result.allocated_node_index.has_value(), true);
-  if (result.allocated_node_index.has_value()) {
-    EXPECT_EQ(result.allocated_node_index.value(), 0);
+  EXPECT_EQ(result.node_id.has_value(), true);
+  if (result.node_id.has_value()) {
+    EXPECT_EQ(result.node_id.value(), (XdNodeId{0, 0}));
   }
 
-  result_future = m_keeper_->RegisterXdNode(server_addr_1, &res, nullptr);
+  result_future =
+      m_keeper_->RegisterXdNode(server_addr_1, XdNodeId{0, 1}, &res, nullptr);
   result_future.wait();
   ASSERT_EQ(result_future.valid(), true);
 
   result = result_future.get();
-  EXPECT_EQ(result.allocated_node_index.has_value(), true);
-  if (result.allocated_node_index.has_value()) {
-    EXPECT_EQ(result.allocated_node_index.value(), 1);
+  EXPECT_EQ(result.node_id.has_value(), true);
+  if (result.node_id.has_value()) {
+    EXPECT_EQ(result.node_id.value(), (XdNodeId{0, 1}));
   }
 
-  result_future = m_keeper_->RegisterXdNode(server_addr_2, &res, nullptr);
+  result_future =
+      m_keeper_->RegisterXdNode(server_addr_2, XdNodeId{0, 2}, &res, nullptr);
   result_future.wait();
   ASSERT_EQ(result_future.valid(), true);
 
   result = result_future.get();
-  EXPECT_EQ(result.allocated_node_index.has_value(), true);
-  if (result.allocated_node_index.has_value()) {
-    EXPECT_EQ(result.allocated_node_index.value(), 2);
+  EXPECT_EQ(result.node_id.has_value(), true);
+  if (result.node_id.has_value()) {
+    EXPECT_EQ(result.node_id.value(), (XdNodeId{0, 2}));
   }
 
   t1.join();
@@ -696,14 +706,15 @@ TEST_F(XdNodeKeeperTest, CheckReuseOfSlot) {
     xd_server->Shutdown();
   });
 
-  result_future = m_keeper_->RegisterXdNode(server_addr_1, &res, nullptr);
+  result_future =
+      m_keeper_->RegisterXdNode(server_addr_1, XdNodeId{0, 1}, &res, nullptr);
   result_future.wait();
   ASSERT_EQ(result_future.valid(), true);
 
   result = result_future.get();
-  EXPECT_EQ(result.allocated_node_index.has_value(), true);
-  if (result.allocated_node_index.has_value()) {
-    EXPECT_EQ(result.allocated_node_index.value(), 1);
+  EXPECT_EQ(result.node_id.has_value(), true);
+  if (result.node_id.has_value()) {
+    EXPECT_EQ(result.node_id.value(), (XdNodeId{0, 1}));
   }
 
   while (exit_count < 3) {

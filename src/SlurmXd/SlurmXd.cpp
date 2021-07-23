@@ -19,8 +19,9 @@ int main(int argc, char** argv) {
         cxxopts::value<std::string>()->default_value(fmt::format("0.0.0.0:{}", kXdDefaultPort)))
     ("s,server-address", "SlurmCtlXd address format: <IP>:<port>",
         cxxopts::value<std::string>())
-    ("ncpu", "# of total cpu core", cxxopts::value<uint32_t>())
-    ("memory", R"(# of total memory. Format: \d+[BKMG])", cxxopts::value<std::string>())
+    ("c,ncpu", "# of total cpu core", cxxopts::value<uint32_t>())
+    ("m,memory", R"(# of total memory. Format: \d+[BKMG])", cxxopts::value<std::string>())
+    ("p,partition", "Name of the partition", cxxopts::value<std::string>())
     ("D,debug-level", "[trace|debug|info|warn|error]", cxxopts::value<std::string>()->default_value("info"))
     ("h,help", "Show help")
   ;
@@ -62,6 +63,18 @@ int main(int argc, char** argv) {
 
   if (parsed_args.count("server-address") == 0) {
     fmt::print("SlurmCtlXd address must be specified.\n{}\n", options.help());
+    return 1;
+  }
+
+  if (parsed_args.count("partition") == 0) {
+    fmt::print("SlurmXd must belong to one partition.\n{}\n", options.help());
+    return 1;
+  }
+
+  const std::string& partition_name =
+      parsed_args["partition"].as<std::string>();
+  if (partition_name == "") {
+    fmt::print("Partition name should not be empty!\n{}\n", options.help());
     return 1;
   }
 
@@ -110,7 +123,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  err = g_ctlxd_client->RegisterOnCtlXd(resource_in_cmd,
+  err = g_ctlxd_client->RegisterOnCtlXd(partition_name, resource_in_cmd,
                                         std::stoul(port_group[1]));
   if (err != SlurmxErr::kOk) {
     SLURMX_ERROR("Exit due to registration error... Shutting down server...");

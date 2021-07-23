@@ -34,18 +34,19 @@ class CtlXdClient {
    */
   SlurmxErr Connect(const std::string& server_address);
 
-  SlurmxErr RegisterOnCtlXd(const resource_t& resource, uint32_t my_port);
+  SlurmxErr RegisterOnCtlXd(const std::string& partition_name,
+                            const resource_t& resource, uint32_t my_port);
 
   SlurmxErr DeallocateResource(const boost::uuids::uuid& resource_uuid);
 
-  uint32_t GetNodeIndex() const { return m_node_index_; };
+  XdNodeId GetNodeId() const { return m_node_id_; };
 
  private:
   std::shared_ptr<Channel> m_ctlxd_channel_;
 
   std::unique_ptr<SlurmCtlXd::Stub> m_stub_;
 
-  uint32_t m_node_index_;
+  XdNodeId m_node_id_;
 };
 
 }  // namespace Xd

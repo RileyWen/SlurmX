@@ -15,5 +15,5 @@ target_link_libraries(slurmxd
         libevent::core
         cxxopts::cxxopts
         Threads::Threads
+        nlohmann_json::nlohmann_json
         )
-

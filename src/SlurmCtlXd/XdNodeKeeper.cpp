@@ -5,12 +5,12 @@
 namespace CtlXd {
 
 XdNodeStub::XdNodeStub()
-    : m_failure_retry_times_(0), m_invalid_(true), m_node_data_(nullptr) {
+    : m_failure_retry_times_(0), m_invalid_(true), m_data_(nullptr) {
   // The most part of jobs are done in XdNodeKeeper::RegisterNewXdNode().
 }
 
 XdNodeStub::~XdNodeStub() {
-  if (m_clean_up_cb_) m_clean_up_cb_(m_node_data_);
+  if (m_clean_up_cb_) m_clean_up_cb_(m_data_);
 }
 
 SlurmxErr XdNodeStub::GrantResourceToken(
@@ -70,17 +70,18 @@ XdNodeKeeper::~XdNodeKeeper() {
 }
 
 std::future<RegisterNodeResult> XdNodeKeeper::RegisterXdNode(
-    const std::string &node_addr, void *node_data,
+    const std::string &node_addr, XdNodeId node_id, void *data,
     std::function<void(void *)> clean_up_cb) {
   using namespace std::chrono_literals;
 
-  auto *data = new InitializingXdTagData{};
-  data->xd = std::make_unique<XdNodeStub>();
+  auto *cq_tag_data = new InitializingXdTagData{};
+  cq_tag_data->xd = std::make_unique<XdNodeStub>();
 
   // InitializingXd: BEGIN -> IDLE
 
-  data->xd->m_node_data_ = node_data;
-  data->xd->m_clean_up_cb_ = clean_up_cb;
+  cq_tag_data->xd->m_node_id_ = node_id;
+  cq_tag_data->xd->m_data_ = data;
+  cq_tag_data->xd->m_clean_up_cb_ = clean_up_cb;
 
   /* Todo: Adjust the value here.
    * In default case, TRANSIENT_FAILURE -> TRANSIENT_FAILURE will use the
@@ -97,26 +98,28 @@ std::future<RegisterNodeResult> XdNodeKeeper::RegisterXdNode(
   //  /*ms*/); channel_args.SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1
   //  /*true*/);
 
-  data->xd->m_channel_ = grpc::CreateCustomChannel(
+  cq_tag_data->xd->m_channel_ = grpc::CreateCustomChannel(
       node_addr, grpc::InsecureChannelCredentials(), channel_args);
-  data->xd->m_prev_channel_state_ = data->xd->m_channel_->GetState(true);
-  data->xd->m_stub_ = SlurmxGrpc::SlurmXd::NewStub(data->xd->m_channel_);
+  cq_tag_data->xd->m_prev_channel_state_ =
+      cq_tag_data->xd->m_channel_->GetState(true);
+  cq_tag_data->xd->m_stub_ =
+      SlurmxGrpc::SlurmXd::NewStub(cq_tag_data->xd->m_channel_);
 
-  data->xd->m_maximum_retry_times_ = 4;
+  cq_tag_data->xd->m_maximum_retry_times_ = 4;
 
   CqTag *tag;
   {
     slurmx::lock_guard lock(m_tag_pool_mtx_);
-    tag = m_tag_pool_.construct(CqTag{CqTag::kInitializingXd, data});
+    tag = m_tag_pool_.construct(CqTag{CqTag::kInitializingXd, cq_tag_data});
   }
 
   // future must be retrieved here previous to NotifyOnStateChange!
   // Otherwise, data may be freed previous to get_future().
-  auto result_future = data->register_result.get_future();
+  auto result_future = cq_tag_data->register_result.get_future();
 
-  data->xd->m_channel_->NotifyOnStateChange(
-      data->xd->m_prev_channel_state_, std::chrono::system_clock::now() + 2s,
-      &m_cq_, tag);
+  cq_tag_data->xd->m_channel_->NotifyOnStateChange(
+      cq_tag_data->xd->m_prev_channel_state_,
+      std::chrono::system_clock::now() + 2s, &m_cq_, tag);
 
   return result_future;
 }
@@ -176,15 +179,17 @@ void XdNodeKeeper::StateMonitorThreadFunc_() {
             delete tag_data;
           } else if (tag->type == CqTag::kEstablishedXd) {
             if (m_node_is_down_cb_)
-              m_node_is_down_cb_(xd->m_index_, xd->m_node_data_);
+              m_node_is_down_cb_(xd->m_node_id_, xd->m_data_);
 
             slurmx::lock_guard node_lock(m_node_mtx_);
             slurmx::write_lock_guard xd_lock(m_alive_xd_rw_mtx_);
 
-            m_empty_slot_bitset_[xd->m_index_] = true;
-            m_alive_xd_bitset_[xd->m_index_] = false;
+            m_empty_slot_bitset_[xd->m_slot_offset_] = true;
+            m_alive_xd_bitset_[xd->m_slot_offset_] = false;
 
-            m_node_vec_[xd->m_index_].reset();
+            m_node_id_slot_offset_map_.erase(xd->m_node_id_);
+
+            m_node_vec_[xd->m_slot_offset_].reset();
           } else {
             SLURMX_ERROR("Unknown tag type: {}", tag->type);
           }
@@ -234,9 +239,9 @@ XdNodeKeeper::CqTag *XdNodeKeeper::InitXdStateMachine_(
         size_t pos = m_empty_slot_bitset_.find_first();
         if (pos == m_empty_slot_bitset_.npos) {
           // No more room for new elements.
-          raw_xd->m_index_ = m_empty_slot_bitset_.size();
+          raw_xd->m_slot_offset_ = m_empty_slot_bitset_.size();
 
-          SLURMX_TRACE("Append Xd at new slot #{}", raw_xd->m_index_);
+          SLURMX_TRACE("Append Xd at new slot #{}", raw_xd->m_slot_offset_);
 
           // Transfer the ownership of this XdNodeStub to smart pointer.
           m_node_vec_.emplace_back(std::move(tag_data->xd));
@@ -246,7 +251,7 @@ XdNodeKeeper::CqTag *XdNodeKeeper::InitXdStateMachine_(
         } else {
           SLURMX_TRACE("Insert Xd at empty slot #{}", pos);
           // Find empty slot.
-          raw_xd->m_index_ = pos;
+          raw_xd->m_slot_offset_ = pos;
 
           // Transfer the XdNodeStub ownership.
           m_node_vec_[pos] = std::move(tag_data->xd);
@@ -254,14 +259,17 @@ XdNodeKeeper::CqTag *XdNodeKeeper::InitXdStateMachine_(
           m_alive_xd_bitset_[pos] = true;
         }
 
+        m_node_id_slot_offset_map_.emplace(raw_xd->m_node_id_,
+                                           raw_xd->m_slot_offset_);
+
         raw_xd->m_failure_retry_times_ = 0;
         raw_xd->m_invalid_ = false;
       }
       if (m_node_is_up_cb_)
-        m_node_is_up_cb_(raw_xd->m_index_, raw_xd->m_node_data_);
+        m_node_is_up_cb_(raw_xd->m_node_id_, raw_xd->m_data_);
 
       // Set future of RegisterNodeResult and free tag_data
-      tag_data->register_result.set_value({raw_xd->m_index_});
+      tag_data->register_result.set_value({raw_xd->m_node_id_});
       delete tag_data;
 
       // Switch to EstablishedXd state machine
@@ -374,10 +382,10 @@ XdNodeKeeper::CqTag *XdNodeKeeper::EstablishedXdStateMachine_(
       xd->m_invalid_ = true;
       {
         slurmx::write_lock_guard lock(m_alive_xd_rw_mtx_);
-        m_alive_xd_bitset_[xd->m_index_] = false;
+        m_alive_xd_bitset_[xd->m_slot_offset_] = false;
       }
       if (m_node_is_temp_down_cb_)
-        m_node_is_temp_down_cb_(xd->m_index_, xd->m_node_data_);
+        m_node_is_temp_down_cb_(xd->m_node_id_, xd->m_data_);
 
       next_tag_type = CqTag::kEstablishedXd;
       break;
@@ -397,11 +405,11 @@ XdNodeKeeper::CqTag *XdNodeKeeper::EstablishedXdStateMachine_(
         xd->m_invalid_ = false;
         {
           slurmx::write_lock_guard lock(m_alive_xd_rw_mtx_);
-          m_alive_xd_bitset_[xd->m_index_] = true;
+          m_alive_xd_bitset_[xd->m_slot_offset_] = true;
         }
 
         if (m_node_rec_from_temp_failure_cb_)
-          m_node_rec_from_temp_failure_cb_(xd->m_index_, xd->m_node_data_);
+          m_node_rec_from_temp_failure_cb_(xd->m_node_id_, xd->m_data_);
 
         next_tag_type = CqTag::kEstablishedXd;
       }
@@ -417,10 +425,10 @@ XdNodeKeeper::CqTag *XdNodeKeeper::EstablishedXdStateMachine_(
         xd->m_invalid_ = true;
         {
           slurmx::write_lock_guard lock(m_alive_xd_rw_mtx_);
-          m_alive_xd_bitset_[xd->m_index_] = false;
+          m_alive_xd_bitset_[xd->m_slot_offset_] = false;
         }
         if (m_node_is_temp_down_cb_)
-          m_node_is_temp_down_cb_(xd->m_index_, xd->m_node_data_);
+          m_node_is_temp_down_cb_(xd->m_node_id_, xd->m_data_);
 
         next_tag_type = CqTag::kEstablishedXd;
       } else if (xd->m_prev_channel_state_ == GRPC_CHANNEL_CONNECTING) {
@@ -461,7 +469,7 @@ XdNodeKeeper::CqTag *XdNodeKeeper::EstablishedXdStateMachine_(
 
     case GRPC_CHANNEL_SHUTDOWN:
       SLURMX_ERROR("Unexpected SHUTDOWN channel state on EstablishedXd #{} !",
-                   xd->m_index_);
+                   xd->m_slot_offset_);
       break;
   }
 
@@ -480,10 +488,11 @@ uint32_t XdNodeKeeper::AvailableNodeCount() {
   return m_alive_xd_bitset_.count();
 }
 
-XdNodeStub *XdNodeKeeper::GetXdFromIndex(uint32_t index) {
+XdNodeStub *XdNodeKeeper::GetXdStub(XdNodeId node_id) {
   slurmx::lock_guard lock(m_node_mtx_);
-  if (index < m_node_vec_.size() && !m_empty_slot_bitset_.test(index))
-    return m_node_vec_[index].get();
+  auto iter = m_node_id_slot_offset_map_.find(node_id);
+  if (iter != m_node_id_slot_offset_map_.end())
+    return m_node_vec_[iter->second].get();
   else
     return nullptr;
 }
@@ -494,21 +503,21 @@ bool XdNodeKeeper::XdNodeValid(uint32_t index) {
   return m_alive_xd_bitset_.test(index);
 }
 
-void XdNodeKeeper::SetNodeIsUpCb(std::function<void(uint32_t, void *)> cb) {
+void XdNodeKeeper::SetNodeIsUpCb(std::function<void(XdNodeId, void *)> cb) {
   m_node_is_up_cb_ = cb;
 }
 
-void XdNodeKeeper::SetNodeIsDownCb(std::function<void(uint32_t, void *)> cb) {
+void XdNodeKeeper::SetNodeIsDownCb(std::function<void(XdNodeId, void *)> cb) {
   m_node_is_down_cb_ = cb;
 }
 
 void XdNodeKeeper::SetNodeIsTempDownCb(
-    std::function<void(uint32_t, void *)> cb) {
+    std::function<void(XdNodeId, void *)> cb) {
   m_node_is_temp_down_cb_ = cb;
 }
 
 void XdNodeKeeper::SetNodeRecFromTempFailureCb(
-    std::function<void(uint32_t, void *)> cb) {
+    std::function<void(XdNodeId, void *)> cb) {
   m_node_rec_from_temp_failure_cb_ = cb;
 }
 

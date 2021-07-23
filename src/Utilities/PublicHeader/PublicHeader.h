@@ -74,6 +74,43 @@ inline std::string_view SlurmxErrStr(SlurmxErr err) {
   return Internal::SlurmxErrStrArr[uint16_t(err)];
 }
 
+/* ----------- Public definitions for all components */
+
+// (partition id, node index), by which a Xd node is uniquely identified.
+struct XdNodeId {
+  uint32_t partition_id;
+  uint32_t node_index;
+
+  struct Hash {
+    std::size_t operator()(const XdNodeId& val) const {
+      return std::hash<uint64_t>()(
+          (static_cast<uint64_t>(val.partition_id) << 32) |
+          static_cast<uint64_t>(val.node_index));
+    }
+  };
+};
+
+inline bool operator==(const XdNodeId& lhs, const XdNodeId& rhs) {
+  return (lhs.node_index == rhs.node_index) &&
+         (lhs.partition_id == rhs.partition_id);
+}
+
+/**
+ * Custom formatter for XdNodeId in fmt.
+ */
+template <>
+struct fmt::formatter<XdNodeId> {
+  constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) {
+    return ctx.begin();
+  }
+
+  template <typename FormatContext>
+  auto format(const XdNodeId& id, FormatContext& ctx) -> decltype(ctx.out()) {
+    // ctx.out() is an output iterator to write to.
+    return format_to(ctx.out(), "({}, {})", id.partition_id, id.node_index);
+  }
+};
+
 // Model the allocatable resources on a slurmxd node.
 struct resource_t {
   uint32_t cpu_count = 0;

@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+package SlurmxGrpc;
+
+message XdNodeId {
+  uint32 partition_id = 1;
+  uint32 node_index = 2;
+}

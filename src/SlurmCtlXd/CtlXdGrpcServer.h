@@ -72,12 +72,19 @@ class CtlXdServer {
   inline void Wait() { m_server_->Wait(); }
 
  private:
-  void XdNodeIsUpCb_(uint32_t index, void *node_data);
-  void XdNodeIsDownCb_(uint32_t index, void *node_data);
+  void XdNodeIsUpCb_(XdNodeId node_id, void *node_data);
+  void XdNodeIsDownCb_(XdNodeId node_id, void *);
 
-  SlurmxErr AllocateResource(const resource_t &res,
+  /**
+   * Actual Handler of AllocateResource RPC.
+   * @return kOK if allocation succeeds. kNoResource if the resource is not
+   * enough in selected partition. kNonExistent if partition doesn't exist.
+   */
+  SlurmxErr AllocateResource(const std::string &partition_name,
+                             const resource_t &res,
                              SlurmxGrpc::ResourceInfo *res_info);
-  SlurmxErr DeallocateResource(uint32_t node_index, const uuid &resource_uuid);
+
+  SlurmxErr DeallocateResource(XdNodeId node_id, const uuid &resource_uuid);
 
   void HeartBeatFromNode(const uuid &node_uuid);
 

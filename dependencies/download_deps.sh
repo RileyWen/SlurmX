@@ -66,7 +66,11 @@ pushd $LIB_DIR/cxxopts-2.2.1 &&
 # LibEvent
 pushd $LIB_DIR/libevent-2.1.12-stable &&
   mkdir -p build && cd build &&
-  cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/libevent "${CMAKE_DEFS[@]}" .. && ninja install &&
+  cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/libevent \
+    -DEVENT__DISABLE_TESTS=ON \
+    -DEVENT__DISABLE_BENCHMARK=ON \
+    "${CMAKE_DEFS[@]}" \
+    .. && ninja install &&
   popd
 
 # GRPC
