@@ -1,9 +1,8 @@
 #pragma once
 
-#include <spdlog/fmt/bundled/format.h>
-
 #include <boost/container_hash/hash.hpp>
 #include <boost/uuid/uuid.hpp>
+#include <chrono>
 #include <string>
 #include <unordered_map>
 
@@ -14,6 +13,8 @@
 #endif
 
 namespace CtlXd {
+
+constexpr uint64_t kTaskScheduleIntervalMs = 1000;
 
 /**
  * The static information on a Xd node (the static part of XDNodeData). This
@@ -30,7 +31,7 @@ struct XdNodeStaticMeta {
   uint32_t partition_id;  // Allocated if partition_name is new or
                           // use existing partition id of the partition_name.
   std::string partition_name;  // a partition_name corresponds to partition id.
-  resource_t res;
+  Resources res;
 };
 
 /**
@@ -41,14 +42,14 @@ struct XdNodeMeta {
   XdNodeStaticMeta static_meta;
 
   // total = avail + in-use
-  resource_t res_total;  // A copy of res in XdNodeStaticMeta,
+  Resources res_total;  // A copy of res in XdNodeStaticMeta,
   // just for convenience.
-  resource_t res_avail;
-  resource_t res_in_use;
+  Resources res_avail;
+  Resources res_in_use;
 
   // Store the information of the slices of allocated resource.
   // One uuid represents one shard of allocated resource.
-  std::unordered_map<boost::uuids::uuid, resource_t,
+  std::unordered_map<boost::uuids::uuid, Resources,
                      boost::hash<boost::uuids::uuid>>
       resource_shards;
 };
@@ -60,9 +61,9 @@ using XdNodeMetaMap = std::unordered_map<uint32_t, XdNodeMeta>;
 
 struct PartitionGlobalMeta {
   // total = avail + in-use
-  resource_t m_resource_total_;
-  resource_t m_resource_avail_;
-  resource_t m_resource_in_use_;
+  Resources m_resource_total_;
+  Resources m_resource_avail_;
+  Resources m_resource_in_use_;
 
   std::string name;
 

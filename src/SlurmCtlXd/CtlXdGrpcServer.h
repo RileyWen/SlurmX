@@ -40,10 +40,10 @@ class SlurmCtlXdServiceImpl final : public SlurmxGrpc::SlurmCtlXd::Service {
       const SlurmxGrpc::SlurmXdRegisterRequest *request,
       SlurmxGrpc::SlurmXdRegisterResult *response) override;
 
-  grpc::Status AllocateResource(
+  grpc::Status AllocateInteractiveTask(
       grpc::ServerContext *context,
-      const SlurmxGrpc::ResourceAllocRequest *request,
-      SlurmxGrpc::ResourceAllocReply *response) override;
+      const SlurmxGrpc::InteractiveTaskAllocRequest *request,
+      SlurmxGrpc::InteractiveTaskAllocReply *response) override;
 
   grpc::Status DeallocateResource(
       grpc::ServerContext *context,
@@ -80,9 +80,9 @@ class CtlXdServer {
    * @return kOK if allocation succeeds. kNoResource if the resource is not
    * enough in selected partition. kNonExistent if partition doesn't exist.
    */
-  SlurmxErr AllocateResource(const std::string &partition_name,
-                             const resource_t &res,
-                             SlurmxGrpc::ResourceInfo *res_info);
+  //  SlurmxErr AllocateResource(const std::string &partition_name,
+  //                             const AllocatableResource &res,
+  //                             SlurmxGrpc::ResourceInfo *res_info);
 
   SlurmxErr DeallocateResource(XdNodeId node_id, const uuid &resource_uuid);
 

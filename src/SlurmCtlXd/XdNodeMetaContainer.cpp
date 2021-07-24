@@ -31,12 +31,13 @@ void XdNodeMetaContainerSimpleImpl::AddNode(
       "Add the resource of Node {} (cpu: {}, mem: {}) to partition [{}]'s "
       "global resource. partition [{}]'s Global resource now: "
       "cpu: {}, mem: {})",
-      static_meta.node_index, static_meta.res.cpu_count,
-      slurmx::ReadableMemory(static_meta.res.memory_bytes),
+      static_meta.node_index, static_meta.res.allocatable_resource.cpu_count,
+      slurmx::ReadableMemory(static_meta.res.allocatable_resource.memory_bytes),
       static_meta.partition_name, static_meta.partition_name,
-      part_metas.partition_global_meta.m_resource_total_.cpu_count,
-      slurmx::ReadableMemory(
-          part_metas.partition_global_meta.m_resource_total_.memory_bytes));
+      part_metas.partition_global_meta.m_resource_total_.allocatable_resource
+          .cpu_count,
+      slurmx::ReadableMemory(part_metas.partition_global_meta.m_resource_total_
+                                 .allocatable_resource.memory_bytes));
 
   XdNodeMeta node_meta{
       .static_meta = static_meta,
@@ -183,6 +184,11 @@ XdNodeMetaContainerSimpleImpl::GetNodeMetaPtr(XdNodeId node_id) {
   }
 
   return {&node_meta_iter->second, &mtx_};
+}
+
+XdNodeMetaContainerInterface::AllPartitionsMetaMapPtr
+XdNodeMetaContainerSimpleImpl::GetAllPartitionsMetaMapPtr() {
+  return {&partition_metas_map_, &mtx_};
 }
 
 }  // namespace CtlXd

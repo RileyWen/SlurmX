@@ -7,7 +7,7 @@
 namespace SrunX {
 
 struct CommandLineArgs {
-  resource_t required_resource;
+  AllocatableResource required_resource;
 
   std::string ctlxd_address;
   std::string ctlxd_port;

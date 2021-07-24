@@ -9,14 +9,15 @@
 namespace Xd {
 
 SlurmxErr CtlXdClient::RegisterOnCtlXd(const std::string& partition_name,
-                                       const resource_t& resource,
+                                       const AllocatableResource& resource,
                                        uint32_t my_port) {
   SlurmXdRegisterRequest req;
 
   req.set_partition_name(partition_name);
   req.set_port(my_port);
 
-  AllocatableResource* resource_total = req.mutable_resource_total();
+  SlurmxGrpc::AllocatableResource* resource_total =
+      req.mutable_resource_total();
   resource_total->set_cpu_core_limit(resource.cpu_count);
   resource_total->set_memory_limit_bytes(resource.memory_bytes);
   resource_total->set_memory_sw_limit_bytes(resource.memory_sw_bytes);

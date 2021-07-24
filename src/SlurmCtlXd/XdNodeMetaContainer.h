@@ -1,5 +1,7 @@
 #pragma once
 
+#include <absl/container/flat_hash_map.h>
+
 #include <unordered_map>
 
 #include "CtlXdPublicDefs.h"
@@ -16,6 +18,11 @@ class XdNodeMetaContainerInterface {
   using Mutex = slurmx::recursive_mutex;
   using LockGuard = slurmx::recursive_lock_guard;
 
+  using AllPartitionsMetaMap =
+      absl::flat_hash_map<uint32_t /*partition id*/, PartitionMetas>;
+
+  using AllPartitionsMetaMapPtr =
+      slurmx::ScopeExclusivePtr<AllPartitionsMetaMap, Mutex>;
   using PartitionMetasPtr = slurmx::ScopeExclusivePtr<PartitionMetas, Mutex>;
   using NodeMetaPtr = slurmx::ScopeExclusivePtr<XdNodeMeta, Mutex>;
 
@@ -61,6 +68,8 @@ class XdNodeMetaContainerInterface {
 
   virtual NodeMetaPtr GetNodeMetaPtr(XdNodeId node_id) = 0;
 
+  virtual AllPartitionsMetaMapPtr GetAllPartitionsMetaMapPtr() = 0;
+
  protected:
   XdNodeMetaContainerInterface() = default;
 
@@ -79,6 +88,8 @@ class XdNodeMetaContainerSimpleImpl : public XdNodeMetaContainerInterface {
   PartitionMetasPtr GetPartitionMetasPtr(uint32_t partition_id) override;
 
   NodeMetaPtr GetNodeMetaPtr(XdNodeId node_id) override;
+
+  AllPartitionsMetaMapPtr GetAllPartitionsMetaMapPtr() override;
 
   bool PartitionExists(const std::string& partition_name) override;
 
@@ -105,10 +116,9 @@ class XdNodeMetaContainerSimpleImpl : public XdNodeMetaContainerInterface {
    */
   uint32_t GetPartitionId_(const std::string& partition_name);
 
-  std::unordered_map<uint32_t /*partition id*/, PartitionMetas>
-      partition_metas_map_;
+  AllPartitionsMetaMap partition_metas_map_;
 
-  std::unordered_map<std::string /*partition name*/, uint32_t /*partition id*/>
+  absl::flat_hash_map<std::string /*partition name*/, uint32_t /*partition id*/>
       partition_name_id_map_;
   uint32_t partition_seq_ = 0;
 

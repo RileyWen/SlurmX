@@ -104,7 +104,7 @@ Status SlurmXdServiceImpl::SrunXStream(
               }
 
               // We have checked the validity of resource uuid.
-              std::optional<resource_t> resource_limit =
+              std::optional<AllocatableResource> resource_limit =
                   g_server->FindResourceByUuid(resource_uuid);
 
               Cgroup::CgroupLimit cg_limit{
@@ -295,8 +295,8 @@ Status SlurmXdServiceImpl::SrunXStream(
   }
 }
 
-SlurmxErr XdServer::GrantResourceToken(const uuid &resource_uuid,
-                                       const resource_t &required_resource) {
+SlurmxErr XdServer::GrantResourceToken(
+    const uuid &resource_uuid, const AllocatableResource &required_resource) {
   if (required_resource <= m_resource_avail_) {
     SLURMX_DEBUG("Resource allocated successfully on uuid {}",
                  to_string(resource_uuid));
@@ -338,7 +338,7 @@ Status SlurmXdServiceImpl::GrantResourceToken(
     ServerContext *context, const GrantResourceTokenRequest *request,
     GrantResourceTokenReply *response) {
   uuid resource_uuid;
-  resource_t required_resource;
+  AllocatableResource required_resource;
   SlurmxErr err;
 
   std::copy(request->resource_uuid().begin(), request->resource_uuid().end(),
@@ -382,7 +382,7 @@ Status SlurmXdServiceImpl::RevokeResourceToken(
 }
 
 XdServer::XdServer(const std::string &listen_address,
-                   const resource_t &total_resource)
+                   const AllocatableResource &total_resource)
     : m_listen_address_(listen_address),
       m_resource_total_(total_resource),
       m_resource_avail_(total_resource),
@@ -412,7 +412,7 @@ SlurmxErr XdServer::CheckValidityOfResourceUuid(const uuid &resource_uuid) {
   return SlurmxErr::kNonExistent;
 }
 
-std::optional<resource_t> XdServer::FindResourceByUuid(
+std::optional<AllocatableResource> XdServer::FindResourceByUuid(
     const uuid &resource_uuid) {
   std::lock_guard<std::mutex> lock_guard(m_node_resource_mtx_);
 

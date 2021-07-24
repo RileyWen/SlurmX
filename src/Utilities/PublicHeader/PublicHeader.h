@@ -112,21 +112,48 @@ struct fmt::formatter<XdNodeId> {
 };
 
 // Model the allocatable resources on a slurmxd node.
-struct resource_t {
+// It contains CPU and memory by now.
+struct AllocatableResource {
   uint32_t cpu_count = 0;
   uint64_t memory_bytes = 0;
   uint64_t memory_sw_bytes = 0;
 
-  resource_t() = default;
-  resource_t(const SlurmxGrpc::AllocatableResource&);
+  AllocatableResource() = default;
+  AllocatableResource(const SlurmxGrpc::AllocatableResource&);
 
-  resource_t& operator+=(const resource_t& rhs);
+  AllocatableResource& operator+=(const AllocatableResource& rhs);
 
-  resource_t& operator-=(const resource_t& rhs);
+  AllocatableResource& operator-=(const AllocatableResource& rhs);
 };
 
-bool operator<=(const resource_t& lhs, const resource_t& rhs);
-bool operator<(const resource_t& lhs, const resource_t& rhs);
+bool operator<=(const AllocatableResource& lhs, const AllocatableResource& rhs);
+bool operator<(const AllocatableResource& lhs, const AllocatableResource& rhs);
+
+/**
+ * Model the dedicated resources in a slurmxd node.
+ * It contains GPU, NIC, etc.
+ */
+struct DedicatedResource {};
+
+/**
+ * When a task is allocated a resource UUID, it holds one instance of Resources
+ * struct. Resource struct contains a AllocatableResource struct and a list of
+ * DedicatedResource.
+ */
+struct Resources {
+  AllocatableResource allocatable_resource;
+
+  Resources() = default;
+
+  Resources& operator+=(const Resources& rhs);
+  Resources& operator-=(const Resources& rhs);
+
+  Resources& operator+=(const AllocatableResource& rhs);
+  Resources& operator-=(const AllocatableResource& rhs);
+};
+
+bool operator<=(const Resources& lhs, const Resources& rhs);
+bool operator<(const Resources& lhs, const Resources& rhs);
 
 namespace Internal {
 

@@ -76,7 +76,7 @@ class XdNodeKeeperTest : public ::testing::Test {
 TEST_F(XdNodeKeeperTest, FailToConnect) {
   std::string server_addr{"127.0.0.1:50011"};
 
-  resource_t res;
+  AllocatableResource res;
   res.cpu_count = 10;
   res.memory_bytes = 1024 * 1024 * 1024;
   res.memory_sw_bytes = 1024 * 1024 * 1024;
@@ -93,7 +93,7 @@ TEST_F(XdNodeKeeperTest, OneStub_OneAbortedServer) {
 
   std::string server_addr{"127.0.0.1:50011"};
 
-  resource_t res;
+  AllocatableResource res;
   res.cpu_count = 10;
   res.memory_bytes = 1024 * 1024 * 1024;
   res.memory_sw_bytes = 1024 * 1024 * 1024;
@@ -166,7 +166,7 @@ TEST_F(XdNodeKeeperTest, OneStub_OneTempDownServer) {
 
   std::string server_addr{"127.0.0.1:50011"};
 
-  resource_t res;
+  AllocatableResource res;
   res.cpu_count = 10;
   res.memory_bytes = 1024 * 1024 * 1024;
   res.memory_sw_bytes = 1024 * 1024 * 1024;
@@ -303,7 +303,7 @@ TEST_F(XdNodeKeeperTest, OneStub_OneTempAbortedServer) {
 
   std::string server_addr{"127.0.0.1:50011"};
 
-  resource_t res;
+  AllocatableResource res;
   res.cpu_count = 10;
   res.memory_bytes = 1024 * 1024 * 1024;
   res.memory_sw_bytes = 1024 * 1024 * 1024;
@@ -391,7 +391,7 @@ TEST_F(XdNodeKeeperTest, TwoStubs_TwoTempDownServers) {
   std::string server_addr_0{"127.0.0.1:50011"};
   std::string server_addr_1{"127.0.0.1:50012"};
 
-  resource_t res;
+  AllocatableResource res;
   res.cpu_count = 10;
   res.memory_bytes = 1024 * 1024 * 1024;
   res.memory_sw_bytes = 1024 * 1024 * 1024;
@@ -543,7 +543,7 @@ TEST_F(XdNodeKeeperTest, CheckReuseOfSlot) {
   std::string server_addr_1{"127.0.0.1:50012"};
   std::string server_addr_2{"127.0.0.1:50013"};
 
-  resource_t res;
+  AllocatableResource res;
   res.cpu_count = 10;
   res.memory_bytes = 1024 * 1024 * 1024;
   res.memory_sw_bytes = 1024 * 1024 * 1024;

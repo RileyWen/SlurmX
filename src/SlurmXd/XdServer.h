@@ -57,32 +57,35 @@ class SlurmXdServiceImpl : public SlurmXd::Service {
 
 class XdServer {
  public:
-  XdServer(const std::string &listen_address, const resource_t &total_resource);
+  XdServer(const std::string &listen_address,
+           const AllocatableResource &total_resource);
 
   inline void Shutdown() { m_server_->Shutdown(); }
 
   inline void Wait() { m_server_->Wait(); }
 
   SlurmxErr GrantResourceToken(const uuid &resource_uuid,
-                               const resource_t &required_resource);
+                               const AllocatableResource &required_resource);
 
   SlurmxErr RevokeResourceToken(const uuid &resource_uuid);
 
   SlurmxErr CheckValidityOfResourceUuid(const uuid &resource_uuid);
 
-  std::optional<resource_t> FindResourceByUuid(const uuid &resource_uuid);
+  std::optional<AllocatableResource> FindResourceByUuid(
+      const uuid &resource_uuid);
 
  private:
   uint64_t NewTaskSeqNum_() { return m_task_seq_++; };
 
   // total = avail + in-use
-  resource_t m_resource_total_;
-  resource_t m_resource_avail_;
-  resource_t m_resource_in_use_;
+  AllocatableResource m_resource_total_;
+  AllocatableResource m_resource_avail_;
+  AllocatableResource m_resource_in_use_;
 
   // It is used to record allocated resources (from slurmctlxd)
   //  in this node.
-  std::unordered_map<uuid, resource_t, boost::hash<uuid>> m_resource_uuid_map_;
+  std::unordered_map<uuid, AllocatableResource, boost::hash<uuid>>
+      m_resource_uuid_map_;
 
   // The mutex which protects the accounting of resource on this node.
   std::mutex m_node_resource_mtx_;

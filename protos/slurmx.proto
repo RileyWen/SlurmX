@@ -17,33 +17,40 @@ message NegotiationReply {
   string reason = 2; // Set when failed
 }
 
-
-// Match the definition of 'resource_t' in PublicHeader.h
-message AllocatableResource {
-  uint64 cpu_core_limit = 1;
-  uint64 memory_limit_bytes = 2;
-  uint64 memory_sw_limit_bytes = 3;
-}
-
-message ResourceAllocRequest {
-  AllocatableResource required_resource = 1;
+message InteractiveTaskAllocRequest {
+  Resources required_resources = 1;
   string partition_name = 2;
   uint64 time_limit_sec = 3;
 }
 
-message ResourceInfo {
-  bytes resource_uuid = 1;
-  uint32 node_index = 2;
-  string ipv4_addr = 3;
-  uint32 port = 4;
+message BasicTaskMeta {
+  uint32 task_id = 1;
+  bytes resource_uuid = 2;
 }
 
-message ResourceAllocReply {
+message InteractiveTaskAllocReply {
   bool ok = 1;
   oneof payload {
-    ResourceInfo res_info = 2;
+    BasicTaskMeta task_meta = 2;
     string reason = 3;
   }
+}
+
+message InteractiveTaskAllocationDetail {
+  /* Used to connect the SlurmXd node */
+  uint32 node_index = 1;
+  string ipv4_addr = 2;
+  uint32 port = 3;
+}
+
+message QueryInteractiveTaskAllocDetailRequest {
+  uint32 task_id = 1;
+  bytes resource_uuid = 2;
+}
+
+message QueryInteractiveTaskAllocDetailReply {
+  bool ok = 1;
+  InteractiveTaskAllocationDetail detail = 2;
 }
 
 message TaskInfo {
@@ -186,8 +193,9 @@ service SlurmCtlXd {
 
   /* RPCs called from SrunX */
   /* When SrunX request an interactive job, it will first request SrunX to allocate
-     the required resource and get the resource token. */
-  rpc AllocateResource(ResourceAllocRequest) returns(ResourceAllocReply);
+     an interactive task and get the related meta information. */
+  rpc AllocateInteractiveTask(InteractiveTaskAllocRequest) returns(InteractiveTaskAllocReply);
+  rpc QueryInteractiveTaskAllocDetail(QueryInteractiveTaskAllocDetailRequest) returns(QueryInteractiveTaskAllocDetailReply);
 }
 
 service SlurmXd {

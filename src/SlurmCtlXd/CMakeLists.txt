@@ -7,13 +7,19 @@ add_executable(slurmctlxd ${SLURMCTLXD_SRC})
 target_link_libraries(slurmctlxd
         spdlog::spdlog
         concurrentqueue
+
         Utility_AnonymousPipe
         Utility_cgroup
         Utility_PublicHeader
-        proto
+
         Boost::boost
         Boost::thread
+
         libevent::core
         cxxopts::cxxopts
         Threads::Threads
+
+        absl::btree
+
+        proto
         )

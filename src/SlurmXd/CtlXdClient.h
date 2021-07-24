@@ -15,7 +15,6 @@ namespace Xd {
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
-using SlurmxGrpc::AllocatableResource;
 using SlurmxGrpc::SlurmCtlXd;
 using SlurmxGrpc::SlurmXdRegisterRequest;
 using SlurmxGrpc::SlurmXdRegisterResult;
@@ -35,7 +34,8 @@ class CtlXdClient {
   SlurmxErr Connect(const std::string& server_address);
 
   SlurmxErr RegisterOnCtlXd(const std::string& partition_name,
-                            const resource_t& resource, uint32_t my_port);
+                            const AllocatableResource& resource,
+                            uint32_t my_port);
 
   SlurmxErr DeallocateResource(const boost::uuids::uuid& resource_uuid);
 

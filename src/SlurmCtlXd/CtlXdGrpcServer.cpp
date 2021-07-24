@@ -4,6 +4,7 @@
 
 #include <limits>
 
+#include "TaskScheduler.h"
 #include "XdNodeKeeper.h"
 #include "XdNodeMetaContainer.h"
 #include "slurmx/String.h"
@@ -35,8 +36,8 @@ grpc::Status CtlXd::SlurmCtlXdServiceImpl::RegisterSlurmXd(
                            .node_name = request->node_name(),
                            .partition_id = node_id.partition_id,
                            .partition_name = request->partition_name(),
-                           .res = request->resource_total()},
-      [](void *data) { delete reinterpret_cast<resource_t *>(data); });
+                           .res = {request->resource_total()}},
+      [](void *data) { delete reinterpret_cast<AllocatableResource *>(data); });
 
   RegisterNodeResult result = result_future.get();
 
@@ -60,19 +61,30 @@ grpc::Status CtlXd::SlurmCtlXdServiceImpl::RegisterSlurmXd(
   return grpc::Status::OK;
 }
 
-grpc::Status SlurmCtlXdServiceImpl::AllocateResource(
+grpc::Status SlurmCtlXdServiceImpl::AllocateInteractiveTask(
     grpc::ServerContext *context,
-    const SlurmxGrpc::ResourceAllocRequest *request,
-    SlurmxGrpc::ResourceAllocReply *response) {
-  resource_t res{request->required_resource()};
-
+    const SlurmxGrpc::InteractiveTaskAllocRequest *request,
+    SlurmxGrpc::InteractiveTaskAllocReply *response) {
   SlurmxErr err;
-  SlurmxGrpc::ResourceInfo res_info;
-  err = m_ctlxd_server_->AllocateResource(request->partition_name(), res,
-                                          &res_info);
+  auto interactive_task = std::make_unique<InteractiveTask>();
+
+  interactive_task->partition_name = request->partition_name();
+  interactive_task->resources.allocatable_resource =
+      request->required_resources().allocatable_resource();
+  interactive_task->time_limit_sec = request->time_limit_sec();
+  interactive_task->type = ITask::Type::Interactive;
+
+  // Todo: Eliminate useless allocation here when err!=kOk.
+  auto task_meta = std::make_unique<BasicTaskMeta>();
+
+  err = g_task_scheduler->SubmitTask(std::move(interactive_task),
+                                     task_meta.get());
+
   if (err == SlurmxErr::kOk) {
     response->set_ok(true);
-    *response->mutable_res_info() = res_info;
+    response->mutable_task_meta()->set_resource_uuid(
+        task_meta->resource_uuid.data, task_meta->resource_uuid.size());
+    response->mutable_task_meta()->set_task_id(task_meta->task_id);
   } else {
     response->set_ok(false);
     response->set_reason(err == SlurmxErr::kNonExistent
@@ -80,7 +92,7 @@ grpc::Status SlurmCtlXdServiceImpl::AllocateResource(
                              : "Resource not enough!");
   }
 
-  return grpc::Status::OK;
+  return Service::AllocateInteractiveTask(context, request, response);
 }
 
 grpc::Status SlurmCtlXdServiceImpl::DeallocateResource(
@@ -167,9 +179,11 @@ void CtlXdServer::XdNodeIsUpCb_(XdNodeId node_id, void *node_data) {
   g_meta_container->AddNode(*static_meta);
 
   SLURMX_INFO("Node {} registered. cpu: {}, mem: {}, mem+sw: {}", node_id,
-              static_meta->res.cpu_count,
-              slurmx::ReadableMemory(static_meta->res.memory_bytes),
-              slurmx::ReadableMemory(static_meta->res.memory_sw_bytes));
+              static_meta->res.allocatable_resource.cpu_count,
+              slurmx::ReadableMemory(
+                  static_meta->res.allocatable_resource.memory_bytes),
+              slurmx::ReadableMemory(
+                  static_meta->res.allocatable_resource.memory_sw_bytes));
 
   // Delete node_data(node_res) (allocated in RegisterSlurmXd) here because it's
   // useless now. The resource information is now kept in global MetaContainer.
@@ -188,74 +202,74 @@ void CtlXdServer::XdNodeIsDownCb_(XdNodeId node_id, void *) {
   g_meta_container->DeleteNodeMeta(node_id);
 }
 
-SlurmxErr CtlXdServer::AllocateResource(const std::string &partition_name,
-                                        const resource_t &res,
-                                        SlurmxGrpc::ResourceInfo *res_info) {
-  SLURMX_TRACE("Trying Allocating resource: cpu {}, mem: {}, mem+sw: {}",
-               res.cpu_count, slurmx::ReadableMemory(res.memory_bytes),
-               slurmx::ReadableMemory(res.memory_sw_bytes));
-
-  if (!g_meta_container->PartitionExists(partition_name)) {
-    SLURMX_DEBUG("Partition {} doesn't exist. Resource allocation failed.",
-                 partition_name);
-    return SlurmxErr::kNonExistent;
-  }
-
-  uint32_t partition_id = g_meta_container->GetPartitionId(partition_name);
-
-  auto metas_ptr = g_meta_container->GetPartitionMetasPtr(partition_id);
-  if (metas_ptr->partition_global_meta.m_resource_avail_ < res) {
-    SLURMX_TRACE(
-        "Resource not enough. Avail: cpu {}, mem: {}, mem+sw: {}",
-        metas_ptr->partition_global_meta.m_resource_avail_.cpu_count,
-        slurmx::ReadableMemory(
-            metas_ptr->partition_global_meta.m_resource_avail_.memory_bytes),
-        slurmx::ReadableMemory(metas_ptr->partition_global_meta
-                                   .m_resource_avail_.memory_sw_bytes));
-    return SlurmxErr::kNoResource;
-  }
-
-  for (auto &[index, node] : metas_ptr->xd_node_meta_map) {
-    bool node_valid = g_node_keeper->XdNodeValid(index);
-    SLURMX_TRACE("Node #{} Valid: {}", index, node_valid);
-    if (node_valid && res <= node.res_avail) {
-      // Todo: We should query the node to test if the required resource
-      //  does not exceed the remaining resource on the node.
-      //  Slurm seems to work in this way.
-      uuid res_uuid;
-
-      res_uuid = m_uuid_gen_();
-      node.res_in_use += res;
-      node.res_avail -= res;
-
-      node.resource_shards.emplace(res_uuid, res);
-
-      metas_ptr->partition_global_meta.m_resource_in_use_ += res;
-      metas_ptr->partition_global_meta.m_resource_avail_ -= res;
-
-      SLURMX_TRACE(
-          "Resource allocated successfully. Node index: {}. uuid: {}. "
-          "Informing XdClient...",
-          index, to_string(res_uuid));
-
-      XdNodeStub *xd_stub =
-          g_node_keeper->GetXdStub(XdNodeId{partition_id, index});
-      SLURMX_ASSERT(xd_stub != nullptr,
-                    "XdNode {}'s stub pointer shouldn't be nullptr when it's "
-                    "valid in bitset.");
-
-      res_info->set_node_index(index);
-      *res_info->mutable_ipv4_addr() = node.static_meta.ipv4_addr;
-      res_info->set_port(node.static_meta.port);
-      res_info->mutable_resource_uuid()->assign(res_uuid.begin(),
-                                                res_uuid.end());
-
-      return xd_stub->GrantResourceToken(res_uuid, res);
-    }
-  }
-
-  return SlurmxErr::kNoResource;
-}
+// SlurmxErr CtlXdServer::AllocateResource(const std::string &partition_name,
+//                                         const AllocatableResource &res,
+//                                         SlurmxGrpc::ResourceInfo *res_info) {
+//   SLURMX_TRACE("Trying Allocating resource: cpu {}, mem: {}, mem+sw: {}",
+//                res.cpu_count, slurmx::ReadableMemory(res.memory_bytes),
+//                slurmx::ReadableMemory(res.memory_sw_bytes));
+//
+//   if (!g_meta_container->PartitionExists(partition_name)) {
+//     SLURMX_DEBUG("Partition {} doesn't exist. Resource allocation failed.",
+//                  partition_name);
+//     return SlurmxErr::kNonExistent;
+//   }
+//
+//   uint32_t partition_id = g_meta_container->GetPartitionId(partition_name);
+//
+//   auto metas_ptr = g_meta_container->GetPartitionMetasPtr(partition_id);
+//   if (metas_ptr->partition_global_meta.m_resource_avail_ < res) {
+//     SLURMX_TRACE(
+//         "Resource not enough. Avail: cpu {}, mem: {}, mem+sw: {}",
+//         metas_ptr->partition_global_meta.m_resource_avail_.cpu_count,
+//         slurmx::ReadableMemory(
+//             metas_ptr->partition_global_meta.m_resource_avail_.memory_bytes),
+//         slurmx::ReadableMemory(metas_ptr->partition_global_meta
+//                                    .m_resource_avail_.memory_sw_bytes));
+//     return SlurmxErr::kNoResource;
+//   }
+//
+//   for (auto &[index, node] : metas_ptr->xd_node_meta_map) {
+//     bool node_valid = g_node_keeper->XdNodeValid(index);
+//     SLURMX_TRACE("Node #{} Valid: {}", index, node_valid);
+//     if (node_valid && res <= node.res_avail) {
+//       // Todo: We should query the node to test if the required resource
+//       //  does not exceed the remaining resource on the node.
+//       //  Slurm seems to work in this way.
+//       uuid res_uuid;
+//
+//       res_uuid = m_uuid_gen_();
+//       node.res_in_use += res;
+//       node.res_avail -= res;
+//
+//       node.resource_shards.emplace(res_uuid, res);
+//
+//       metas_ptr->partition_global_meta.m_resource_in_use_ += res;
+//       metas_ptr->partition_global_meta.m_resource_avail_ -= res;
+//
+//       SLURMX_TRACE(
+//           "Resource allocated successfully. Node index: {}. uuid: {}. "
+//           "Informing XdClient...",
+//           index, to_string(res_uuid));
+//
+//       XdNodeStub *xd_stub =
+//           g_node_keeper->GetXdStub(XdNodeId{partition_id, index});
+//       SLURMX_ASSERT(xd_stub != nullptr,
+//                     "XdNode {}'s stub pointer shouldn't be nullptr when it's
+//                     " "valid in bitset.");
+//
+//       res_info->set_node_index(index);
+//       *res_info->mutable_ipv4_addr() = node.static_meta.ipv4_addr;
+//       res_info->set_port(node.static_meta.port);
+//       res_info->mutable_resource_uuid()->assign(res_uuid.begin(),
+//                                                 res_uuid.end());
+//
+//       return xd_stub->GrantResourceToken(res_uuid, res);
+//     }
+//   }
+//
+//   return SlurmxErr::kNoResource;
+// }
 
 SlurmxErr CtlXdServer::DeallocateResource(XdNodeId node_id,
                                           const uuid &resource_uuid) {

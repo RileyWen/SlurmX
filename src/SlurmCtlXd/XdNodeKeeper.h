@@ -36,7 +36,7 @@ class XdNodeStub {
   ~XdNodeStub();
 
   SlurmxErr GrantResourceToken(const boost::uuids::uuid &resource_uuid,
-                               const resource_t &resource);
+                               const AllocatableResource &resource);
 
   void *GetNodeData() { return m_data_; };
 

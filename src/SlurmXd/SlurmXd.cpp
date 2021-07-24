@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
   else if (mem_group[2] == "G")
     memory_bytes *= 1024 * 1024 * 1024;
 
-  resource_t resource_in_cmd;
+  AllocatableResource resource_in_cmd;
   resource_in_cmd.cpu_count = parsed_args["ncpu"].as<uint32_t>();
   resource_in_cmd.memory_bytes = memory_bytes;
   resource_in_cmd.memory_sw_bytes = memory_bytes;

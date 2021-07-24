@@ -2,7 +2,22 @@ syntax = "proto3";
 
 package SlurmxGrpc;
 
+// All the definitions in this proto file can be found in PublicHeader.h
+// They are just protobuf version definitions.
+
 message XdNodeId {
   uint32 partition_id = 1;
   uint32 node_index = 2;
+}
+
+message AllocatableResource {
+  uint64 cpu_core_limit = 1;
+  uint64 memory_limit_bytes = 2;
+  uint64 memory_sw_limit_bytes = 3;
+}
+
+message DedicatedResource {}
+
+message Resources {
+  AllocatableResource allocatable_resource = 1;
 }

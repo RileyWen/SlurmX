@@ -14,7 +14,8 @@ XdNodeStub::~XdNodeStub() {
 }
 
 SlurmxErr XdNodeStub::GrantResourceToken(
-    const boost::uuids::uuid &resource_uuid, const resource_t &resource) {
+    const boost::uuids::uuid &resource_uuid,
+    const AllocatableResource &resource) {
   using grpc::ClientContext;
   using grpc::Status;
   using SlurmxGrpc::AllocatableResource;
