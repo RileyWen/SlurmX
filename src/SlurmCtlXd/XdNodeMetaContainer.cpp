@@ -17,7 +17,7 @@ void XdNodeMetaContainerSimpleImpl::AddNode(
                                   .m_resource_avail_ = static_meta.res,
                                   .name = static_meta.partition_name}};
     auto [part_metas_iter, ok] =
-        partition_metas_map_.emplace(partition_id, part_metas);
+        partition_metas_map_.emplace(partition_id, std::move(part_metas));
     SLURMX_ASSERT(
         ok == true,
         "AddNode should never fails when creating a non-existent partition.");
@@ -117,7 +117,7 @@ uint32_t XdNodeMetaContainerSimpleImpl::GetPartitionId_(
     PartitionMetas part_metas{
         .partition_global_meta = {.name = partition_name}};
     auto [part_metas_iter, ok] =
-        partition_metas_map_.emplace(part_id, part_metas);
+        partition_metas_map_.emplace(part_id, std::move(part_metas));
     SLURMX_ASSERT(ok == true,
                   "GetPartitionId_ should never fails when creating a "
                   "non-existent partition.");

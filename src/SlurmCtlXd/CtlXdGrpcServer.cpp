@@ -71,7 +71,7 @@ grpc::Status SlurmCtlXdServiceImpl::AllocateInteractiveTask(
   interactive_task->partition_name = request->partition_name();
   interactive_task->resources.allocatable_resource =
       request->required_resources().allocatable_resource();
-  interactive_task->time_limit_sec = request->time_limit_sec();
+  interactive_task->time_limit = absl::Seconds(request->time_limit_sec());
   interactive_task->type = ITask::Type::Interactive;
 
   // Todo: Eliminate useless allocation here when err!=kOk.

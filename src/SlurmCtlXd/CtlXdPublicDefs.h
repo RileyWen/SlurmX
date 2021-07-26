@@ -1,5 +1,9 @@
 #pragma once
 
+#include <absl/container/btree_map.h>
+#include <absl/container/flat_hash_map.h>
+#include <absl/time/time.h>
+
 #include <boost/container_hash/hash.hpp>
 #include <boost/uuid/uuid.hpp>
 #include <chrono>
@@ -15,6 +19,55 @@
 namespace CtlXd {
 
 constexpr uint64_t kTaskScheduleIntervalMs = 1000;
+
+struct ITask {
+  enum class Type { Interactive, Batch };
+  enum class Status { Pending, Running, Finished, Abort };
+
+  /* -------- Fields that are set at the submission time. ------- */
+  absl::Duration time_limit;
+
+  std::string partition_name;
+  Resources resources;
+
+  Type type;
+
+  /* ------- Fields that won't change after this task is accepted. -------- */
+  uint32_t task_id;
+  uint32_t partition_id;
+
+  /* ----- Fields that may change at run time. ----------- */
+  Status status;
+
+  // If this task is PENDING, start_time is either not set (default constructed)
+  // or an estimated start time.
+  // If this task is RUNNING, start_time is the actual starting time.
+  absl::Time start_time;
+
+  virtual ~ITask() = default;
+
+ protected:
+  ITask() = default;
+};
+
+struct InteractiveTask : public ITask {
+  using ITask::ITask;
+};
+
+struct BatchTask : public ITask {
+  using ITask::ITask;
+};
+
+struct BasicTaskMeta {
+  uint32_t task_id;
+  boost::uuids::uuid resource_uuid;
+};
+
+struct InteractiveTaskAllocationDetail {
+  uint32_t node_index;
+  std::string ipv4_addr;
+  uint32_t port;
+};
 
 /**
  * The static information on a Xd node (the static part of XDNodeData). This
@@ -52,6 +105,8 @@ struct XdNodeMeta {
   std::unordered_map<boost::uuids::uuid, Resources,
                      boost::hash<boost::uuids::uuid>>
       resource_shards;
+
+  absl::flat_hash_map<uint32_t, std::unique_ptr<ITask>> running_tasks;
 };
 
 /**
