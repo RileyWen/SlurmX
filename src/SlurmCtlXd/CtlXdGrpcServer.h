@@ -50,9 +50,10 @@ class SlurmCtlXdServiceImpl final : public SlurmxGrpc::SlurmCtlXd::Service {
       const SlurmxGrpc::DeallocateResourceRequest *request,
       SlurmxGrpc::DeallocateResourceReply *response) override;
 
-  grpc::Status Heartbeat(grpc::ServerContext *context,
-                         const SlurmxGrpc::HeartbeatRequest *request,
-                         SlurmxGrpc::HeartbeatReply *response) override;
+  grpc::Status SubmitBatchTask(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::SubmitBatchTaskRequest *request,
+      SlurmxGrpc::SubmitBatchTaskReply *response) override;
 
  private:
   CtlXdServer *m_ctlxd_server_;
@@ -85,8 +86,6 @@ class CtlXdServer {
   //                             SlurmxGrpc::ResourceInfo *res_info);
 
   SlurmxErr DeallocateResource(XdNodeId node_id, const uuid &resource_uuid);
-
-  void HeartBeatFromNode(const uuid &node_uuid);
 
   const std::string m_listen_address_;
 

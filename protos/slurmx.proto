@@ -3,6 +3,7 @@ syntax = "proto3";
 package SlurmxGrpc;
 
 import "PublicDefs.proto";
+import "google/protobuf/duration.proto";
 
 message Negotiation {
   uint32 version = 1;
@@ -144,12 +145,6 @@ message SlurmXdRegisterResult {
   }
 }
 
-message HeartbeatRequest {
-  bytes node_uuid = 1;
-}
-
-message HeartbeatReply {}
-
 message GrantResourceTokenRequest {
   bytes resource_uuid = 1;
   AllocatableResource allocated_resource = 2;
@@ -179,13 +174,57 @@ message DeallocateResourceReply {
   string reason = 2 ;
 }
 
+message TaskStatusChangeRequest {
+  uint32 task_id = 1;
+  TaskStatus new_status = 2;
+  bool release_resource = 3;
+}
+
+message TaskStatusChangeReply {
+  bool ok = 1;
+}
+
+message SubmitBatchTaskRequest {
+  /* --------- Fields that are shared between all types of tasks ----------------- */
+  string executive_path = 1;
+  repeated string arguments = 2;
+
+  google.protobuf.Duration time_limit = 3;
+  string partition_name = 4;
+  Resources required_resources = 5;
+
+  /* -------------------- Fields that are batch task only ------------------------ */
+  string output_file_pattern = 6;
+}
+
+message SubmitBatchTaskReply {
+  bool ok = 1;
+  oneof payload{
+    BasicTaskMeta task_meta = 2;
+    string reason = 3;
+  }
+}
+
+message ExecuteTaskRequest {
+  Task task = 1;
+  oneof additional_meta {
+    BatchTaskAdditionalMeta batch_meta = 2;
+    InteractiveTaskAdditionalMeta interactive_meta = 3;
+  }
+}
+
+message ExecuteTaskReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
 // Todo: Divide service into two parts: one for SlurmXd and one for SrunX
 //  We need to distinguish the message sender
 //  and have some kind of authentication
 service SlurmCtlXd {
   /* RPCs called from SlurmXd*/
   rpc RegisterSlurmXd(SlurmXdRegisterRequest) returns (SlurmXdRegisterResult);
-  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatReply);
+  rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
 
   /* When SlurmXd finishes executing a task, SlurmCtlXd will be informed to deallocate related resources. */
   rpc DeallocateResource(DeallocateResourceRequest) returns(DeallocateResourceReply);
@@ -196,12 +235,17 @@ service SlurmCtlXd {
      an interactive task and get the related meta information. */
   rpc AllocateInteractiveTask(InteractiveTaskAllocRequest) returns(InteractiveTaskAllocReply);
   rpc QueryInteractiveTaskAllocDetail(QueryInteractiveTaskAllocDetailRequest) returns(QueryInteractiveTaskAllocDetailReply);
+
+
+  /* RPCs called from sbatch */
+  rpc SubmitBatchTask(SubmitBatchTaskRequest) returns(SubmitBatchTaskReply);
 }
 
 service SlurmXd {
   /* Called from SlurmCtlXd */
   rpc GrantResourceToken(GrantResourceTokenRequest) returns (GrantResourceTokenReply);
   rpc RevokeResourceToken(RevokeResourceTokenRequest) returns (RevokeResourceTokenReply);
+  rpc ExecuteTask(ExecuteTaskRequest) returns(ExecuteTaskReply);
 
   /* Called from SrunX */
   rpc SrunXStream(stream SrunXStreamRequest) returns (stream SrunXStreamReply);

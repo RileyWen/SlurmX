@@ -2,6 +2,9 @@ syntax = "proto3";
 
 package SlurmxGrpc;
 
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
 // All the definitions in this proto file can be found in PublicHeader.h
 // They are just protobuf version definitions.
 
@@ -20,4 +23,47 @@ message DedicatedResource {}
 
 message Resources {
   AllocatableResource allocatable_resource = 1;
+}
+
+enum TaskStatus {
+  Pending = 0;
+  Running = 1;
+  Finished = 2;
+  Abort = 3;
+}
+
+message Task {
+  enum Type {
+    Interactive = 0;
+    Batch = 1;
+  }
+
+  /* -------- Fields that are set at the submission time. ------- */
+  google.protobuf.Duration time_limit = 1;
+
+  string partition_name = 2;
+  Resources resources = 3;
+
+  Type type = 4;
+
+  /* ------- Fields that won't change after this task is accepted. -------- */
+  uint32 task_id = 5;
+  uint32 partition_id = 6;
+
+  /* ----- Fields that may change at run time. ----------- */
+  TaskStatus status = 7;
+  uint32 node_index = 8;
+
+  // If this task is PENDING, start_time is either not set (default constructed)
+  // or an estimated start time.
+  // If this task is RUNNING, start_time is the actual starting time.
+  google.protobuf.Timestamp start_time = 9;
+}
+
+message BatchTaskAdditionalMeta {
+  string output_file_pattern = 1;
+}
+
+message InteractiveTaskAdditionalMeta{
+
 }

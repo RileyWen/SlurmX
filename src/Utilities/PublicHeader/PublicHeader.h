@@ -1,7 +1,9 @@
 #pragma once
 
+#include <absl/time/time.h>
+#include <spdlog/spdlog.h>
+
 #include "protos/slurmx.pb.h"
-#include "spdlog/spdlog.h"
 
 #define SLURMX_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
 #define SLURMX_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)
@@ -154,6 +156,46 @@ struct Resources {
 
 bool operator<=(const Resources& lhs, const Resources& rhs);
 bool operator<(const Resources& lhs, const Resources& rhs);
+
+struct ITask {
+  enum class Type { Interactive, Batch };
+  enum class Status { Pending, Running, Finished, Abort };
+
+  /* -------- Fields that are set at the submission time. ------- */
+  absl::Duration time_limit;
+
+  std::string partition_name;
+  Resources resources;
+
+  Type type;
+
+  /* ------- Fields that won't change after this task is accepted. -------- */
+  uint32_t task_id;
+  uint32_t partition_id;
+
+  /* ----- Fields that may change at run time. ----------- */
+  Status status;
+  uint32_t node_index;
+
+  // If this task is PENDING, start_time is either not set (default constructed)
+  // or an estimated start time.
+  // If this task is RUNNING, start_time is the actual starting time.
+  absl::Time start_time;
+
+  virtual ~ITask() = default;
+
+ protected:
+  ITask() = default;
+};
+
+struct InteractiveTask : public ITask {
+  using ITask::ITask;
+};
+
+struct BatchTask : public ITask {
+  using ITask::ITask;
+  std::string output_file_pattern;
+};
 
 namespace Internal {
 

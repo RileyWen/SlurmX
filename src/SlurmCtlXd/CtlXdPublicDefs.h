@@ -21,45 +21,6 @@ namespace CtlXd {
 
 constexpr uint64_t kTaskScheduleIntervalMs = 1000;
 
-struct ITask {
-  enum class Type { Interactive, Batch };
-  enum class Status { Pending, Running, Finished, Abort };
-
-  /* -------- Fields that are set at the submission time. ------- */
-  absl::Duration time_limit;
-
-  std::string partition_name;
-  Resources resources;
-
-  Type type;
-
-  /* ------- Fields that won't change after this task is accepted. -------- */
-  uint32_t task_id;
-  uint32_t partition_id;
-
-  /* ----- Fields that may change at run time. ----------- */
-  Status status;
-  uint32_t node_index;
-
-  // If this task is PENDING, start_time is either not set (default constructed)
-  // or an estimated start time.
-  // If this task is RUNNING, start_time is the actual starting time.
-  absl::Time start_time;
-
-  virtual ~ITask() = default;
-
- protected:
-  ITask() = default;
-};
-
-struct InteractiveTask : public ITask {
-  using ITask::ITask;
-};
-
-struct BatchTask : public ITask {
-  using ITask::ITask;
-};
-
 struct BasicTaskMeta {
   uint32_t task_id;
   boost::uuids::uuid resource_uuid;
