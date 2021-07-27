@@ -29,17 +29,22 @@ class INodeSelectionAlgo {
    * Do node selection for all pending tasks.
    * Note: During this function call, the global meta is locked. This function
    * should return as quick as possible.
-   * @param[in] partition_metas The reference to the task's partition meta.
+   * @param[in,out] all_partitions_meta_map Callee should make necessary
+   * modification in this structure to keep the consistency of global meta data.
+   * e.g. When a task is added to \b selection_result_list, corresponding
+   * resource should subtracted from the fields in all_partitions_meta.
    * @param[in,out] pending_task_map A list that contains all pending task. The
    * list is order by committing time. The later committed task is at the tail
    * of the list. When scheduling is done, scheduled tasks \b SHOULD be removed
    * from \b pending_task_list
-   * @param[out] selection_result_list A list that contains the result of
+   * @param[out] selected_tasks A list that contains the result of
    * scheduling. See the annotation of \b SchedulingResult
    */
   virtual void NodeSelect(
       const XdNodeMetaContainerInterface::AllPartitionsMetaMap&
           all_partitions_meta_map,
+      const absl::flat_hash_map<uint32_t, std::unique_ptr<ITask>>&
+          running_tasks,
       absl::btree_map<uint32_t, std::unique_ptr<ITask>>* pending_task_map,
       std::list<NodeSelectionResult>* selection_result_list) = 0;
 };
@@ -49,8 +54,10 @@ class MinLoadFirst : public INodeSelectionAlgo {
   void NodeSelect(
       const XdNodeMetaContainerInterface::AllPartitionsMetaMap&
           all_partitions_meta_map,
+      const absl::flat_hash_map<uint32_t, std::unique_ptr<ITask>>&
+          running_tasks,
       absl::btree_map<uint32_t, std::unique_ptr<ITask>>* pending_task_map,
-      std::list<NodeSelectionResult>* scheduling_result_list) override;
+      std::list<NodeSelectionResult>* selection_result_list) override;
 };
 
 class TaskScheduler {
@@ -62,14 +69,14 @@ class TaskScheduler {
 
   ~TaskScheduler();
 
-  void SetSchedulingAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
+  void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
 
   SlurmxErr SubmitTask(std::unique_ptr<ITask> task, BasicTaskMeta* task_meta);
 
  private:
   void ScheduleThread_();
 
-  std::unique_ptr<INodeSelectionAlgo> m_sched_algo_;
+  std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
 
   boost::uuids::random_generator_mt19937 m_uuid_gen_;
   uint32_t m_next_task_id_;
@@ -79,6 +86,8 @@ class TaskScheduler {
   absl::btree_map<uint32_t /*Task Id*/, std::unique_ptr<ITask>>
       m_pending_task_map_;
   Mutex m_pending_task_map_mtx_;
+
+  absl::flat_hash_map<uint32_t, std::unique_ptr<ITask>> m_running_task_map_;
 
   std::thread m_schedule_thread_;
   std::atomic_bool m_thread_stop_;

@@ -191,4 +191,29 @@ XdNodeMetaContainerSimpleImpl::GetAllPartitionsMetaMapPtr() {
   return {&partition_metas_map_, &mtx_};
 }
 
+void XdNodeMetaContainerSimpleImpl::MallocResourceFromNode(
+    XdNodeId node_id, const boost::uuids::uuid& uuid,
+    const Resources& resources) {
+  LockGuard guard(mtx_);
+
+  auto part_metas_iter = partition_metas_map_.find(node_id.partition_id);
+  if (part_metas_iter == partition_metas_map_.end()) {
+    // No such partition.
+    return;
+  }
+
+  auto node_meta_iter =
+      part_metas_iter->second.xd_node_meta_map.find(node_id.node_index);
+  if (node_meta_iter == part_metas_iter->second.xd_node_meta_map.end()) {
+    // No such node in this partition.
+    return;
+  }
+
+  node_meta_iter->second.resource_shards.emplace(uuid, resources);
+  part_metas_iter->second.partition_global_meta.m_resource_avail_ -= resources;
+  part_metas_iter->second.partition_global_meta.m_resource_in_use_ += resources;
+  node_meta_iter->second.res_avail -= resources;
+  node_meta_iter->second.res_in_use += resources;
+}
+
 }  // namespace CtlXd

@@ -57,6 +57,12 @@ class XdNodeMetaContainerInterface {
    */
   virtual uint32_t AllocNodeIndexInPartition(uint32_t partition_id) = 0;
 
+  virtual void MallocResourceFromNode(XdNodeId node_id,
+                                      const boost::uuids::uuid& uuid,
+                                      const Resources& resources) = 0;
+  virtual void FreeResourceFromNode(XdNodeId node_id,
+                                    const boost::uuids::uuid& uuid) = 0;
+
   /**
    * Provide a thread-safe way to access NodeMeta.
    * @return a ScopeExclusivePointerType class. During the initialization of
@@ -98,6 +104,12 @@ class XdNodeMetaContainerSimpleImpl : public XdNodeMetaContainerInterface {
   void TryReleasePartition(uint32_t partition_id) override;
 
   uint32_t AllocNodeIndexInPartition(uint32_t partition_id) override;
+
+  void MallocResourceFromNode(XdNodeId node_id, const boost::uuids::uuid& uuid,
+                              const Resources& resources) override;
+
+  void FreeResourceFromNode(XdNodeId node_id,
+                            const boost::uuids::uuid& uuid) override;
 
  private:
   /**

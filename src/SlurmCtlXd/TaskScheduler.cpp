@@ -17,11 +17,29 @@ TaskScheduler::~TaskScheduler() {
 }
 
 void TaskScheduler::ScheduleThread_() {
-  std::list<INodeSelectionAlgo::NodeSelectionResult> sched_result_list;
+  std::list<INodeSelectionAlgo::NodeSelectionResult> selection_result_list;
   while (m_thread_stop_) {
-    for (const auto& [task_id, pending_task] : m_pending_task_map_) {
-      auto part_metas =
-          g_meta_container->GetPartitionMetasPtr(pending_task->partition_id);
+    auto all_part_metas = g_meta_container->GetAllPartitionsMetaMapPtr();
+
+    std::list<std::unique_ptr<ITask>> node_selection_result;
+
+    m_pending_task_map_mtx_.lock();
+    m_node_selection_algo_->NodeSelect(*all_part_metas, m_running_task_map_,
+                                       &m_pending_task_map_,
+                                       &selection_result_list);
+    m_pending_task_map_mtx_.unlock();
+
+    for (auto it = selection_result_list.begin();
+         it != selection_result_list.end();) {
+      auto& task = it->first;
+      uint32_t partition_id = task->partition_id;
+      uint32_t node_index = it->second;
+      boost::uuids::uuid resource_uuid = m_uuid_gen_();
+
+      g_meta_container->MallocResourceFromNode({partition_id, node_index},
+                                               resource_uuid, task->resources);
+      g_meta_container->GetNodeMetaPtr({partition_id, node_index})
+          ->running_task_ids.insert(task->task_id);
     }
 
     std::this_thread::sleep_for(
@@ -29,9 +47,9 @@ void TaskScheduler::ScheduleThread_() {
   }
 }
 
-void TaskScheduler::SetSchedulingAlgo(
+void TaskScheduler::SetNodeSelectionAlgo(
     std::unique_ptr<INodeSelectionAlgo> algo) {
-  m_sched_algo_ = std::move(algo);
+  m_node_selection_algo_ = std::move(algo);
 }
 
 SlurmxErr TaskScheduler::SubmitTask(std::unique_ptr<ITask> task,
@@ -73,8 +91,9 @@ SlurmxErr TaskScheduler::SubmitTask(std::unique_ptr<ITask> task,
 void MinLoadFirst::NodeSelect(
     const XdNodeMetaContainerInterface::AllPartitionsMetaMap&
         all_partitions_meta_map,
+    const absl::flat_hash_map<uint32_t, std::unique_ptr<ITask>>& running_tasks,
     absl::btree_map<uint32_t, std::unique_ptr<ITask>>* pending_task_map,
-    std::list<NodeSelectionResult>* scheduling_result_list) {
+    std::list<NodeSelectionResult>* selection_result_list) {
   /**
    * In this map, the time is discretized by 1s and starts from absl::Now().
    * {x: a, y: b, z: c, ...} means that
@@ -102,13 +121,15 @@ void MinLoadFirst::NodeSelect(
           part_id__node_info__map[partition_id];
 
       node_info_in_a_partition.task_num__node_id__map.emplace(
-          node_meta.running_tasks.size(), node_index);
+          node_meta.running_task_ids.size(), node_index);
 
-      // Sort all task in this node by ending time.
+      // Sort all running task in this node by ending time.
       std::vector<std::pair<absl::Time, uint32_t>> end_time__task_id_vec;
-      for (const auto& [task_id, running_task] : node_meta.running_tasks) {
-        end_time__task_id_vec.push_back(
-            {running_task->start_time + running_task->time_limit, task_id});
+      for (const auto& [task_id, running_task] : running_tasks) {
+        if (running_task->partition_id == partition_id &&
+            running_task->node_index == node_index)
+          end_time__task_id_vec.push_back(
+              {running_task->start_time + running_task->time_limit, task_id});
       }
       std::sort(end_time__task_id_vec.begin(), end_time__task_id_vec.end(),
                 [](const auto& lhs, const auto& rhs) {
@@ -124,7 +145,7 @@ void MinLoadFirst::NodeSelect(
       {  // Limit the scope of `iter`
         auto iter = time__avail_res__map.find(now);
         for (auto& [end_time, task_id] : end_time__task_id_vec) {
-          const auto& running_task = node_meta.running_tasks.at(task_id);
+          const auto& running_task = running_tasks.at(task_id);
           if (!time__avail_res__map.contains(end_time + absl::Seconds(1))) {
             /**
              * For the situation in which multiple tasks may end at the same
@@ -145,8 +166,10 @@ void MinLoadFirst::NodeSelect(
     }
   }
 
-  // Now we know the # of running tasks and how many resources are available at
-  //  the end of each task, on each node in all partitions.
+  // Now we know, on each node in all partitions, the # of running tasks (which
+  //  doesn't include those we select as the incoming running tasks in the
+  //  following code) and how many resources are available at the end of each
+  //  task.
   // Iterate over all the pending tasks and select the available node for the
   //  task to run in its partition.
   for (auto it = pending_task_map->begin(); it != pending_task_map->end();) {
@@ -184,7 +207,6 @@ void MinLoadFirst::NodeSelect(
 
       if (resource_enough_in_this_duration) {
         expected_start_time = task_duration_begin_it->first;
-        task->start_time = expected_start_time;
         break;
       }
     }
@@ -215,14 +237,25 @@ void MinLoadFirst::NodeSelect(
 
     if (expected_start_time == now) {
       // The task can be started now.
+      task->start_time = expected_start_time;
+
+      // Increase the running task num in the local variable.
+      // We leave the change in all_partitions_meta_map and running_tasks to
+      // the scheduling thread caller to avoid lock maintenance and deadlock.
+      uint32_t task_num_in_this_node =
+          node_info.task_num__node_id__map.begin()->first;
+      node_info.task_num__node_id__map.erase(
+          node_info.task_num__node_id__map.begin());
+      node_info.task_num__node_id__map.emplace(task_num_in_this_node + 1,
+                                               min_load_node_index);
 
       std::unique_ptr<ITask> moved_task;
 
       // Move task out of pending_task_map and insert it to the
       // scheduling_result_list.
       moved_task.swap(task);
-      scheduling_result_list->emplace_back(std::move(moved_task),
-                                           min_load_node_index);
+      selection_result_list->emplace_back(std::move(moved_task),
+                                          min_load_node_index);
 
       // Erase the empty task unique_ptr from map and move to the next element
       it = pending_task_map->erase(it);

@@ -2,6 +2,7 @@
 
 #include <absl/container/btree_map.h>
 #include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
 #include <absl/time/time.h>
 
 #include <boost/container_hash/hash.hpp>
@@ -38,6 +39,7 @@ struct ITask {
 
   /* ----- Fields that may change at run time. ----------- */
   Status status;
+  uint32_t node_index;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
@@ -106,7 +108,7 @@ struct XdNodeMeta {
                      boost::hash<boost::uuids::uuid>>
       resource_shards;
 
-  absl::flat_hash_map<uint32_t, std::unique_ptr<ITask>> running_tasks;
+  absl::flat_hash_set<uint32_t> running_task_ids;
 };
 
 /**
