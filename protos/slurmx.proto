@@ -172,6 +172,48 @@ message DeallocateResourceReply {
   string reason = 2 ;
 }
 
+message SqueueXRequest {
+  enum Type {
+    REQUEST_JOB_INFO_SINGLE = 0;
+    REQUEST_JOB_USER_INFO = 1;
+    REQUEST_JOB_INFO = 2;
+  }
+  Type type = 1;
+  oneof payload{
+    uint32 job_id = 2;
+    uint32 user_id = 3;
+    string update_time = 4;
+  }
+  uint32 show_flags = 5;
+}
+
+message JobInfo {
+  uint32 job_id = 1;
+  string state_desc = 2;
+  AllocatableResource job_resources = 3;
+  string user_name = 4;
+  uint32 user_id = 5;
+  string job_name = 6;
+}
+
+message Jobs {
+  uint64 update_time = 1;
+  repeated JobInfo job_infos = 3;
+}
+
+message SqueueXReply {
+  bool ok = 1;
+  enum Type {
+    RESPONSE_JOB_INFO = 0;
+    RESPONSE_JOB_RC_NO_CHANGE = 1;
+  }
+  Type type = 2;
+  oneof payload{
+    Jobs job_records = 3;
+    string reason = 4;
+  }
+}
+
 // Todo: Divide service into two parts: one for SlurmXd and one for SrunX
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -188,6 +230,9 @@ service SlurmCtlXd {
   /* When SrunX request an interactive job, it will first request SrunX to allocate
      the required resource and get the resource token. */
   rpc AllocateResource(ResourceAllocRequest) returns(ResourceAllocReply);
+
+  //SqueueX client loads job information from the ctlxd
+  rpc LoadJobs (SqueueXRequest) returns (SqueueXReply);
 }
 
 service SlurmXd {

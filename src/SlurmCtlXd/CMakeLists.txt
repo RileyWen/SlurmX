@@ -16,4 +16,5 @@ target_link_libraries(slurmctlxd
         event_core
         cxxopts
         Threads::Threads
+        absl::time
         )

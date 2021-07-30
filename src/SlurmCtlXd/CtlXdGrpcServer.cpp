@@ -120,6 +120,119 @@ grpc::Status SlurmCtlXdServiceImpl::Heartbeat(
   return grpc::Status::OK;
 }
 
+grpc::Status SlurmCtlXdServiceImpl::LoadJobs(
+    grpc::ServerContext *context, const SlurmxGrpc::SqueueXRequest *request,
+    SlurmxGrpc::SqueueXReply *response) {
+  SlurmxErr err;
+  JobInfoMsg job_infos;
+  // fill the response message depending on the request message type.
+  if (request->type() ==
+      SlurmxGrpc::SqueueXRequest_Type_REQUEST_JOB_INFO_SINGLE) {
+    err = m_ctlxd_server_->GetJobInfoByJobId(&job_infos, request->job_id(),
+                                             request->show_flags());
+    if (err != SlurmxErr::kOk) {
+      SLURMX_ERROR("Failed to load job infos", SlurmxErrStr(err));
+      response->set_ok(false);
+      response->set_reason(SlurmxErrStr(err).data());
+    } else {
+      response->set_ok(true);
+      // fill the response message from job_infos, it should contain only 1 msg.
+      auto *jobs = response->mutable_job_records();
+      jobs->set_update_time(static_cast<uint64_t>(time(NULL)));
+      auto *infos = jobs->add_job_infos();
+
+      auto job = job_infos.job_array[0];
+
+      infos->set_job_id(job.job_id);
+      infos->set_user_name(job.user_name);
+      infos->set_user_id(job.user_id);
+      infos->set_state_desc(job.state_desc);
+      infos->set_job_name(job.job_name);
+
+      auto *alloc_resource = infos->mutable_job_resources();
+      alloc_resource->set_cpu_core_limit(job.alloc_res.cpu_count);
+      alloc_resource->set_memory_limit_bytes(job.alloc_res.memory_bytes);
+      alloc_resource->set_memory_sw_limit_bytes(job.alloc_res.memory_sw_bytes);
+    }
+  }
+
+  else if (request->type() ==
+           SlurmxGrpc::SqueueXRequest_Type_REQUEST_JOB_USER_INFO) {
+    err = m_ctlxd_server_->GetJobInfoByUserId(&job_infos, request->user_id(),
+                                              request->show_flags());
+    if (err != SlurmxErr::kOk) {
+      SLURMX_ERROR("Failed to load job infos", SlurmxErrStr(err));
+      response->set_ok(false);
+      response->set_reason(SlurmxErrStr(err).data());
+    } else {
+      response->set_ok(true);
+      // reply job info of the user id.
+      auto *jobs = response->mutable_job_records();
+      jobs->set_update_time(static_cast<uint64_t>(time(NULL)));
+      auto *infos = jobs->add_job_infos();
+
+      for (auto job : job_infos.job_array) {
+        infos->set_job_id(job.job_id);
+        infos->set_user_name(job.user_name);
+        infos->set_user_id(job.user_id);
+        infos->set_state_desc(job.state_desc);
+        infos->set_job_name(job.job_name);
+
+        auto *alloc_resource = infos->mutable_job_resources();
+        alloc_resource->set_cpu_core_limit(job.alloc_res.cpu_count);
+        alloc_resource->set_memory_limit_bytes(job.alloc_res.memory_bytes);
+        alloc_resource->set_memory_sw_limit_bytes(
+            job.alloc_res.memory_sw_bytes);
+      }
+    }
+  }
+
+  else if (request->type() ==
+           SlurmxGrpc::SqueueXRequest_Type_REQUEST_JOB_INFO) {
+    // todo fill job change time
+    // local last_update_time of the job record will be compared with remote
+    // last_update_time.
+    absl::Time local_update_time;
+    std::string time_str = request->update_time();
+    absl::ParseTime("%Y-%m-%d %H:%M:%S %z", time_str, &local_update_time, nullptr);
+
+    absl::Time job_change_time = local_update_time + absl::Hours(1);
+    if (local_update_time > job_change_time) {
+      response->set_ok(false);
+      response->set_reason((char *)"JobInfoNoChange");
+    } else {
+      err = m_ctlxd_server_->GetJobsInfo(&job_infos, time_str,
+                                         request->show_flags());
+      if (err != SlurmxErr::kOk) {
+        SLURMX_ERROR("Failed to load job infos", SlurmxErrStr(err));
+        response->set_ok(false);
+        response->set_reason(SlurmxErrStr(err).data());
+      } else {
+        // reply job infos.
+        response->set_ok(true);
+        auto *jobs = response->mutable_job_records();
+        jobs->set_update_time(static_cast<uint64_t>(time(NULL)));
+        auto *infos = jobs->add_job_infos();
+
+        for (auto job : job_infos.job_array) {
+          infos->set_job_id(job.job_id);
+          infos->set_user_name(job.user_name);
+          infos->set_user_id(job.user_id);
+          infos->set_state_desc(job.state_desc);
+          infos->set_job_name(job.job_name);
+
+          auto *alloc_ressource = infos->mutable_job_resources();
+          alloc_ressource->set_cpu_core_limit(job.alloc_res.cpu_count);
+          alloc_ressource->set_memory_limit_bytes(job.alloc_res.memory_bytes);
+          alloc_ressource->set_memory_sw_limit_bytes(
+              job.alloc_res.memory_sw_bytes);
+        }
+      }
+    }
+  }
+  return grpc::Status::OK;
+}
+
 CtlXdServer::CtlXdServer(const std::string &listen_address)
     : m_listen_address_(listen_address) {
   m_service_impl_ = std::make_unique<SlurmCtlXdServiceImpl>(this);
@@ -292,5 +405,79 @@ SlurmxErr CtlXdServer::DeallocateResource(XdNodeId node_id,
 }
 
 void CtlXdServer::HeartBeatFromNode(const uuid &node_uuid) {}
+
+// todo fake info
+SlurmxErr CtlXdServer::GetJobsInfo(JobInfoMsg *job_info, const std::string &update_time,
+                                   uint16_t show_flags) {
+  absl::Time now = absl::Now();
+  job_info->last_update = absl::FormatTime(now);
+  job_info_t job;
+  job.job_id = 333;
+  job.user_id = 1000;
+  job.user_name = (char *)"wzd";
+  job.state_desc = (char *)"COMPLETING";
+  job.job_name = (char *)"job1";
+
+  job.alloc_res.cpu_count = 2;
+  job.alloc_res.memory_bytes = 9999;
+  job.alloc_res.memory_sw_bytes = 666;
+
+  job_info->job_array.push_back(job);
+
+  job_info_t job2;
+  job2.job_id = 334;
+  job2.user_id = 1000;
+  job2.user_name = (char *)"wzd";
+  job2.state_desc = (char *)"COMPLETING";
+  job2.job_name = (char *)"job2";
+
+  job2.alloc_res.cpu_count = 2;
+  job2.alloc_res.memory_bytes = 99;
+  job2.alloc_res.memory_sw_bytes = 666;
+
+  job_info->job_array.push_back(job2);
+
+  return SlurmxErr::kOk;
+}
+SlurmxErr CtlXdServer::GetJobInfoByJobId(JobInfoMsg *job_info, uint32_t job_id,
+                                         uint16_t show_flags) {
+  time_t now;
+  time(&now);
+  job_info->last_update = now;
+  job_info_t job;
+  job.job_id = job_id;
+  job.user_id = 1000;
+  job.user_name = (char *)"wzd";
+  job.state_desc = (char *)"COMPLETING";
+  job.job_name = (char *)"job1";
+
+  job.alloc_res.cpu_count = 2;
+  job.alloc_res.memory_bytes = 9999;
+  job.alloc_res.memory_sw_bytes = 666;
+
+  job_info->job_array.push_back(job);
+
+  return SlurmxErr::kOk;
+}
+SlurmxErr CtlXdServer::GetJobInfoByUserId(JobInfoMsg *job_info,
+                                          uint32_t user_id,
+                                          uint16_t show_flags) {
+  time_t now;
+  time(&now);
+  job_info->last_update = now;
+  job_info_t job;
+  job.job_id = 333;
+  job.user_id = user_id;
+  job.user_name = (char *)"wzd";
+  job.state_desc = (char *)"COMPLETING";
+  job.job_name = (char *)"job1";
+
+  job.alloc_res.cpu_count = 2;
+  job.alloc_res.memory_bytes = 9999;
+  job.alloc_res.memory_sw_bytes = 666;
+
+  job_info->job_array.push_back(job);
+  return SlurmxErr::kOk;
+}
 
 }  // namespace CtlXd

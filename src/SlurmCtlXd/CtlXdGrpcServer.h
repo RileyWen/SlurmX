@@ -1,5 +1,8 @@
 #pragma once
 
+#include <absl/time/clock.h>
+#include <absl/time/time.h>
+#include <absl/time/internal/test_util.h>
 #include <grpc++/grpc++.h>
 
 #include <boost/algorithm/string.hpp>
@@ -54,6 +57,10 @@ class SlurmCtlXdServiceImpl final : public SlurmxGrpc::SlurmCtlXd::Service {
                          const SlurmxGrpc::HeartbeatRequest *request,
                          SlurmxGrpc::HeartbeatReply *response) override;
 
+  grpc::Status LoadJobs(grpc::ServerContext *context,
+                        const SlurmxGrpc::SqueueXRequest *request,
+                        SlurmxGrpc::SqueueXReply *response) override;
+
  private:
   CtlXdServer *m_ctlxd_server_;
 };
@@ -87,6 +94,15 @@ class CtlXdServer {
   SlurmxErr DeallocateResource(XdNodeId node_id, const uuid &resource_uuid);
 
   void HeartBeatFromNode(const uuid &node_uuid);
+
+  SlurmxErr GetJobsInfo(JobInfoMsg *job_info, const std::string &update_time,
+                        uint16_t show_flags);
+
+  SlurmxErr GetJobInfoByJobId(JobInfoMsg *job_info, uint32_t job_id,
+                              uint16_t show_flags);
+
+  SlurmxErr GetJobInfoByUserId(JobInfoMsg *job_info, uint32_t user_id,
+                               uint16_t show_flags);
 
   const std::string m_listen_address_;
 

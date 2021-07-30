@@ -128,6 +128,34 @@ struct resource_t {
 bool operator<=(const resource_t& lhs, const resource_t& rhs);
 bool operator<(const resource_t& lhs, const resource_t& rhs);
 
+struct job_info_t {
+
+  uint32_t job_id;  //job id
+  std::string job_name;
+  uint32_t user_id;	// user the job runs as
+  std::string user_name;
+  std::string state_desc;
+
+  resource_t alloc_res;
+};
+
+struct JobInfoMsg{
+  std::string last_update;	//time of latest info
+  std::vector<job_info_t> job_array;
+};
+
+//Used as show_flags for slurm_get_ and slurm_load_ function calls.
+#define SHOW_ALL	0x0001	/* Show info for "hidden" partitions */
+#define SHOW_DETAIL	0x0002	/* Show detailed resource information */
+#define SHOW_DETAIL2	0x0004	/* Show batch script listing */
+#define SHOW_MIXED	0x0008	/* Automatically set node MIXED state */
+#define SHOW_LOCAL	0x0010	/* Show only local information, even on
+				 * federated cluster */
+#define SHOW_SIBLING	0x0020	/* Show sibling jobs on a federated cluster */
+#define SHOW_FEDERATION	0x0040	/* Show federated state information.
+				 * Shows local info if not in federation */
+#define SHOW_FUTURE	0x0080	/* Show future nodes */
+
 namespace Internal {
 
 struct StaticLogFormatSetter {
