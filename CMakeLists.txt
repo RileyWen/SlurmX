@@ -47,11 +47,6 @@ set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost 1.67 REQUIRED COMPONENTS thread fiber)
 add_definitions(-DBoost_MINOR_VERSION=${Boost_MINOR_VERSION})
 
-find_package(GTest CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/google-test)
-
-find_package(spdlog 1.8.2 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/spdlog)
-add_definitions(-DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
-
 # Link libevent as a static lib
 set(LIBEVENT_STATIC_LINK TRUE)
 find_package(Libevent REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/libevent)
