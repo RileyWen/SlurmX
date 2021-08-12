@@ -31,8 +31,8 @@ target_link_libraries(slurmctlxd_test
 
         concurrentqueue
         Threads::Threads
-        libevent::core
-        cxxopts::cxxopts
+        event_core
+        cxxopts
         Boost::boost
         Boost::thread
         Boost::fiber

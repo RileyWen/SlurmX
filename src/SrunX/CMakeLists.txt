@@ -5,7 +5,7 @@ file(GLOB_RECURSE SRUNX-SRC
 add_executable(srunx ${SRUNX-SRC})
 
 target_link_libraries(srunx
-        cxxopts::cxxopts
+        cxxopts
         proto
         Utility_PublicHeader
         )

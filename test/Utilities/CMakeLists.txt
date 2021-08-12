@@ -6,8 +6,8 @@ target_link_libraries(utility_test
         GTest::gtest_main
         concurrentqueue
         Threads::Threads
-        libevent::core
-        cxxopts::cxxopts
+        event_core
+        cxxopts
 
         Utility_cgroup
         Utility_PublicHeader

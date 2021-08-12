@@ -8,9 +8,9 @@ target_link_libraries(slurmxd_test
         GTest::gtest_main
         concurrentqueue
         spdlog::spdlog
-        libevent::core
-        libevent::pthreads
-        cxxopts::cxxopts
+        event_core
+        event_pthreads
+        cxxopts
 
         Threads::Threads
 

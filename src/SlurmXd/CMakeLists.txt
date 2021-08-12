@@ -12,8 +12,8 @@ target_link_libraries(slurmxd
         Utility_PublicHeader
         proto
         Boost::boost
-        libevent::core
-        cxxopts::cxxopts
+        event_core
+        cxxopts
         Threads::Threads
         nlohmann_json::nlohmann_json
         )

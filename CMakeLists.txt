@@ -41,34 +41,19 @@ set(DEPENDENCIES_PRE_INSTALLED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/pre_
 set(DEPENDENCIES_ONLINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/online)
 
 find_package(Threads REQUIRED)
-find_package(fmt 7.1.3 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/fmt)
 
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost 1.67 REQUIRED COMPONENTS thread fiber)
 add_definitions(-DBoost_MINOR_VERSION=${Boost_MINOR_VERSION})
 
-find_package(GTest CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/google-test)
-
-find_package(spdlog 1.8.2 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/spdlog)
-add_definitions(-DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
-
-# Link libevent as a static lib
-set(LIBEVENT_STATIC_LINK TRUE)
-find_package(Libevent REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/libevent)
-
-find_package(cxxopts 2.2.0 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/cxxopts)
-
-find_package(absl CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/abseil)
-find_package(Protobuf CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/grpc)
-find_package(gRPC CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/grpc)
-get_target_property(GRPC_CPP_PLUGIN_LOCATION gRPC::grpc_cpp_plugin LOCATION)
+#find_package(absl CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/abseil)
+#find_package(Protobuf CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/grpc)
+#find_package(gRPC CONFIG REQUIRED)
+#get_target_property(GRPC_CPP_PLUGIN_LOCATION gRPC::grpc_cpp_plugin LOCATION)
 
 find_package(PkgConfig REQUIRED)
 
 pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
-
-list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/libuv")
-pkg_check_modules(libuv IMPORTED_TARGET libuv>=1.40.0)
 
 # concurrent queue has no cmake config files. Add it manually as a header-only library.
 add_library(concurrentqueue INTERFACE)
@@ -87,38 +72,65 @@ add_subdirectory(src)
 add_subdirectory(test)
 
 # Generate proto files
-set(PROTO_SRC_DIR protos)
-file(GLOB_RECURSE PROTO_SRCS ${PROTO_SRC_DIR}/*.proto)
-
-add_library(proto ${PROTO_SRCS})
-target_link_libraries(proto
-        protobuf::libprotobuf
-        gRPC::grpc
-        gRPC::grpc++)
-
 set(GENERATED_FILE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/generated)
-file(MAKE_DIRECTORY ${GENERATED_FILE_PATH})
+file(MAKE_DIRECTORY ${GENERATED_FILE_PATH}/protos)
+message(${GENERATED_FILE_PATH})
 
-target_include_directories(proto PUBLIC ${GENERATED_FILE_PATH})
 set_property(DIRECTORY PROPERTY ADDITIONAL_MAKE_CLEAN_FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/generated/*")
 
-# This generates the proto part of .proto file
-protobuf_generate(
-        TARGET proto
-        LANGUAGE cpp
-        PROTOC_OUT_DIR ${GENERATED_FILE_PATH}/protos
-        IMPORT_DIRS protos
-)
+## This generates proto files of slurmx.proto file
+get_filename_component(slurmx_proto "protos/slurmx.proto" ABSOLUTE)
+get_filename_component(slurmx_proto_path "${slurmx_proto}" PATH)
+# Generated sources
+set(slurmx_proto_srcs "${GENERATED_FILE_PATH}/protos/slurmx.pb.cc")
+set(slurmx_proto_hdrs "${GENERATED_FILE_PATH}/protos/slurmx.pb.h")
+set(slurmx_grpc_srcs "${GENERATED_FILE_PATH}/protos/slurmx.grpc.pb.cc")
+set(slurmx_grpc_hdrs "${GENERATED_FILE_PATH}/protos/slurmx.grpc.pb.h")
+add_custom_command(
+        OUTPUT "${slurmx_proto_srcs}" "${slurmx_proto_hdrs}" "${slurmx_grpc_srcs}" "${slurmx_grpc_hdrs}"
+        COMMAND ${_PROTOBUF_PROTOC}
+        ARGS --grpc_out "${GENERATED_FILE_PATH}/protos"
+        --cpp_out "${GENERATED_FILE_PATH}/protos"
+        -I "${slurmx_proto_path}"
+        --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
+        "${slurmx_proto}"
+        DEPENDS "${slurmx_proto}")
 
-# This generates the grpc part of .proto file
-protobuf_generate(
-        TARGET proto
-        LANGUAGE grpc
-        PROTOC_OUT_DIR ${GENERATED_FILE_PATH}/protos
-        PLUGIN "protoc-gen-grpc=${GRPC_CPP_PLUGIN_LOCATION}"
-        GENERATE_EXTENSIONS .grpc.pb.h .grpc.pb.cc
-        IMPORT_DIRS protos
-)
+# This generates proto files of PublicDefs.proto file
+get_filename_component(PublicDefs_proto "protos/PublicDefs.proto" ABSOLUTE)
+get_filename_component(PublicDefs_proto_path "${PublicDefs_proto}" PATH)
+# Generated sources
+set(PublicDefs_proto_srcs "${GENERATED_FILE_PATH}/protos/PublicDefs.pb.cc")
+set(PublicDefs_proto_hdrs "${GENERATED_FILE_PATH}/protos/PublicDefs.pb.h")
+set(PublicDefs_grpc_srcs "${GENERATED_FILE_PATH}/protos/PublicDefs.grpc.pb.cc")
+set(PublicDefs_grpc_hdrs "${GENERATED_FILE_PATH}/protos/PublicDefs.grpc.pb.h")
+add_custom_command(
+        OUTPUT "${PublicDefs_proto_srcs}" "${PublicDefs_proto_hdrs}" "${PublicDefs_grpc_srcs}" "${PublicDefs_grpc_hdrs}"
+        COMMAND ${_PROTOBUF_PROTOC}
+        ARGS --grpc_out "${GENERATED_FILE_PATH}/protos"
+        --cpp_out "${GENERATED_FILE_PATH}/protos"
+        -I "${PublicDefs_proto_path}"
+        --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
+        "${PublicDefs_proto}"
+        DEPENDS "${PublicDefs_proto}")
 
-target_link_libraries(proto absl::base absl::synchronization)
+#proto
+add_library(proto
+        ${slurmx_grpc_srcs}
+        ${slurmx_grpc_hdrs}
+        ${slurmx_proto_srcs}
+        ${slurmx_proto_hdrs}
+        ${PublicDefs_grpc_srcs}
+        ${PublicDefs_grpc_hdrs}
+        ${PublicDefs_proto_srcs}
+        ${PublicDefs_proto_hdrs})
+
+target_link_libraries(proto
+        ${_REFLECTION}
+        ${_GRPC_GRPCPP}
+        ${_PROTOBUF_LIBPROTOBUF}
+        absl::base
+        absl::synchronization)
+
+target_include_directories(proto PUBLIC ${GENERATED_FILE_PATH})
