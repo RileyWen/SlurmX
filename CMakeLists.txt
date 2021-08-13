@@ -41,7 +41,6 @@ set(DEPENDENCIES_PRE_INSTALLED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/pre_
 set(DEPENDENCIES_ONLINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/online)
 
 find_package(Threads REQUIRED)
-find_package(fmt 7.1.3 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/fmt)
 
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost 1.67 REQUIRED COMPONENTS thread fiber)
@@ -53,7 +52,6 @@ find_package(Libevent REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/libevent)
 
 find_package(cxxopts 2.2.0 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/cxxopts)
 
-find_package(absl CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/abseil)
 find_package(Protobuf CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/grpc)
 find_package(gRPC CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/grpc)
 get_target_property(GRPC_CPP_PLUGIN_LOCATION gRPC::grpc_cpp_plugin LOCATION)
