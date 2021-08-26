@@ -1,9 +1,17 @@
 #pragma once
 
-#include <absl/time/time.h>
+#include <absl/time/time.h>  // NOLINT(modernize-deprecated-headers)
 #include <spdlog/spdlog.h>
 
+#include <boost/uuid/uuid.hpp>
+#include <list>
+
 #include "protos/slurmx.pb.h"
+
+// For better logging inside lambda functions
+#if defined(__clang__) || defined(__GNUC__) || defined(__GNUG__)
+#define __FUNCTION__ __PRETTY_FUNCTION__
+#endif
 
 #define SLURMX_TRACE(...) SPDLOG_TRACE(__VA_ARGS__)
 #define SLURMX_DEBUG(...) SPDLOG_DEBUG(__VA_ARGS__)
@@ -13,12 +21,12 @@
 #define SLURMX_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
 
 #ifndef NDEBUG
-#define SLURMX_ASSERT(condition, ...) \
-  do {                                \
-    if (!(condition)) {               \
-      SLURMX_CRITICAL(__VA_ARGS__);   \
-      std::terminate();               \
-    }                                 \
+#define SLURMX_ASSERT(condition, ...)                                        \
+  do {                                                                       \
+    if (!(condition)) {                                                      \
+      SLURMX_CRITICAL("Assertion failed: \"" #condition "\".", __VA_ARGS__); \
+      std::terminate();                                                      \
+    }                                                                        \
   } while (false)
 #else
 #define ASSERT(condition, message) \
@@ -31,7 +39,7 @@ enum class SlurmxErr : uint16_t {
   kGenericFailure,
   kNoResource,
   kNonExistent,
-  kSystemErr,
+  kSystemErr,  // represent the error which sets errno
   kExistingTask,
   kInvalidParam,
   kStop,
@@ -42,8 +50,11 @@ enum class SlurmxErr : uint16_t {
   kTokenRequestFailure,
   KStreamBroken,
   kInvalidStub,
+  kCgroupError,
+  kProtobufError,
+  kLibEventError,
 
-  __ERR_SIZE
+  __ERR_SIZE  // NOLINT(bugprone-reserved-identifier)
 };
 
 inline const char* kCtlXdDefaultPort = "10011";
@@ -68,6 +79,9 @@ constexpr std::array<std::string_view, uint16_t(SlurmxErr::__ERR_SIZE)>
         "Failed to request required token",
         "Stream is broken",
         "Xd node stub is invalid",
+        "Error when manipulating cgroup",
+        "Error when using protobuf",
+        "Error when using LibEvent",
 };
 
 }
@@ -121,7 +135,8 @@ struct AllocatableResource {
   uint64_t memory_sw_bytes = 0;
 
   AllocatableResource() = default;
-  AllocatableResource(const SlurmxGrpc::AllocatableResource&);
+  explicit AllocatableResource(const SlurmxGrpc::AllocatableResource&);
+  AllocatableResource& operator=(const SlurmxGrpc::AllocatableResource&);
 
   AllocatableResource& operator+=(const AllocatableResource& rhs);
 
@@ -159,7 +174,7 @@ bool operator<(const Resources& lhs, const Resources& rhs);
 
 struct ITask {
   enum class Type { Interactive, Batch };
-  enum class Status { Pending, Running, Finished, Abort };
+  enum class Status { Pending, Running, Completing, Finished, Failed };
 
   /* -------- Fields that are set at the submission time. ------- */
   absl::Duration time_limit;
@@ -182,6 +197,8 @@ struct ITask {
   // If this task is RUNNING, start_time is the actual starting time.
   absl::Time start_time;
 
+  absl::Time end_time;
+
   virtual ~ITask() = default;
 
  protected:
@@ -190,10 +207,13 @@ struct ITask {
 
 struct InteractiveTask : public ITask {
   using ITask::ITask;
+  boost::uuids::uuid resource_uuid;
 };
 
 struct BatchTask : public ITask {
   using ITask::ITask;
+  std::string executive_path;
+  std::list<std::string> arguments;
   std::string output_file_pattern;
 };
 

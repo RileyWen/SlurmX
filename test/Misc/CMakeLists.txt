@@ -11,5 +11,13 @@ target_link_libraries(misc_test
 
         shared_test_impl_lib
 
+        Utility_PublicHeader
+        Utility_AnonymousPipe
+
+        concurrentqueue
         absl::btree
+        libevent::core
+        libevent::pthreads
+
+        Threads::Threads
         )

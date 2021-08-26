@@ -12,8 +12,14 @@ target_link_libraries(slurmxd
         Utility_PublicHeader
         proto
         Boost::boost
+
         libevent::core
+        libevent::pthreads
+
         cxxopts::cxxopts
         Threads::Threads
         nlohmann_json::nlohmann_json
+
+        absl::flat_hash_map
+        absl::synchronization
         )

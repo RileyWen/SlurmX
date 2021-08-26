@@ -16,6 +16,8 @@ target_link_libraries(slurmctlxd
         Boost::thread
 
         libevent::core
+        libevent::pthreads
+
         cxxopts::cxxopts
         Threads::Threads
 

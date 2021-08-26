@@ -2,7 +2,7 @@
 
 #include <spdlog/fmt/fmt.h>
 
-namespace slurmx {
+namespace util {
 
 inline std::string ReadableMemory(uint64_t memory_bytes) {
   if (memory_bytes < 1024)

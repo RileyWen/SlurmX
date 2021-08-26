@@ -32,12 +32,12 @@ void XdNodeMetaContainerSimpleImpl::AddNode(
       "global resource. partition [{}]'s Global resource now: "
       "cpu: {}, mem: {})",
       static_meta.node_index, static_meta.res.allocatable_resource.cpu_count,
-      slurmx::ReadableMemory(static_meta.res.allocatable_resource.memory_bytes),
+      util::ReadableMemory(static_meta.res.allocatable_resource.memory_bytes),
       static_meta.partition_name, static_meta.partition_name,
       part_metas.partition_global_meta.m_resource_total_.allocatable_resource
           .cpu_count,
-      slurmx::ReadableMemory(part_metas.partition_global_meta.m_resource_total_
-                                 .allocatable_resource.memory_bytes));
+      util::ReadableMemory(part_metas.partition_global_meta.m_resource_total_
+                               .allocatable_resource.memory_bytes));
 
   XdNodeMeta node_meta{
       .static_meta = static_meta,
@@ -192,8 +192,7 @@ XdNodeMetaContainerSimpleImpl::GetAllPartitionsMetaMapPtr() {
 }
 
 void XdNodeMetaContainerSimpleImpl::MallocResourceFromNode(
-    XdNodeId node_id, const boost::uuids::uuid& uuid,
-    const Resources& resources) {
+    XdNodeId node_id, uint32_t task_id, const Resources& resources) {
   LockGuard guard(mtx_);
 
   auto part_metas_iter = partition_metas_map_.find(node_id.partition_id);
@@ -209,11 +208,44 @@ void XdNodeMetaContainerSimpleImpl::MallocResourceFromNode(
     return;
   }
 
-  node_meta_iter->second.resource_shards.emplace(uuid, resources);
+  node_meta_iter->second.running_task_resource_map.emplace(task_id, resources);
   part_metas_iter->second.partition_global_meta.m_resource_avail_ -= resources;
   part_metas_iter->second.partition_global_meta.m_resource_in_use_ += resources;
   node_meta_iter->second.res_avail -= resources;
   node_meta_iter->second.res_in_use += resources;
+}
+
+void XdNodeMetaContainerSimpleImpl::FreeResourceFromNode(XdNodeId node_id,
+                                                         uint32_t task_id) {
+  LockGuard guard(mtx_);
+
+  auto part_metas_iter = partition_metas_map_.find(node_id.partition_id);
+  if (part_metas_iter == partition_metas_map_.end()) {
+    // No such partition.
+    return;
+  }
+
+  auto node_meta_iter =
+      part_metas_iter->second.xd_node_meta_map.find(node_id.node_index);
+  if (node_meta_iter == part_metas_iter->second.xd_node_meta_map.end()) {
+    // No such node in this partition.
+    return;
+  }
+
+  auto resource_iter =
+      node_meta_iter->second.running_task_resource_map.find(task_id);
+  if (resource_iter == node_meta_iter->second.running_task_resource_map.end()) {
+    // Invalid task_id
+    return;
+  }
+
+  const Resources& resources = resource_iter->second;
+  part_metas_iter->second.partition_global_meta.m_resource_avail_ += resources;
+  part_metas_iter->second.partition_global_meta.m_resource_in_use_ -= resources;
+  node_meta_iter->second.res_avail += resources;
+  node_meta_iter->second.res_in_use -= resources;
+
+  node_meta_iter->second.running_task_resource_map.erase(resource_iter);
 }
 
 }  // namespace CtlXd

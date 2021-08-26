@@ -1,3 +1,4 @@
+#include <gtest/gtest.h>
 #include <libcgroup.h>
 #include <stdio.h>
 #include <string.h>
@@ -11,8 +12,8 @@
 #include <thread>
 #include <vector>
 
-#include "../../src/SlurmXd/TaskManager.h"
-#include "gtest/gtest.h"
+#include "AnonymousPipe.h"
+#include "cgroup.linux.h"
 
 // NOTICE: For non-RHEL system, swap account in cgroup is disabled by default.
 //  Turn it on by adding
@@ -99,20 +100,16 @@ TEST(cgroup, cpu_core_limit) {
     t3.join();
 
   } else {
+    using namespace util;
     const std::string cg_path{"riley_cgroup"};
 
-    Cgroup::CgroupManager& cm = Cgroup::CgroupManager::getInstance();
-    cm.create_or_open(cg_path, Cgroup::ALL_CONTROLLER_FLAG,
-                      Cgroup::NO_CONTROLLER_FLAG, false);
+    CgroupManager& cm = CgroupManager::Instance();
+    Cgroup* cg = cm.CreateOrOpen(cg_path, ALL_CONTROLLER_FLAG,
+                                 NO_CONTROLLER_FLAG, false);
 
-    auto cg_info_wrapper = cm.find_cgroup(cg_path);
-    auto& cg_struct = *(cg_info_wrapper.value().get().cgroup_ptr);
+    cg->SetCpuCoreLimit(2);
 
-    Cgroup::Internal::CgroupManipulator cg_limit(cg_struct);
-
-    cg_limit.set_cpu_core_limit(2);
-
-    cm.migrate_proc_to_cgroup(child_pid, cg_path);
+    cm.MigrateProcTo(child_pid, cg_path);
 
     val = 1;
     _ = anon_pipe_p_c.WriteIntegerToChild<u_char>(val);
@@ -145,7 +142,7 @@ TEST(cgroup, cpu_core_limit) {
     int child_ret_val;
     wait(&child_ret_val);
 
-    cm.destroy(cg_path);
+    cm.Release(cg_path);
   }
 
   signal(SIGCHLD, SIG_DFL);
@@ -179,20 +176,16 @@ TEST(cgroup, memory_limit) {
 
     const std::string cg_path{"riley_cgroup"};
 
-    Cgroup::CgroupManager& cm = Cgroup::CgroupManager::getInstance();
-    cm.create_or_open(cg_path, Cgroup::ALL_CONTROLLER_FLAG,
-                      Cgroup::NO_CONTROLLER_FLAG, false);
+    using namespace util;
+    CgroupManager& cm = CgroupManager::Instance();
+    Cgroup* cg = cm.CreateOrOpen(cg_path, ALL_CONTROLLER_FLAG,
+                                 NO_CONTROLLER_FLAG, false);
 
-    auto cg_info_wrapper = cm.find_cgroup(cg_path);
-    auto& cg_struct = *(cg_info_wrapper.value().get().cgroup_ptr);
+    cg->SetMemoryLimitBytes(10 * MB);
+    cg->SetMemorySwLimitBytes(10 * MB);
+    cg->SetMemorySoftLimitBytes(10 * MB);
 
-    Cgroup::Internal::CgroupManipulator cg_limit(cg_struct);
-    cg_limit.set_memory_limit_bytes(10 * MB);
-    cg_limit.set_memory_sw_limit_bytes(10 * MB);
-
-    cg_limit.set_memory_soft_limit_bytes(10 * MB);
-
-    cm.migrate_proc_to_cgroup(child_pid, cg_path);
+    cm.MigrateProcTo(child_pid, cg_path);
 
     int child_status;
     wait(&child_status);
@@ -202,7 +195,7 @@ TEST(cgroup, memory_limit) {
         << "Child should exit with SIGTERM rather than "
         << strsignal(WTERMSIG(child_status)) << ".\n";
 
-    cm.destroy(cg_path);
+    cm.Release(cg_path);
   }
 }
 

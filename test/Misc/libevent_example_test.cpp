@@ -200,6 +200,7 @@ static void CustomEventCb(int sock, short which, void *arg) {
   }
 }
 
+// Just a code example.
 TEST_F(LibEventTest, CustomEvent) {
   struct event *ev = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
                                CustomEventCb, m_ev_base_);

@@ -1,13 +1,22 @@
 #include "TaskManager.h"
 
+#include <google/protobuf/io/zero_copy_stream_impl.h>
+#include <google/protobuf/util/delimited_message_util.h>
+
+#include <utility>
+
+#include "ResourceAllocators.h"
+#include "protos/XdSubprocess.pb.h"
+
 namespace Xd {
 
 TaskManager::TaskManager()
-    : m_cg_mgr_(Cgroup::CgroupManager::getInstance()),
+    : m_cg_mgr_(util::CgroupManager::Instance()),
       m_ev_sigchld_(nullptr),
       m_ev_base_(nullptr),
-      m_ev_grpc_event_(nullptr),
+      m_ev_grpc_interactive_task_(nullptr),
       m_ev_exit_event_(nullptr),
+      m_ev_task_status_change_(nullptr),
       m_is_ending_now_(false) {
   // Only called once. Guaranteed by singleton pattern.
   m_instance_ptr_ = this;
@@ -15,63 +24,99 @@ TaskManager::TaskManager()
   m_ev_base_ = event_base_new();
   if (!m_ev_base_) {
     SLURMX_ERROR("Could not initialize libevent!");
-    abort();
+    std::terminate();
   }
+  {  // SIGCHLD
+    m_ev_sigchld_ = evsignal_new(m_ev_base_, SIGCHLD, EvSigchldCb_, this);
+    if (!m_ev_sigchld_) {
+      SLURMX_ERROR("Failed to create the SIGCHLD event!");
+      std::terminate();
+    }
 
-  m_ev_sigchld_ = evsignal_new(m_ev_base_, SIGCHLD, EvSigchldCb_, this);
-  if (!m_ev_sigchld_) {
-    SLURMX_ERROR("Failed to create the SIGCHLD event!");
-    abort();
+    if (event_add(m_ev_sigchld_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the SIGCHLD event to base!");
+      std::terminate();
+    }
   }
+  {  // SIGINT
+    m_ev_sigint_ = evsignal_new(m_ev_base_, SIGINT, EvSigintCb_, this);
+    if (!m_ev_sigint_) {
+      SLURMX_ERROR("Failed to create the SIGCHLD event!");
+      std::terminate();
+    }
 
-  if (event_add(m_ev_sigchld_, nullptr) < 0) {
-    SLURMX_ERROR("Could not add the SIGCHLD event to base!");
-    abort();
+    if (event_add(m_ev_sigint_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the SIGINT event to base!");
+      std::terminate();
+    }
   }
+  {  // gRPC: SpawnInteractiveTask
+    m_ev_grpc_interactive_task_ =
+        event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
+                  EvGrpcSpawnInteractiveTaskCb_, this);
+    if (!m_ev_grpc_interactive_task_) {
+      SLURMX_ERROR("Failed to create the grpc event!");
+      std::terminate();
+    }
 
-  m_ev_sigint_ = evsignal_new(m_ev_base_, SIGINT, EvSigintCb_, this);
-  if (!m_ev_sigint_) {
-    SLURMX_ERROR("Failed to create the SIGCHLD event!");
-    abort();
+    if (event_add(m_ev_grpc_interactive_task_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the grpc event to base!");
+      std::terminate();
+    }
   }
+  {  // Exit Event
+    if ((m_ev_exit_fd_ = eventfd(0, EFD_CLOEXEC)) < 0) {
+      SLURMX_ERROR("Failed to init the eventfd!");
+      std::terminate();
+    }
 
-  if (event_add(m_ev_sigint_, nullptr) < 0) {
-    SLURMX_ERROR("Could not add the SIGINT event to base!");
-    abort();
+    m_ev_exit_event_ = event_new(m_ev_base_, m_ev_exit_fd_,
+                                 EV_PERSIST | EV_READ, EvExitEventCb_, this);
+    if (!m_ev_exit_event_) {
+      SLURMX_ERROR("Failed to create the exit event!");
+      std::terminate();
+    }
+
+    if (event_add(m_ev_exit_event_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the exit event to base!");
+      std::terminate();
+    }
   }
-
-  if ((m_grpc_event_fd_ = eventfd(0, EFD_SEMAPHORE | EFD_CLOEXEC)) < 0) {
-    SLURMX_ERROR("Failed to init the eventfd!");
-    abort();
+  {  // Grpc Execute Task Event
+    m_ev_grpc_execute_task_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
+                                        EvGrpcExecuteTaskCb_, this);
+    if (!m_ev_grpc_execute_task_) {
+      SLURMX_ERROR("Failed to create the grpc_execute_task event!");
+      std::terminate();
+    }
+    if (event_add(m_ev_grpc_execute_task_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the m_ev_grpc_execute_task_ to base!");
+      std::terminate();
+    }
   }
-
-  m_ev_grpc_event_ = event_new(m_ev_base_, m_grpc_event_fd_,
-                               EV_PERSIST | EV_READ, EvGrpcEventCb_, this);
-  if (!m_ev_grpc_event_) {
-    SLURMX_ERROR("Failed to create the grpc event!");
-    abort();
+  {  // Task Status Change Event
+    m_ev_task_status_change_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
+                                         EvTaskStatusChangeCb_, this);
+    if (!m_ev_task_status_change_) {
+      SLURMX_ERROR("Failed to create the task_status_change event!");
+      std::terminate();
+    }
+    if (event_add(m_ev_task_status_change_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the m_ev_task_status_change_event_ to base!");
+      std::terminate();
+    }
   }
-
-  if (event_add(m_ev_grpc_event_, nullptr) < 0) {
-    SLURMX_ERROR("Could not add the grpc event to base!");
-    abort();
-  }
-
-  if ((m_ev_exit_fd_ = eventfd(0, EFD_CLOEXEC)) < 0) {
-    SLURMX_ERROR("Failed to init the eventfd!");
-    abort();
-  }
-
-  m_ev_exit_event_ = event_new(m_ev_base_, m_ev_exit_fd_, EV_PERSIST | EV_READ,
-                               EvExitEventCb_, this);
-  if (!m_ev_exit_event_) {
-    SLURMX_ERROR("Failed to create the exit event!");
-    abort();
-  }
-
-  if (event_add(m_ev_exit_event_, nullptr) < 0) {
-    SLURMX_ERROR("Could not add the exit event to base!");
-    abort();
+  {
+    m_ev_task_terminate_ = event_new(m_ev_base_, -1, EV_READ | EV_PERSIST,
+                                     EvTerminateTaskCb_, this);
+    if (!m_ev_task_terminate_) {
+      SLURMX_ERROR("Failed to create the task_terminate event!");
+      std::terminate();
+    }
+    if (event_add(m_ev_task_terminate_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the m_ev_task_terminate_ to base!");
+      std::terminate();
+    }
   }
 
   m_ev_loop_thread_ =
@@ -84,52 +129,26 @@ TaskManager::~TaskManager() {
   if (m_ev_sigchld_) event_free(m_ev_sigchld_);
   if (m_ev_sigint_) event_free(m_ev_sigint_);
 
-  if (m_ev_grpc_event_) event_free(m_ev_grpc_event_);
-  close(m_grpc_event_fd_);
+  if (m_ev_grpc_interactive_task_) event_free(m_ev_grpc_interactive_task_);
 
   if (m_ev_exit_event_) event_free(m_ev_exit_event_);
   close(m_ev_exit_fd_);
 
+  if (m_ev_grpc_execute_task_) event_free(m_ev_grpc_execute_task_);
+
+  if (m_ev_task_status_change_) event_free(m_ev_task_status_change_);
+
   if (m_ev_base_) event_base_free(m_ev_base_);
 }
 
-SlurmxErr TaskManager::AddTaskAsync(TaskInitInfo&& task_init_info) {
-  if (m_is_ending_now_) {
-    return SlurmxErr::kStop;
-  } else {
-    eventfd_t u = 1;
-
-    std::promise<grpc_resp_new_task_t> resp_prom;
-    std::future<grpc_resp_new_task_t> resp_future = resp_prom.get_future();
-
-    grpc_req_new_task_t req{
-        std::move(task_init_info),
-        std::move(resp_prom),
-    };
-
-    m_gprc_new_task_queue_.enqueue(std::move(req));
-    ssize_t s = eventfd_write(m_grpc_event_fd_, u);
-    if (s < 0) {
-      SLURMX_ERROR("Failed to write to grpc event fd: {}", strerror(errno));
-      return SlurmxErr::kSystemErr;
-    }
-
-    grpc_resp_new_task_t resp = resp_future.get();
-
-    return resp.err;
-  }
+const TaskInstance* TaskManager::FindInstanceByTaskId_(uint32_t task_id) {
+  auto iter = m_task_map_.find(task_id);
+  if (iter == m_task_map_.end()) return nullptr;
+  return iter->second.get();
 }
 
-std::optional<const Task*> TaskManager::FindTaskByName(
-    const std::string& task_name) {
-  const Task* p = m_task_set_.FindByName(task_name);
-  if (!p) return std::nullopt;
-
-  return p;
-}
-
-std::string TaskManager::CgroupStrByPID(pid_t pid) {
-  return fmt::format("SlurmX_proc_{}", pid);
+std::string TaskManager::CgroupStrByTaskId_(uint32_t task_id) {
+  return fmt::format("SlurmX_Task_{}", task_id);
 }
 
 void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
@@ -137,7 +156,7 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
   assert(m_instance_ptr_->m_instance_ptr_ != nullptr);
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
-  sigchld_info_t sigchld_info;
+  SigchldInfo sigchld_info{};
 
   int status;
   pid_t pid;
@@ -160,28 +179,53 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
         printf("continued\n");
       } */
 
-      // Destroy related Cgroup
-      this_->m_cg_mgr_.destroy(CgroupStrByPID(pid));
-      SLURMX_DEBUG("Received SIGCHLD. Destroying Cgroup for pid {}", pid);
+      uint32_t task_id;
+      TaskInstance* instance;
+      const ProcessInstance* proc;
 
-      std::string task_name;
-      const Task* taskPtr = this_->m_task_set_.FindByPid(pid);
-      if (!taskPtr)
-        SLURMX_ERROR("Failed to find task name for pid {}.", pid);
+      auto task_iter = this_->m_pid_task_map_.find(pid);
+      auto proc_iter = this_->m_pid_proc_map_.find(pid);
+      if (task_iter == this_->m_pid_task_map_.end() ||
+          proc_iter == this_->m_pid_proc_map_.end())
+        SLURMX_ERROR("Failed to find task id for pid {}.", pid);
       else {
-        task_name = taskPtr->init_info.name;
+        instance = task_iter->second;
+        proc = proc_iter->second;
+        task_id = instance->task->task_id;
 
-        SLURMX_DEBUG(R"(Destroying Task structure for "{}".)", task_name);
+        proc->finish_cb(sigchld_info.is_terminated_by_signal,
+                        sigchld_info.value);
 
-        taskPtr->init_info.finish_callback(sigchld_info.is_terminated_by_signal,
-                                           sigchld_info.value);
+        bufferevent_free(proc->ev_buf_event);
 
-        bufferevent_free(taskPtr->ev_buf_event);
+        // Free the ProcessInstance. ITask struct is not freed here because
+        // the ITask for an Interactive task can have no ProcessInstance.
+        instance->process.reset(nullptr);
 
-        this_->m_task_set_.EraseByName(task_name);
+        // Remove indexes from pid to TaskInstance*, ProcessInstance*
+        this_->m_pid_task_map_.erase(task_iter);
+        this_->m_pid_proc_map_.erase(proc_iter);
+
+        // See the comment of EvActivateTaskStatusChange_.
+        if (instance->task->type == ITask::Type::Batch) {
+          // For a Batch task, the end of the process means it is done.
+          if (sigchld_info.is_terminated_by_signal)
+            this_->EvActivateTaskStatusChange_(task_id, ITask::Status::Failed,
+                                               std::nullopt);
+          else
+            this_->EvActivateTaskStatusChange_(task_id, ITask::Status::Finished,
+                                               std::nullopt);
+        } else {
+          // For a COMPLETING Interactive task with a process running, the end
+          // of this process means that this task is done.
+          this_->EvActivateTaskStatusChange_(task_id, ITask::Status::Finished,
+                                             std::nullopt);
+        }
       }
 
-      if (this_->m_is_ending_now_ && this_->m_task_set_.Empty()) {
+      // Todo: Add additional timer to check periodically whether all children
+      //  have exited.
+      if (this_->m_is_ending_now_ && this_->m_task_map_.empty()) {
         SLURMX_TRACE("EvSigchldCb_ has reaped all child. Stop event loop.");
         this_->Shutdown();
       }
@@ -195,159 +239,8 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
   }
 }
 
-void TaskManager::EvGrpcEventCb_(int efd, short events, void* user_data) {
-  uint64_t u;
-  ssize_t s;
-  s = read(efd, &u, sizeof(uint64_t));
-  if (s != sizeof(uint64_t)) {
-    if (errno != EAGAIN) {
-      SLURMX_ERROR("Failed to read grpc_fd: errno {}, {}", errno,
-                   strerror(errno));
-    }
-    return;
-  }
-
-  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-
-  grpc_req_new_task_t req;
-  this_->m_gprc_new_task_queue_.try_dequeue(req);
-  TaskInitInfo& task_init_info = req.task_init_info;
-
-  SLURMX_DEBUG("Receive one grpc req of new task: {}", task_init_info.name);
-
-  if (this_->m_task_set_.CountByName(task_init_info.name) > 0) {
-    req.resp_promise.set_value({SlurmxErr::kExistingTask});
-    return;
-  };
-
-  constexpr u_char E_PIPE_OK = 0;
-  constexpr u_char E_PIPE_SUICIDE = 1;
-  AnonymousPipe anon_pipe;
-
-  pid_t child_pid = fork();
-  if (child_pid == 0) {  // Child proc
-    anon_pipe.CloseParentEnd();
-
-    SLURMX_DEBUG("Subprocess start running....");
-
-    // We use u_char here, since the size of u_char is standard-defined.
-    u_char val;
-
-    // Blocking read to wait the parent move the child into designated cgroup.
-    if (!anon_pipe.ReadIntegerFromParent<u_char>(&val))
-      SLURMX_ERROR("Failed to write the expected 1 byte to AnonymousPipe.");
-
-    // Use abort to avoid the wrong call to destructor of CgroupManager, which
-    // deletes all cgroup in system.
-    if (val == E_PIPE_SUICIDE) abort();
-
-    // Set pgid to the root process of task.
-    setpgid(0, 0);
-
-    // Prepare the command line arguments.
-    std::vector<const char*> argv;
-    argv.push_back(task_init_info.executive_path.c_str());
-    for (auto&& arg : task_init_info.arguments) {
-      argv.push_back(arg.c_str());
-    }
-    argv.push_back(nullptr);
-
-    SLURMX_TRACE("execv: {} {}", task_init_info.executive_path,
-                 boost::algorithm::join(task_init_info.arguments, " "));
-
-    dup2(anon_pipe.GetChildEndFd(), 1);  // stdout -> pipe
-    dup2(anon_pipe.GetChildEndFd(), 2);  // stderr -> pipe
-
-    // Release the file descriptor before calling exec()
-    anon_pipe.CloseChildEnd();
-
-    execv(task_init_info.executive_path.c_str(),
-          const_cast<char* const*>(argv.data()));
-
-    // Error occurred since execv returned. At this point, errno is set.
-    // CtlXd use SIGABRT to inform the client of this failure.
-    fmt::print(stderr,
-               "[SlurmCtlXd Error] Failed to execute the task. Error: {}\n",
-               strerror(errno));
-    abort();
-  } else {  // Parent proc
-    SLURMX_TRACE("Child proc: pid {}", child_pid);
-
-    u_char pipe_uchar_val;
-
-    anon_pipe.CloseChildEnd();
-
-    auto new_task = std::make_unique<Task>();
-    new_task->root_pid = child_pid;
-    new_task->cg_path = CgroupStrByPID(child_pid);
-    new_task->init_info = std::move(task_init_info);
-
-    // Avoid corruption during std::move
-    std::string task_name_copy = new_task->init_info.name;
-
-    // Create cgroup for the new subprocess
-    if (!this_->m_cg_mgr_.create_or_open(CgroupStrByPID(child_pid),
-                                         Cgroup::ALL_CONTROLLER_FLAG,
-                                         Cgroup::NO_CONTROLLER_FLAG, false)) {
-      SLURMX_ERROR(
-          "Destroy child task process of \"{}\" due to failure of cgroup "
-          "creation.",
-          new_task->init_info.name);
-
-      pipe_uchar_val = E_PIPE_SUICIDE;
-      if (!anon_pipe.WriteIntegerToChild<u_char>(pipe_uchar_val))
-        SLURMX_ERROR("Failed to send E_PIPE_SUICIDE to child.");
-    }
-
-    // Add event for stdout/stderr of the new subprocess
-    new_task->ev_buf_event = bufferevent_socket_new(
-        this_->m_ev_base_, anon_pipe.GetParentEndFd(), BEV_OPT_CLOSE_ON_FREE);
-    if (!new_task->ev_buf_event) {
-      SLURMX_ERROR(
-          "Error constructing bufferevent for the subprocess of task \"{}\"!",
-          task_init_info.name);
-      pipe_uchar_val = E_PIPE_SUICIDE;
-      if (!anon_pipe.WriteIntegerToChild<u_char>(pipe_uchar_val))
-        SLURMX_ERROR("Failed to send E_PIPE_SUICIDE to child.");
-    }
-    bufferevent_setcb(new_task->ev_buf_event, EvSubprocessReadCb_, nullptr,
-                      nullptr, (void*)new_task.get());
-    bufferevent_enable(new_task->ev_buf_event, EV_READ);
-    bufferevent_disable(new_task->ev_buf_event, EV_WRITE);
-
-    // Migrate the new subprocess to newly created cgroup
-    if (!this_->m_cg_mgr_.migrate_proc_to_cgroup(new_task->root_pid,
-                                                 new_task->cg_path)) {
-      SLURMX_ERROR(
-          "Destroy child task process of \"{}\" due to failure of cgroup "
-          "migration.",
-          new_task->init_info.name);
-
-      pipe_uchar_val = E_PIPE_SUICIDE;
-      if (!anon_pipe.WriteIntegerToChild<u_char>(pipe_uchar_val))
-        SLURMX_ERROR("Failed to send E_PIPE_SUICIDE to child.");
-
-      this_->m_cg_mgr_.destroy(new_task->cg_path);
-      return;
-    }
-
-    SLURMX_TRACE("New task {} is ready. Asking subprocess to execv...",
-                 new_task->init_info.name);
-    // Tell subprocess that the parent process is ready. Then the
-    // subprocess should continue to exec().
-    pipe_uchar_val = E_PIPE_OK;
-    if (!anon_pipe.WriteIntegerToChild<u_char>(pipe_uchar_val))
-      SLURMX_ERROR("Failed to send E_PIPE_OK to child.");
-
-    this_->m_task_set_.Insert(std::move(new_task));
-
-    // Inform the async caller of success.
-    req.resp_promise.set_value({SlurmxErr::kOk});
-  }
-}
-
-void TaskManager::EvSubprocessReadCb_(struct bufferevent* bev, void* pid_) {
-  auto task_ptr = reinterpret_cast<Task*>(pid_);
+void TaskManager::EvSubprocessReadCb_(struct bufferevent* bev, void* process) {
+  auto* proc = reinterpret_cast<ProcessInstance*>(process);
 
   size_t buf_len = evbuffer_get_length(bev->input);
 
@@ -356,9 +249,9 @@ void TaskManager::EvSubprocessReadCb_(struct bufferevent* bev, void* pid_) {
   int n_copy = evbuffer_remove(bev->input, str.data(), buf_len);
 
   SLURMX_TRACE("Read {:>4} bytes from subprocess (pid: {}): {}", n_copy,
-               task_ptr->root_pid, str);
+               proc->pid, str);
 
-  task_ptr->init_info.output_callback(std::move(str));
+  proc->output_cb(std::move(str));
 }
 
 void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
@@ -371,17 +264,14 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
 
     if (this_->m_sigint_cb_) this_->m_sigint_cb_();
 
-    if (this_->m_task_set_.Empty()) {
+    if (this_->m_task_map_.empty()) {
       // If there is no task to kill, stop the loop directly.
       this_->Shutdown();
     } else {
-      // Todo: Add timer which sends SIGTERM for those tasks who
-      //  will not quit when receiving SIGINT.
-
       // Send SIGINT to all tasks and the event loop will stop
       // when the ev_sigchld_cb_ of the last task is called.
-      for (auto&& task : this_->m_task_set_) {
-        this_->Kill(task.name(), SIGINT);
+      for (auto&& [task_id, instance] : this_->m_task_map_) {
+        KillProcessInstance_(instance->process.get(), SIGINT);
       }
     }
   } else {
@@ -423,13 +313,13 @@ void TaskManager::Wait() {
   if (m_ev_loop_thread_.joinable()) m_ev_loop_thread_.join();
 }
 
-SlurmxErr TaskManager::Kill(const std::string& task_name, int signum) {
-  auto task_option = FindTaskByName(task_name);
-  if (task_option.has_value()) {
-    const Task* task = task_option.value();
-
+SlurmxErr TaskManager::KillProcessInstance_(const ProcessInstance* proc,
+                                            int signum) {
+  // Todo: Add timer which sends SIGTERM for those tasks who
+  //  will not quit when receiving SIGINT.
+  if (proc) {
     // Send the signal to the whole process group.
-    int err = kill(-task->root_pid, signum);
+    int err = kill(-proc->pid, signum);
 
     if (err == 0)
       return SlurmxErr::kOk;
@@ -443,50 +333,353 @@ SlurmxErr TaskManager::Kill(const std::string& task_name, int signum) {
 }
 
 void TaskManager::SetSigintCallback(std::function<void()> cb) {
-  m_sigint_cb_ = cb;
+  m_sigint_cb_ = std::move(cb);
 }
 
-void TaskMultiIndexSet::Insert(std::unique_ptr<Task>&& task) {
-  task_set_.insert({std::move(task)});
+SlurmxErr TaskManager::SpawnProcessInInstance_(
+    TaskInstance* instance, std::unique_ptr<ProcessInstance> process) {
+  using google::protobuf::io::FileInputStream;
+  using google::protobuf::io::FileOutputStream;
+  using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
+  using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
+
+  using SlurmxGrpc::Xd::CanStartMessage;
+
+  int socket_pair[2];
+
+  if (socketpair(AF_UNIX, SOCK_STREAM, 0, socket_pair) != 0) {
+    SLURMX_ERROR("Failed to create socket pair: {}", strerror(errno));
+    return SlurmxErr::kSystemErr;
+  }
+
+  pid_t child_pid = fork();
+  if (child_pid > 0) {  // Parent proc
+    close(socket_pair[1]);
+    int fd = socket_pair[0];
+    bool ok;
+    SlurmxErr err;
+
+    FileOutputStream ostream(fd);
+    CanStartMessage msg;
+
+    SLURMX_DEBUG("Subprocess was created for task #{} pid: {}",
+                 instance->task->task_id, child_pid);
+
+    process->pid = child_pid;
+
+    // Add event for stdout/stderr of the new subprocess
+    process->ev_buf_event =
+        bufferevent_socket_new(m_ev_base_, fd, BEV_OPT_CLOSE_ON_FREE);
+    if (!process->ev_buf_event) {
+      SLURMX_ERROR(
+          "Error constructing bufferevent for the subprocess of task #!",
+          instance->task->task_id);
+      err = SlurmxErr::kLibEventError;
+      goto AskChildToSuicide;
+    }
+    bufferevent_setcb(process->ev_buf_event, EvSubprocessReadCb_, nullptr,
+                      nullptr, (void*)process.get());
+    bufferevent_enable(process->ev_buf_event, EV_READ);
+    bufferevent_disable(process->ev_buf_event, EV_WRITE);
+
+    // Migrate the new subprocess to newly created cgroup
+    if (!m_cg_mgr_.MigrateProcTo(process->pid, instance->cg_path)) {
+      SLURMX_ERROR(
+          "Terminate the subprocess of task #{} due to failure of cgroup "
+          "migration.",
+          instance->task->task_id);
+
+      m_cg_mgr_.Release(instance->cg_path);
+      err = SlurmxErr::kCgroupError;
+      goto AskChildToSuicide;
+    }
+
+    SLURMX_TRACE("New task #{} is ready. Asking subprocess to execv...",
+                 instance->task->task_id);
+
+    // Tell subprocess that the parent process is ready. Then the
+    // subprocess should continue to exec().
+    msg.set_ok(true);
+    ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
+    ok &= ostream.Flush();
+    if (!ok) {
+      SLURMX_ERROR("Failed to ask subprocess {} to suicide for task #{}",
+                   child_pid, instance->task->task_id);
+      return SlurmxErr::kProtobufError;
+    }
+
+    // Add indexes from pid to TaskInstance*, ProcessInstance*
+    m_pid_task_map_.emplace(child_pid, instance);
+    m_pid_proc_map_.emplace(child_pid, process.get());
+
+    // Move the ownership of ProcessInstance into the TaskInstance.
+    instance->process = std::move(process);
+
+    return SlurmxErr::kOk;
+
+  AskChildToSuicide:
+    msg.set_ok(false);
+
+    ok = SerializeDelimitedToZeroCopyStream(msg, &ostream);
+    if (!ok) {
+      SLURMX_ERROR("Failed to ask subprocess {} to suicide for task #{}",
+                   child_pid, instance->task->task_id);
+      return SlurmxErr::kProtobufError;
+    }
+    return err;
+  } else {  // Child proc
+    close(socket_pair[0]);
+    int fd = socket_pair[1];
+
+    FileInputStream istream(fd);
+    CanStartMessage msg;
+
+    ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
+    if (!msg.ok()) std::abort();
+
+    // Set pgid to the pid of task root process.
+    setpgid(0, 0);
+
+    // Prepare the command line arguments.
+    std::vector<const char*> argv;
+    argv.push_back(process->executive_path.c_str());
+    for (auto&& arg : process->arguments) {
+      argv.push_back(arg.c_str());
+    }
+    argv.push_back(nullptr);
+
+    SLURMX_TRACE("execv being called subprocess: {} {}",
+                 process->executive_path,
+                 boost::algorithm::join(process->arguments, " "));
+
+    dup2(fd, 1);  // stdout -> pipe
+    dup2(fd, 2);  // stderr -> pipe
+
+    close(fd);
+
+    execv(process->executive_path.c_str(),
+          const_cast<char* const*>(argv.data()));
+
+    // Error occurred since execv returned. At this point, errno is set.
+    // CtlXd use SIGABRT to inform the client of this failure.
+    fmt::print(stderr,
+               "[SlurmCtlXd Subprocess Error] Failed to execv. Error: {}\n",
+               strerror(errno));
+    // Todo: See https://tldp.org/LDP/abs/html/exitcodes.html, return standard
+    //  exit codes
+    abort();
+  }
 }
 
-const Task* TaskMultiIndexSet::FindByName(const std::string& name) {
-  auto& taskNameIndex = task_set_.get<Internal::TaskName>();
-  auto iter = taskNameIndex.find(name);
-  if (iter == taskNameIndex.end()) return nullptr;
+SlurmxErr TaskManager::ExecuteTaskAsync(std::unique_ptr<ITask> task) {
+  auto instance = std::make_unique<TaskInstance>();
 
-  return iter->p_.get();
+  m_grpc_execute_task_queue_.enqueue(std::move(instance));
+  event_active(m_ev_grpc_execute_task_, 0, 0);
+
+  return SlurmxErr::kOk;
 }
 
-const Task* TaskMultiIndexSet::FindByPid(pid_t pid) {
-  auto& pidIndex = task_set_.get<Internal::Pid>();
-  auto iter = pidIndex.find(pid);
-  if (iter == pidIndex.end()) return nullptr;
+void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+  std::unique_ptr<TaskInstance> instance;
 
-  return iter->p_.get();
+  if (!this_->m_grpc_execute_task_queue_.try_dequeue(instance)) {
+    std::string err_str{fmt::format(
+        "GrpcExecuteTask was notified, but m_grpc_execute_task_queue_ is "
+        "empty in task #{}",
+        instance->task->task_id)};
+    SLURMX_ERROR(err_str);
+    this_->EvActivateTaskStatusChange_(
+        instance->task->task_id, ITask::Status::Failed, std::move(err_str));
+    return;
+  }
+
+  instance->cg_path = CgroupStrByTaskId_(instance->task->task_id);
+  util::Cgroup* cgroup;
+  cgroup = this_->m_cg_mgr_.CreateOrOpen(instance->cg_path,
+                                         util::ALL_CONTROLLER_FLAG,
+                                         util::NO_CONTROLLER_FLAG, false);
+  // Create cgroup for the new subprocess
+  if (!cgroup) {
+    SLURMX_ERROR("Failed to create cgroup for task #{}",
+                 instance->task->task_id);
+    this_->EvActivateTaskStatusChange_(
+        instance->task->task_id, ITask::Status::Failed,
+        fmt::format("Cannot create cgroup for the instance of task #{}",
+                    instance->task->task_id));
+    return;
+  }
+
+  if (!AllocatableResourceAllocator::Allocate(
+          instance->task->resources.allocatable_resource, cgroup)) {
+    SLURMX_ERROR(
+        "Failed to allocate allocatable resource in cgroup for task #{}",
+        instance->task->task_id);
+    this_->EvActivateTaskStatusChange_(
+        instance->task->task_id, ITask::Status::Failed,
+        fmt::format("Cannot allocate resources for the instance of task #{}",
+                    instance->task->task_id));
+    return;
+  }
+
+  // If this is a batch task, run it now.
+  if (instance->task->type == ITask::Type::Batch) {
+    auto process = std::make_unique<ProcessInstance>();
+    const auto* batch_task = dynamic_cast<BatchTask*>(instance->task.get());
+    process->executive_path = batch_task->executive_path;
+    process->arguments = batch_task->arguments;
+
+    SlurmxErr err;
+    err = this_->SpawnProcessInInstance_(instance.get(), std::move(process));
+    if (err != SlurmxErr::kOk) {
+      this_->EvActivateTaskStatusChange_(
+          instance->task->task_id, ITask::Status::Failed,
+          fmt::format(
+              "Cannot spawn a new process inside the instance of task #{}",
+              instance->task->task_id));
+    }
+  }
 }
 
-void TaskMultiIndexSet::EraseByName(const std::string& name) {
-  auto& taskNameIndex = task_set_.get<Internal::TaskName>();
-  auto iter = taskNameIndex.find(name);
-  if (iter == taskNameIndex.end()) return;
+void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
+                                        void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
-  task_set_.erase(iter);
+  TaskStatusChange status_change;
+  this_->m_task_status_change_queue_.try_dequeue(status_change);
+
+  if (status_change.new_status == ITask::Status::Finished ||
+      status_change.new_status == ITask::Status::Failed) {
+    SLURMX_DEBUG(R"(Destroying Task structure for "{}".)",
+                 status_change.task_id);
+
+    auto iter = this_->m_task_map_.find(status_change.task_id);
+    SLURMX_ASSERT(iter != this_->m_task_map_.end(),
+                  "Task should be found here.");
+
+    // Destroy the related cgroup.
+    this_->m_cg_mgr_.Release(iter->second->cg_path);
+    SLURMX_DEBUG("Received SIGCHLD. Destroying Cgroup for task #{}",
+                 status_change.task_id);
+
+    // Free the TaskInstance structure
+    this_->m_task_map_.erase(status_change.task_id);
+  }
+
+  g_ctlxd_client->TaskStatusChangeAsync(std::move(status_change));
 }
 
-size_t TaskMultiIndexSet::CountByName(const std::string& name) {
-  auto& taskNameIndex = task_set_.get<Internal::TaskName>();
-  return taskNameIndex.count(name);
+void TaskManager::EvActivateTaskStatusChange_(
+    uint32_t task_id, ITask::Status new_status,
+    std::optional<std::string> reason) {
+  TaskStatusChange status_change{task_id, new_status};
+  if (reason.has_value()) status_change.reason = std::move(reason);
+
+  m_task_status_change_queue_.enqueue(std::move(status_change));
+  event_active(m_ev_task_status_change_, 0, 0);
 }
 
-TaskMultiIndexSet::iterator_type TaskMultiIndexSet::begin() {
-  auto& pidIndex = task_set_.get<Internal::Pid>();
-  return pidIndex.begin();
+SlurmxErr TaskManager::SpawnInteractiveTaskAsync(
+    uint32_t task_id, std::string executive_path,
+    std::list<std::string> arguments,
+    std::function<void(std::string&& buf)> output_cb,
+    std::function<void(bool, int)> finish_cb) {
+  EvQueueGrpcInteractiveTask elem{
+      .task_id = task_id,
+      .executive_path = std::move(executive_path),
+      .arguments = std::move(arguments),
+      .output_cb = std::move(output_cb),
+      .finish_cb = std::move(finish_cb),
+  };
+  std::future<SlurmxErr> err_future = elem.err_promise.get_future();
+
+  m_grpc_interactive_task_queue_.enqueue(std::move(elem));
+  event_active(m_ev_grpc_interactive_task_, 0, 0);
+
+  return err_future.get();
 }
 
-TaskMultiIndexSet::iterator_type TaskMultiIndexSet::end() {
-  auto& pidIndex = task_set_.get<Internal::Pid>();
-  return pidIndex.end();
+void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
+                                                void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  EvQueueGrpcInteractiveTask elem;
+  this_->m_grpc_interactive_task_queue_.try_dequeue(elem);
+
+  SLURMX_TRACE("Receive one GrpcSpawnInteractiveTask for task #{}",
+               elem.task_id);
+
+  auto task_iter = this_->m_task_map_.find(elem.task_id);
+  if (task_iter == this_->m_task_map_.end()) {
+    SLURMX_ERROR("Cannot find task #{}", elem.task_id);
+    elem.err_promise.set_value(SlurmxErr::kNonExistent);
+    return;
+  }
+
+  if (task_iter->second->task->type != ITask::Type::Interactive) {
+    SLURMX_ERROR("Try spawning a new process in non-interactive task #{}!",
+                 elem.task_id);
+    elem.err_promise.set_value(SlurmxErr::kInvalidParam);
+    return;
+  }
+
+  if (task_iter->second->task->status == ITask::Status::Completing) {
+    // If someone has called TerminateTask, don't spawn a new process in this
+    // task.
+    elem.err_promise.set_value(SlurmxErr::kStop);
+    return;
+  }
+
+  auto process = std::make_unique<ProcessInstance>();
+  process->executive_path = std::move(elem.executive_path);
+  process->arguments = std::move(elem.arguments);
+  process->output_cb = std::move(elem.output_cb);
+  process->finish_cb = std::move(elem.finish_cb);
+
+  SlurmxErr err;
+  err = this_->SpawnProcessInInstance_(task_iter->second.get(),
+                                       std::move(process));
+  elem.err_promise.set_value(err);
+
+  if (err != SlurmxErr::kOk)
+    this_->EvActivateTaskStatusChange_(elem.task_id, ITask::Status::Failed,
+                                       std::string(SlurmxErrStr(err)));
+}
+
+void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  EvQueueTaskTerminate elem;  // NOLINT(cppcoreguidelines-pro-type-member-init)
+  this_->m_task_terminate_queue_.try_dequeue(elem);
+
+  auto iter = this_->m_task_map_.find(elem.task_id);
+  if (iter == this_->m_task_map_.end()) {
+    SLURMX_ERROR("Trying terminating unknown task #{}", elem.task_id);
+    return;
+  }
+
+  const auto& task_instance = iter->second;
+  task_instance->task->status = ITask::Status::Completing;
+
+  int sig = SIGTERM;  // For BatchTask
+  if (task_instance->task->type == ITask::Type::Interactive) sig = SIGHUP;
+
+  if (task_instance->process) {
+    // For an Interactive task with a process running or a Batch task, we just
+    // send a kill signal here.
+    KillProcessInstance_(task_instance->process.get(), sig);
+  } else {
+    // For an Interactive task with no process running, it ends immediately.
+    this_->EvActivateTaskStatusChange_(elem.task_id, ITask::Status::Finished,
+                                       std::nullopt);
+  }
+}
+
+void TaskManager::TerminateTaskAsync(uint32_t task_id) {
+  EvQueueTaskTerminate elem{task_id};
+  m_task_terminate_queue_.enqueue(elem);
+  event_active(m_ev_task_terminate_, 0, 0);
 }
 
 }  // namespace Xd

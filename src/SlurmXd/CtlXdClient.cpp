@@ -8,6 +8,15 @@
 
 namespace Xd {
 
+CtlXdClient::CtlXdClient() {
+  m_async_send_thread_ = std::thread([this] { AsyncSendThread_(); });
+}
+
+CtlXdClient::~CtlXdClient() {
+  m_thread_stop_ = true;
+  m_async_send_thread_.join();
+}
+
 SlurmxErr CtlXdClient::RegisterOnCtlXd(const std::string& partition_name,
                                        const AllocatableResource& resource,
                                        uint32_t my_port) {
@@ -17,7 +26,7 @@ SlurmxErr CtlXdClient::RegisterOnCtlXd(const std::string& partition_name,
   req.set_port(my_port);
 
   SlurmxGrpc::AllocatableResource* resource_total =
-      req.mutable_resource_total();
+      req.mutable_resource_total()->mutable_allocatable_resource();
   resource_total->set_cpu_core_limit(resource.cpu_count);
   resource_total->set_memory_limit_bytes(resource.memory_bytes);
   resource_total->set_memory_sw_limit_bytes(resource.memory_sw_bytes);
@@ -64,42 +73,66 @@ SlurmxErr CtlXdClient::Connect(const std::string& server_address) {
   return SlurmxErr::kOk;
 }
 
-SlurmxErr CtlXdClient::DeallocateResource(
-    const boost::uuids::uuid& resource_uuid) {
-  using SlurmxGrpc::DeallocateResourceReply;
-  using SlurmxGrpc::DeallocateResourceRequest;
+void CtlXdClient::TaskStatusChangeAsync(TaskStatusChange&& task_status_change) {
+  m_task_status_change_mtx_.Lock();
+  m_task_status_change_queue_.emplace(std::move(task_status_change));
+  m_task_status_change_mtx_.Unlock();
+}
 
-  DeallocateResourceRequest req;
-  DeallocateResourceReply reply;
-  ClientContext context;
-  Status status;
+void CtlXdClient::AsyncSendThread_() {
+  absl::Condition cond(
+      +[](decltype(m_task_status_change_queue_)* queue) {
+        return !queue->empty();
+      },
+      &m_task_status_change_queue_);
 
-  req.mutable_node_id()->set_partition_id(this->GetNodeId().partition_id);
-  req.mutable_node_id()->set_node_index(this->GetNodeId().node_index);
+  TaskStatusChange status_change;
 
-  auto* uuid = req.mutable_resource_uuid();
-  uuid->assign(resource_uuid.begin(), resource_uuid.end());
-
-  status = m_stub_->DeallocateResource(&context, req, &reply);
-  if (status.ok()) {
-    if (reply.ok()) {
-      SLURMX_DEBUG("SlurmCtlXd has deallocated resource uuid: {}",
-                   boost::uuids::to_string(resource_uuid));
-
-      return SlurmxErr::kOk;
+  while (true) {
+    if (m_thread_stop_) break;
+    bool has_msg = m_task_status_change_mtx_.LockWhenWithTimeout(
+        cond, absl::Milliseconds(300));
+    if (!has_msg) {
+      m_task_status_change_mtx_.Unlock();
+      continue;
     }
 
-    SLURMX_ERROR("SlurmCtlXd failed to deallocate uuid: {}. Reason: {}",
-                 boost::uuids::to_string(resource_uuid), reply.reason());
-    return SlurmxErr::kGenericFailure;
-  }
+    status_change = std::move(m_task_status_change_queue_.front());
+    m_task_status_change_queue_.pop();
+    m_task_status_change_mtx_.Unlock();
 
-  SLURMX_ERROR(
-      "De-allocation of resource uuid {} failed due to a local error. Code: "
-      "{}, Msg: {}",
-      boost::uuids::to_string(resource_uuid), status.error_code(),
-      status.error_message());
-  return SlurmxErr::kGenericFailure;
+    grpc::ClientContext context;
+    SlurmxGrpc::TaskStatusChangeRequest request;
+    SlurmxGrpc::TaskStatusChangeReply reply;
+    grpc::Status status;
+
+    request.set_task_id(status_change.task_id);
+    switch (status_change.new_status) {
+      case ITask::Status::Pending:
+        request.set_new_status(SlurmxGrpc::TaskStatus::Pending);
+        break;
+      case ITask::Status::Running:
+        request.set_new_status(SlurmxGrpc::TaskStatus::Running);
+        break;
+      case ITask::Status::Finished:
+        request.set_new_status(SlurmxGrpc::TaskStatus::Finished);
+        break;
+      case ITask::Status::Failed:
+        request.set_new_status(SlurmxGrpc::TaskStatus::Failed);
+        break;
+    }
+    if (status_change.reason.has_value())
+      request.set_reason(status_change.reason.value());
+
+    status = m_stub_->TaskStatusChange(&context, request, &reply);
+    if (!status.ok()) {
+      SLURMX_ERROR(
+          "Failed to send TaskStatusChange: "
+          "{{TaskId: {}, NewStatus: {}}}, reason: {}",
+          status_change.task_id, status_change.new_status,
+          status.error_message());
+    }
+  }
 }
 
 }  // namespace Xd

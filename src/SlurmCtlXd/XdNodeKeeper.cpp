@@ -1,8 +1,14 @@
 #include "XdNodeKeeper.h"
 
+#include <google/protobuf/util/time_util.h>
+
 #include <optional>
+#include <utility>
 
 namespace CtlXd {
+
+using grpc::ClientContext;
+using grpc::Status;
 
 XdNodeStub::XdNodeStub()
     : m_failure_retry_times_(0), m_invalid_(true), m_data_(nullptr) {
@@ -13,40 +19,93 @@ XdNodeStub::~XdNodeStub() {
   if (m_clean_up_cb_) m_clean_up_cb_(m_data_);
 }
 
-SlurmxErr XdNodeStub::GrantResourceToken(
-    const boost::uuids::uuid &resource_uuid,
-    const AllocatableResource &resource) {
-  using grpc::ClientContext;
-  using grpc::Status;
-  using SlurmxGrpc::AllocatableResource;
-  using SlurmxGrpc::GrantResourceTokenReply;
-  using SlurmxGrpc::GrantResourceTokenRequest;
+SlurmxErr XdNodeStub::ExecuteTask(const ITask *task) {
+  using SlurmxGrpc::ExecuteTaskReply;
+  using SlurmxGrpc::ExecuteTaskRequest;
 
-  if (m_invalid_) return SlurmxErr::kInvalidStub;
-
-  GrantResourceTokenRequest req;
-
-  req.set_resource_uuid(resource_uuid.data, resource_uuid.size());
-
-  AllocatableResource *alloc_res = req.mutable_allocated_resource();
-  alloc_res->set_cpu_core_limit(resource.cpu_count);
-  alloc_res->set_memory_limit_bytes(resource.memory_bytes);
-  alloc_res->set_memory_sw_limit_bytes(resource.memory_sw_bytes);
-
+  ExecuteTaskRequest request;
+  ExecuteTaskReply reply;
   ClientContext context;
-  GrantResourceTokenReply resp;
   Status status;
-  status = m_stub_->GrantResourceToken(&context, req, &resp);
 
-  if (!status.ok()) {
-    SLURMX_DEBUG("GrantResourceToken RPC returned with status not ok: {}",
-                 status.error_message());
+  auto *mutable_task = request.mutable_task();
+
+  // Set time_limit
+  mutable_task->mutable_time_limit()->CopyFrom(
+      google::protobuf::util::TimeUtil::MillisecondsToDuration(
+          ToInt64Milliseconds(task->time_limit)));
+
+  mutable_task->set_partition_name(task->partition_name);
+
+  // Set resources
+  auto *mutable_allocatable_resource =
+      mutable_task->mutable_resources()->mutable_allocatable_resource();
+  mutable_allocatable_resource->set_cpu_core_limit(
+      task->resources.allocatable_resource.cpu_count);
+  mutable_allocatable_resource->set_memory_limit_bytes(
+      task->resources.allocatable_resource.memory_bytes);
+  mutable_allocatable_resource->set_memory_sw_limit_bytes(
+      task->resources.allocatable_resource.memory_sw_bytes);
+
+  // Set type
+  if (task->type == ITask::Type::Interactive)
+    mutable_task->set_type(SlurmxGrpc::Task::Interactive);
+  else if (task->type == ITask::Type::Batch)
+    mutable_task->set_type(SlurmxGrpc::Task::Batch);
+  else
+    SLURMX_ASSERT(false, "Unknown task type.");
+
+  mutable_task->set_task_id(task->task_id);
+  mutable_task->set_partition_id(task->partition_id);
+
+  // `status` is not set because it is only used in CtlXd.
+  mutable_task->set_node_index(task->node_index);
+
+  // `start_time` is not set because it is only used in CtlXd.
+
+  if (task->type == ITask::Type::Interactive) {
+    auto *ia_task = dynamic_cast<const InteractiveTask *>(task);
+    auto *mutable_meta = request.mutable_interactive_meta();
+    mutable_meta->set_resource_uuid(ia_task->resource_uuid.data,
+                                    ia_task->resource_uuid.size());
+  } else if (task->type == ITask::Type::Batch) {
+    auto *batch_task = dynamic_cast<const BatchTask *>(task);
+    auto *mutable_meta = request.mutable_batch_meta();
+    mutable_meta->set_executive_path(batch_task->executive_path);
+    mutable_meta->set_output_file_pattern(batch_task->output_file_pattern);
+
+    auto *mutable_args = mutable_meta->mutable_arguments();
+    for (const auto &arg : batch_task->arguments)
+      mutable_args->Add(std::string(arg));
   }
 
-  if (!resp.ok()) {
-    SLURMX_DEBUG("GrantResourceToken got ok 'false' from XdClient: {}",
-                 resp.reason());
-    return SlurmxErr::kGenericFailure;
+  status = m_stub_->ExecuteTask(&context, request, &reply);
+  if (!status.ok()) {
+    SLURMX_DEBUG("Execute RPC for Node {} returned with status not ok: {}",
+                 m_node_id_, status.error_message());
+    return SlurmxErr::kRpcFailure;
+  }
+
+  return SlurmxErr::kOk;
+}
+
+SlurmxErr XdNodeStub::TerminateTask(uint32_t task_id) {
+  using SlurmxGrpc::TerminateTaskReply;
+  using SlurmxGrpc::TerminateTaskRequest;
+
+  ClientContext context;
+  Status status;
+  TerminateTaskRequest request;
+  TerminateTaskReply reply;
+
+  request.set_task_id(task_id);
+
+  status = m_stub_->TerminateTask(&context, request, &reply);
+  if (!status.ok()) {
+    SLURMX_DEBUG(
+        "TerminateTask RPC for Node {} returned with status not ok: {}",
+        m_node_id_, status.error_message());
+    return SlurmxErr::kRpcFailure;
   }
 
   return SlurmxErr::kOk;
@@ -57,16 +116,16 @@ XdNodeKeeper::XdNodeKeeper() : m_cq_closed_(false), m_tag_pool_(32, 0) {
 }
 
 XdNodeKeeper::~XdNodeKeeper() {
-  m_cq_mtx_.lock();
+  m_cq_mtx_.Lock();
 
   m_cq_.Shutdown();
   m_cq_closed_ = true;
 
-  m_cq_mtx_.unlock();
+  m_cq_mtx_.Unlock();
 
   m_cq_thread_.join();
 
-  // Dependency order: rpc_cq -> channel_state_cq -> tag pool
+  // Dependency order: rpc_cq -> channel_state_cq -> tag pool.
   // Tag pool's destructor will free all trailing tags in cq.
 }
 
@@ -82,7 +141,7 @@ std::future<RegisterNodeResult> XdNodeKeeper::RegisterXdNode(
 
   cq_tag_data->xd->m_node_id_ = node_id;
   cq_tag_data->xd->m_data_ = data;
-  cq_tag_data->xd->m_clean_up_cb_ = clean_up_cb;
+  cq_tag_data->xd->m_clean_up_cb_ = std::move(clean_up_cb);
 
   /* Todo: Adjust the value here.
    * In default case, TRANSIENT_FAILURE -> TRANSIENT_FAILURE will use the
@@ -110,7 +169,7 @@ std::future<RegisterNodeResult> XdNodeKeeper::RegisterXdNode(
 
   CqTag *tag;
   {
-    slurmx::lock_guard lock(m_tag_pool_mtx_);
+    util::lock_guard lock(m_tag_pool_mtx_);
     tag = m_tag_pool_.construct(CqTag{CqTag::kInitializingXd, cq_tag_data});
   }
 
@@ -159,7 +218,7 @@ void XdNodeKeeper::StateMonitorThreadFunc_() {
             break;
         }
         if (next_tag) {
-          slurmx::lock_guard lock(m_cq_mtx_);
+          util::lock_guard lock(m_cq_mtx_);
           if (!m_cq_closed_) {
             SLURMX_TRACE("Registering next tag: {}", next_tag->type);
 
@@ -182,8 +241,8 @@ void XdNodeKeeper::StateMonitorThreadFunc_() {
             if (m_node_is_down_cb_)
               m_node_is_down_cb_(xd->m_node_id_, xd->m_data_);
 
-            slurmx::lock_guard node_lock(m_node_mtx_);
-            slurmx::write_lock_guard xd_lock(m_alive_xd_rw_mtx_);
+            util::lock_guard node_lock(m_node_mtx_);
+            util::write_lock_guard xd_lock(m_alive_xd_rw_mtx_);
 
             m_empty_slot_bitset_[xd->m_slot_offset_] = true;
             m_alive_xd_bitset_[xd->m_slot_offset_] = false;
@@ -196,7 +255,7 @@ void XdNodeKeeper::StateMonitorThreadFunc_() {
           }
         }
 
-        slurmx::lock_guard lock(m_tag_pool_mtx_);
+        util::lock_guard lock(m_tag_pool_mtx_);
         m_tag_pool_.free(tag);
       } else {
         /* ok = false implies that NotifyOnStateChange() timed out.
@@ -205,7 +264,7 @@ void XdNodeKeeper::StateMonitorThreadFunc_() {
          *
          * Register the same tag again. Do not free it because we have no newly
          * allocated tag. */
-        slurmx::lock_guard lock(m_cq_mtx_);
+        util::lock_guard lock(m_cq_mtx_);
         if (!m_cq_closed_) {
           SLURMX_TRACE("Registering next tag: {}", tag->type);
 
@@ -234,8 +293,8 @@ XdNodeKeeper::CqTag *XdNodeKeeper::InitXdStateMachine_(
       {
         SLURMX_TRACE("CONNECTING -> READY");
         // The two should be modified as a whole.
-        slurmx::lock_guard node_lock(m_node_mtx_);
-        slurmx::write_lock_guard xd_w_lock(m_alive_xd_rw_mtx_);
+        util::lock_guard node_lock(m_node_mtx_);
+        util::write_lock_guard xd_w_lock(m_alive_xd_rw_mtx_);
 
         size_t pos = m_empty_slot_bitset_.find_first();
         if (pos == m_empty_slot_bitset_.npos) {
@@ -335,10 +394,10 @@ XdNodeKeeper::CqTag *XdNodeKeeper::InitXdStateMachine_(
   SLURMX_TRACE("Exit InitXdStateMachine_");
   if (next_tag_type.has_value()) {
     if (next_tag_type.value() == CqTag::kInitializingXd) {
-      slurmx::lock_guard lock(m_tag_pool_mtx_);
+      util::lock_guard lock(m_tag_pool_mtx_);
       return m_tag_pool_.construct(CqTag{next_tag_type.value(), tag_data});
     } else if (next_tag_type.value() == CqTag::kEstablishedXd) {
-      slurmx::lock_guard lock(m_tag_pool_mtx_);
+      util::lock_guard lock(m_tag_pool_mtx_);
       return m_tag_pool_.construct(CqTag{next_tag_type.value(), raw_xd});
     }
   }
@@ -382,7 +441,7 @@ XdNodeKeeper::CqTag *XdNodeKeeper::EstablishedXdStateMachine_(
 
       xd->m_invalid_ = true;
       {
-        slurmx::write_lock_guard lock(m_alive_xd_rw_mtx_);
+        util::write_lock_guard lock(m_alive_xd_rw_mtx_);
         m_alive_xd_bitset_[xd->m_slot_offset_] = false;
       }
       if (m_node_is_temp_down_cb_)
@@ -405,7 +464,7 @@ XdNodeKeeper::CqTag *XdNodeKeeper::EstablishedXdStateMachine_(
         xd->m_failure_retry_times_ = 0;
         xd->m_invalid_ = false;
         {
-          slurmx::write_lock_guard lock(m_alive_xd_rw_mtx_);
+          util::write_lock_guard lock(m_alive_xd_rw_mtx_);
           m_alive_xd_bitset_[xd->m_slot_offset_] = true;
         }
 
@@ -425,7 +484,7 @@ XdNodeKeeper::CqTag *XdNodeKeeper::EstablishedXdStateMachine_(
 
         xd->m_invalid_ = true;
         {
-          slurmx::write_lock_guard lock(m_alive_xd_rw_mtx_);
+          util::write_lock_guard lock(m_alive_xd_rw_mtx_);
           m_alive_xd_bitset_[xd->m_slot_offset_] = false;
         }
         if (m_node_is_temp_down_cb_)
@@ -475,7 +534,7 @@ XdNodeKeeper::CqTag *XdNodeKeeper::EstablishedXdStateMachine_(
   }
 
   if (next_tag_type.has_value()) {
-    slurmx::lock_guard lock(m_tag_pool_mtx_);
+    util::lock_guard lock(m_tag_pool_mtx_);
     SLURMX_TRACE("Exit EstablishedXdStateMachine_");
     return m_tag_pool_.construct(CqTag{next_tag_type.value(), xd});
   }
@@ -485,12 +544,12 @@ XdNodeKeeper::CqTag *XdNodeKeeper::EstablishedXdStateMachine_(
 }
 
 uint32_t XdNodeKeeper::AvailableNodeCount() {
-  slurmx::read_lock_guard r_lock(m_alive_xd_rw_mtx_);
+  util::read_lock_guard r_lock(m_alive_xd_rw_mtx_);
   return m_alive_xd_bitset_.count();
 }
 
 XdNodeStub *XdNodeKeeper::GetXdStub(XdNodeId node_id) {
-  slurmx::lock_guard lock(m_node_mtx_);
+  util::lock_guard lock(m_node_mtx_);
   auto iter = m_node_id_slot_offset_map_.find(node_id);
   if (iter != m_node_id_slot_offset_map_.end())
     return m_node_vec_[iter->second].get();
@@ -499,7 +558,7 @@ XdNodeStub *XdNodeKeeper::GetXdStub(XdNodeId node_id) {
 }
 
 bool XdNodeKeeper::XdNodeValid(uint32_t index) {
-  slurmx::read_lock_guard r_lock(m_alive_xd_rw_mtx_);
+  util::read_lock_guard r_lock(m_alive_xd_rw_mtx_);
 
   return m_alive_xd_bitset_.test(index);
 }

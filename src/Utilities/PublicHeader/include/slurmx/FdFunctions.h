@@ -1,6 +1,6 @@
 #pragma once
 
-namespace slurmx {
+namespace util {
 
 // Close file descriptors within [fd_begin, fd_end)
 void CloseFdRange(int fd_begin, int fd_end);

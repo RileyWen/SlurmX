@@ -9,11 +9,11 @@ message Negotiation {
   uint32 version = 1;
 }
 
-message NegotiationRequest {
+message StreamRequestNegotiation {
   uint32 version = 1;
 }
 
-message NegotiationReply {
+message StreamReplyResult {
   bool ok = 1;
   string reason = 2; // Set when failed
 }
@@ -24,15 +24,10 @@ message InteractiveTaskAllocRequest {
   uint64 time_limit_sec = 3;
 }
 
-message BasicTaskMeta {
-  uint32 task_id = 1;
-  bytes resource_uuid = 2;
-}
-
 message InteractiveTaskAllocReply {
   bool ok = 1;
   oneof payload {
-    BasicTaskMeta task_meta = 2;
+    uint32 task_id = 2;
     string reason = 3;
   }
 }
@@ -42,11 +37,11 @@ message InteractiveTaskAllocationDetail {
   uint32 node_index = 1;
   string ipv4_addr = 2;
   uint32 port = 3;
+  bytes resource_uuid = 4;
 }
 
 message QueryInteractiveTaskAllocDetailRequest {
   uint32 task_id = 1;
-  bytes resource_uuid = 2;
 }
 
 message QueryInteractiveTaskAllocDetailReply {
@@ -54,18 +49,21 @@ message QueryInteractiveTaskAllocDetailReply {
   InteractiveTaskAllocationDetail detail = 2;
 }
 
-message TaskInfo {
-  string executive_path = 1;
-  repeated string arguments = 2;
-
-  bytes resource_uuid = 3;
+message StreamRequestCheckResource {
+  bytes resource_uuid = 1;
+  uint32 task_id = 2;
 }
 
-message IoRedirection {
+message StreamRequestExecutiveInfo {
+  string executive_path = 1;
+  repeated string arguments = 2;
+}
+
+message StreamReplyIo {
   string buf = 1;
 }
 
-message TaskExitStatus {
+message StreamReplyExitStatus {
   enum ExitReason {
     Normal = 0;
     Signal = 1;
@@ -75,30 +73,20 @@ message TaskExitStatus {
   uint32 value = 2;
 }
 
-message NewlyAllocatedTaskInfo {
-  uint32 job_id = 1;
-}
-
-message NewTaskResult {
-  bool ok = 1;
-  oneof payload{
-    string reason = 2; // Set if task allocation fails.
-    NewlyAllocatedTaskInfo newly_allocated_task_info = 3; // Set if task allocation succeeds.
-  }
-}
-
 message SrunXStreamRequest{
   enum Type {
     NegotiationRequest = 0;
-    NewTask = 1;
-    Signal = 2;
+    CheckResource = 1;
+    ExecutiveInfo = 2;
+    Signal = 3;
   }
   Type type = 1;
 
   oneof payload {
-    NegotiationRequest negotiation = 2;
-    TaskInfo task_info = 3;
-    uint32 signum = 4;
+    StreamRequestNegotiation negotiation = 2;
+    StreamRequestExecutiveInfo exec_info = 3;
+    int32 signum = 4;
+    StreamRequestCheckResource check_resource = 5;
   }
 }
 
@@ -106,16 +94,14 @@ message SrunXStreamReply {
   enum Type {
     IoRedirection = 0;
     ExitStatus = 1;
-    NewTaskResult = 2;
-    NegotiationReply = 3;
+    Result = 2;
   }
   Type type = 1;
 
   oneof payload {
-    IoRedirection io_redirection = 2 ;
-    TaskExitStatus task_exit_status = 3;
-    NewTaskResult new_task_result = 4;
-    NegotiationReply negotiation_reply = 5;
+    StreamReplyIo io = 2 ;
+    StreamReplyExitStatus exit_status = 3;
+    StreamReplyResult result = 4;
   }
 }
 
@@ -126,7 +112,7 @@ message SlurmXdRegisterRequest {
   string node_name = 3;
   string partition_name = 4;
 
-  AllocatableResource resource_total = 5;
+  Resources resource_total = 5;
   uint64 time_limit_for_task_in_sec = 6;
 
   /* Todo: Add fields describing what tasks the SlurmXd is still running and the current usage of this node in case that
@@ -145,39 +131,10 @@ message SlurmXdRegisterResult {
   }
 }
 
-message GrantResourceTokenRequest {
-  bytes resource_uuid = 1;
-  AllocatableResource allocated_resource = 2;
-}
-
-message GrantResourceTokenReply {
-  bool ok = 1;
-  string reason = 2;
-}
-
-message RevokeResourceTokenRequest {
-  bytes resource_uuid = 1;
-}
-
-message RevokeResourceTokenReply {
-  bool ok = 1;
-  string reason = 2;
-}
-
-message DeallocateResourceRequest {
-  XdNodeId node_id = 1;
-  bytes resource_uuid = 2;
-}
-
-message DeallocateResourceReply {
-  bool ok = 1;
-  string reason = 2 ;
-}
-
 message TaskStatusChangeRequest {
   uint32 task_id = 1;
   TaskStatus new_status = 2;
-  bool release_resource = 3;
+  string reason = 3;
 }
 
 message TaskStatusChangeReply {
@@ -200,7 +157,7 @@ message SubmitBatchTaskRequest {
 message SubmitBatchTaskReply {
   bool ok = 1;
   oneof payload{
-    BasicTaskMeta task_meta = 2;
+    uint32 task_id = 2;
     string reason = 3;
   }
 }
@@ -218,6 +175,15 @@ message ExecuteTaskReply {
   string reason = 2;
 }
 
+message TerminateTaskRequest {
+  uint32 task_id = 1;
+}
+
+message TerminateTaskReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
 // Todo: Divide service into two parts: one for SlurmXd and one for SrunX
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -226,9 +192,6 @@ service SlurmCtlXd {
   rpc RegisterSlurmXd(SlurmXdRegisterRequest) returns (SlurmXdRegisterResult);
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
 
-  /* When SlurmXd finishes executing a task, SlurmCtlXd will be informed to deallocate related resources. */
-  rpc DeallocateResource(DeallocateResourceRequest) returns(DeallocateResourceReply);
-
 
   /* RPCs called from SrunX */
   /* When SrunX request an interactive job, it will first request SrunX to allocate
@@ -236,17 +199,31 @@ service SlurmCtlXd {
   rpc AllocateInteractiveTask(InteractiveTaskAllocRequest) returns(InteractiveTaskAllocReply);
   rpc QueryInteractiveTaskAllocDetail(QueryInteractiveTaskAllocDetailRequest) returns(QueryInteractiveTaskAllocDetailReply);
 
+  rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
 
   /* RPCs called from sbatch */
   rpc SubmitBatchTask(SubmitBatchTaskRequest) returns(SubmitBatchTaskReply);
 }
 
 service SlurmXd {
-  /* Called from SlurmCtlXd */
-  rpc GrantResourceToken(GrantResourceTokenRequest) returns (GrantResourceTokenReply);
-  rpc RevokeResourceToken(RevokeResourceTokenRequest) returns (RevokeResourceTokenReply);
+  /* ----------------------------------- Called from SlurmCtlXd ---------------------------------------------------- */
+  // Todo: Granting and revoking Resource UUID can be merged into ExecuteTask and TerminateTask. Remove this two RPC.
+
+  /* If the task is a batch task, it will run immediately.
+     If the task is an interactive task, slurmxd will just allocate the resource and waiting for
+     further SrunXStream to execute a real task.
+   */
   rpc ExecuteTask(ExecuteTaskRequest) returns(ExecuteTaskReply);
 
-  /* Called from SrunX */
+  /*
+  If the task is an interactive task, the resource uuid is also revoked.
+   If there's no process in this interactive task, just deallocate all the resources.
+   If there are processes in this interactive task, kill all the processes and deallocate resources.
+  If the task is a batch task, just kill it.
+  */
+  rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
+
+
+  /* ----------------------------------- Called from SrunX --------------------------------------------------------- */
   rpc SrunXStream(stream SrunXStreamRequest) returns (stream SrunXStreamReply);
 }

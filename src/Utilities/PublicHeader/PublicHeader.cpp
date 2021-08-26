@@ -40,6 +40,14 @@ AllocatableResource::AllocatableResource(
   memory_sw_bytes = value.memory_sw_limit_bytes();
 }
 
+AllocatableResource& AllocatableResource::operator=(
+    const SlurmxGrpc::AllocatableResource& value) {
+  cpu_count = value.cpu_core_limit();
+  memory_bytes = value.memory_limit_bytes();
+  memory_sw_bytes = value.memory_sw_limit_bytes();
+  return *this;
+}
+
 Resources& Resources::operator+=(const Resources& rhs) {
   allocatable_resource += rhs.allocatable_resource;
   return *this;

@@ -1,4 +1,11 @@
 #include <fcntl.h>
+#include <google/protobuf/io/zero_copy_stream_impl.h>
+#include <google/protobuf/util/delimited_message_util.h>
+#include <grpc++/grpc++.h>
+#include <gtest/gtest.h>
+#include <spdlog/fmt/fmt.h>
+#include <spdlog/spdlog.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 
 #include <atomic>
@@ -7,11 +14,8 @@
 
 #include "SharedTestImpl/greeter_service_impl.h"
 #include "concurrentqueue/concurrentqueue.h"
-#include "grpc++/grpc++.h"
-#include "gtest/gtest.h"
 #include "protos/math.grpc.pb.h"
 #include "protos/math.pb.h"
-#include "spdlog/spdlog.h"
 
 using grpc::Server;
 using grpc::ServerBuilder;
@@ -603,4 +607,64 @@ TEST(GrpcExample, BidirectionalStream_ClientAbort) {
     std::this_thread::sleep_for(std::chrono::seconds(1));
     server.WaitStop();
   }
+}
+
+TEST(Protobuf, InterprocessPipe) {
+  using google::protobuf::io::FileInputStream;
+  using google::protobuf::io::FileOutputStream;
+  using google::protobuf::util::ParseDelimitedFromZeroCopyStream;
+  using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
+
+  int socket_pair[2];
+
+  if (socketpair(AF_UNIX, SOCK_DGRAM, 0, socket_pair) != 0) {
+    FAIL() << fmt::format("Failed to create socket pair: {}", strerror(errno));
+  }
+  signal(SIGCHLD, SIG_IGN);
+
+  std::thread t1([=] {
+    int fd = socket_pair[1];
+    bool ok;
+
+    FileInputStream istream(fd);
+    FileOutputStream ostream(fd);
+
+    HelloRequest request;
+    ok = ParseDelimitedFromZeroCopyStream(&request, &istream, nullptr);
+    ASSERT_TRUE(ok) << "request.ParseFromZeroCopyStream(&istream)";
+    GTEST_LOG_(INFO) << fmt::format("Child receive HelloRequest: {}",
+                                    request.name());
+
+    HelloReply reply;
+    reply.set_message("OK");
+    ok = SerializeDelimitedToZeroCopyStream(reply, &ostream);
+    ASSERT_TRUE(ok) << "reply.SerializeToZeroCopyStream(&ostream)";
+    ostream.Flush();
+    ASSERT_TRUE(ok) << "ostream.Flush()";
+  });
+
+  {
+    int fd = socket_pair[0];
+    bool ok;
+
+    FileInputStream istream(fd);
+    FileOutputStream ostream(fd);
+
+    HelloRequest request;
+    request.set_name("Parent");
+    ok = SerializeDelimitedToZeroCopyStream(request, &ostream);
+    GTEST_LOG_(INFO) << fmt::format("ostream.ByteCount(): {}",
+                                    ostream.ByteCount());
+    ASSERT_TRUE(ok) << "request.SerializeToZeroCopyStream(&ostream)";
+    ok = ostream.Flush();
+    ASSERT_TRUE(ok) << "ostream.Flush()";
+
+    HelloReply reply;
+    ok = ParseDelimitedFromZeroCopyStream(&reply, &istream, nullptr);
+    ASSERT_TRUE(ok) << "reply.ParseFromZeroCopyStream(&istream)";
+    GTEST_LOG_(INFO) << fmt::format("Parent receive HelloReply: {}",
+                                    reply.message());
+  }
+
+  t1.join();
 }

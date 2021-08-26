@@ -3,7 +3,7 @@
 #include <absl/container/btree_map.h>
 #include <absl/container/flat_hash_map.h>
 #include <absl/container/flat_hash_set.h>
-#include <absl/time/time.h>
+#include <absl/time/time.h>  // NOLINT(modernize-deprecated-headers)
 
 #include <boost/container_hash/hash.hpp>
 #include <boost/uuid/uuid.hpp>
@@ -20,16 +20,14 @@
 namespace CtlXd {
 
 constexpr uint64_t kTaskScheduleIntervalMs = 1000;
-
-struct BasicTaskMeta {
-  uint32_t task_id;
-  boost::uuids::uuid resource_uuid;
-};
+constexpr uint64_t kEndedTaskCleanIntervalSeconds = 1;
+constexpr uint64_t kEndedTaskKeepingTimeSeconds = 3600;
 
 struct InteractiveTaskAllocationDetail {
   uint32_t node_index;
   std::string ipv4_addr;
   uint32_t port;
+  boost::uuids::uuid resource_uuid;
 };
 
 /**
@@ -64,12 +62,9 @@ struct XdNodeMeta {
   Resources res_in_use;
 
   // Store the information of the slices of allocated resource.
-  // One uuid represents one shard of allocated resource.
-  std::unordered_map<boost::uuids::uuid, Resources,
-                     boost::hash<boost::uuids::uuid>>
-      resource_shards;
-
-  absl::flat_hash_set<uint32_t> running_task_ids;
+  // One task id owns one shard of allocated resource.
+  absl::flat_hash_map<uint32_t /*task id*/, Resources>
+      running_task_resource_map;
 };
 
 /**

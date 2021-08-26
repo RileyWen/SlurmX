@@ -2,13 +2,16 @@
 
 #include <algorithm>
 
+#include "CtlXdGrpcServer.h"
+#include "XdNodeKeeper.h"
 #include "slurmx/String.h"
 
 namespace CtlXd {
 
 TaskScheduler::TaskScheduler() {
-  m_schedule_thread_ =
-      std::thread(std::bind(&TaskScheduler::ScheduleThread_, this));
+  m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
+
+  m_clean_ended_thread_ = std::thread([this] { CleanEndedTaskThread_(); });
 }
 
 TaskScheduler::~TaskScheduler() {
@@ -17,33 +20,70 @@ TaskScheduler::~TaskScheduler() {
 }
 
 void TaskScheduler::ScheduleThread_() {
-  std::list<INodeSelectionAlgo::NodeSelectionResult> selection_result_list;
-  while (m_thread_stop_) {
+  while (!m_thread_stop_) {
     auto all_part_metas = g_meta_container->GetAllPartitionsMetaMapPtr();
+    std::list<INodeSelectionAlgo::NodeSelectionResult> selection_result_list;
 
-    std::list<std::unique_ptr<ITask>> node_selection_result;
-
-    m_pending_task_map_mtx_.lock();
+    m_pending_task_map_mtx_.Lock();
     m_node_selection_algo_->NodeSelect(*all_part_metas, m_running_task_map_,
                                        &m_pending_task_map_,
                                        &selection_result_list);
-    m_pending_task_map_mtx_.unlock();
+    m_pending_task_map_mtx_.Unlock();
 
     for (auto it = selection_result_list.begin();
          it != selection_result_list.end();) {
       auto& task = it->first;
       uint32_t partition_id = task->partition_id;
       uint32_t node_index = it->second;
-      boost::uuids::uuid resource_uuid = m_uuid_gen_();
 
-      g_meta_container->MallocResourceFromNode({partition_id, node_index},
-                                               resource_uuid, task->resources);
-      g_meta_container->GetNodeMetaPtr({partition_id, node_index})
-          ->running_task_ids.insert(task->task_id);
+      XdNodeId node_id{partition_id, node_index};
+      g_meta_container->MallocResourceFromNode(node_id, task->task_id,
+                                               task->resources);
+
+      if (task->type == ITask::Type::Interactive) {
+        XdNodeMeta node_meta =
+            all_part_metas->at(partition_id).xd_node_meta_map.at(node_index);
+        InteractiveTaskAllocationDetail detail{
+            .node_index = node_index,
+            .ipv4_addr = node_meta.static_meta.ipv4_addr,
+            .port = node_meta.static_meta.port,
+            .resource_uuid = m_uuid_gen_(),
+        };
+
+        dynamic_cast<InteractiveTask*>(task.get())->resource_uuid =
+            detail.resource_uuid;
+
+        g_ctlxd_server->AddAllocDetailToIaTask(task->task_id,
+                                               std::move(detail));
+      }
+
+      XdNodeStub* node_stub = g_node_keeper->GetXdStub(node_id);
+      node_stub->ExecuteTask(task.get());
     }
 
     std::this_thread::sleep_for(
         std::chrono::milliseconds(kTaskScheduleIntervalMs));
+  }
+}
+
+void TaskScheduler::CleanEndedTaskThread_() {
+  while (!m_thread_stop_) {
+    {
+      LockGuard guard(m_ended_task_map_mtx_);
+      for (auto iter = m_ended_task_map_.begin();
+           iter != m_ended_task_map_.end();) {
+        if (iter->second->end_time +
+                absl::Seconds(kEndedTaskKeepingTimeSeconds) >
+            absl::Now()) {
+          auto copy_iter = iter++;
+          m_ended_task_map_.erase(copy_iter);
+        } else
+          iter++;
+      }
+    }
+
+    std::this_thread::sleep_for(
+        std::chrono::seconds(kEndedTaskCleanIntervalSeconds));
   }
 }
 
@@ -53,7 +93,7 @@ void TaskScheduler::SetNodeSelectionAlgo(
 }
 
 SlurmxErr TaskScheduler::SubmitTask(std::unique_ptr<ITask> task,
-                                    BasicTaskMeta* task_meta) {
+                                    uint32_t* task_id) {
   // Check whether the selected partition exists.
   if (!g_meta_container->PartitionExists(task->partition_name))
     return SlurmxErr::kNonExistent;
@@ -64,15 +104,14 @@ SlurmxErr TaskScheduler::SubmitTask(std::unique_ptr<ITask> task,
   // Check whether the selected partition is able to run this task.
   auto metas_ptr = g_meta_container->GetPartitionMetasPtr(partition_id);
   if (metas_ptr->partition_global_meta.m_resource_avail_ < task->resources) {
-    SLURMX_TRACE("Resource not enough. Avail: cpu {}, mem: {}, mem+sw: {}",
-                 metas_ptr->partition_global_meta.m_resource_avail_
-                     .allocatable_resource.cpu_count,
-                 slurmx::ReadableMemory(
-                     metas_ptr->partition_global_meta.m_resource_avail_
-                         .allocatable_resource.memory_bytes),
-                 slurmx::ReadableMemory(
-                     metas_ptr->partition_global_meta.m_resource_avail_
-                         .allocatable_resource.memory_sw_bytes));
+    SLURMX_TRACE(
+        "Resource not enough. Avail: cpu {}, mem: {}, mem+sw: {}",
+        metas_ptr->partition_global_meta.m_resource_avail_.allocatable_resource
+            .cpu_count,
+        util::ReadableMemory(metas_ptr->partition_global_meta.m_resource_avail_
+                                 .allocatable_resource.memory_bytes),
+        util::ReadableMemory(metas_ptr->partition_global_meta.m_resource_avail_
+                                 .allocatable_resource.memory_sw_bytes));
     return SlurmxErr::kNoResource;
   }
 
@@ -81,11 +120,44 @@ SlurmxErr TaskScheduler::SubmitTask(std::unique_ptr<ITask> task,
   task->partition_id = partition_id;
   task->status = ITask::Status::Pending;
 
-  m_pending_task_map_mtx_.lock();
+  *task_id = task->task_id;
+
+  m_pending_task_map_mtx_.Lock();
   m_pending_task_map_.emplace(task->task_id, std::move(task));
-  m_pending_task_map_mtx_.unlock();
+  m_pending_task_map_mtx_.Unlock();
 
   return SlurmxErr::kOk;
+}
+
+void TaskScheduler::TaskStatusChange(uint32_t task_id, ITask::Status new_status,
+                                     std::optional<std::string> reason) {
+  LockGuard running_guard(m_running_task_map_mtx_);
+  LockGuard ended_guard(m_ended_task_map_mtx_);
+
+  auto iter = m_running_task_map_.find(task_id);
+  if (iter == m_running_task_map_.end()) {
+    SLURMX_ERROR("Unknown task id {} when change task status.", task_id);
+    return;
+  }
+
+  std::unique_ptr<ITask> task;
+  task = std::move(iter->second);
+  m_running_task_map_.erase(iter);
+
+  SLURMX_DEBUG("TaskStatusChange: Task #{} {}->{}", task->status, new_status);
+  task->status = new_status;
+
+  if (task->type == ITask::Type::Interactive) {
+    g_ctlxd_server->RemoveAllocDetailOfIaTask(task_id);
+
+    auto stub =
+        g_node_keeper->GetXdStub({task->partition_id, task->node_index});
+    stub->TerminateTask(task->task_id);
+  }
+
+  g_meta_container->FreeResourceFromNode({task->partition_id, task->node_index},
+                                         task_id);
+  m_ended_task_map_.emplace(task_id, std::move(task));
 }
 
 void MinLoadFirst::NodeSelect(
@@ -121,15 +193,15 @@ void MinLoadFirst::NodeSelect(
           part_id__node_info__map[partition_id];
 
       node_info_in_a_partition.task_num__node_id__map.emplace(
-          node_meta.running_task_ids.size(), node_index);
+          node_meta.running_task_resource_map.size(), node_index);
 
       // Sort all running task in this node by ending time.
       std::vector<std::pair<absl::Time, uint32_t>> end_time__task_id_vec;
       for (const auto& [task_id, running_task] : running_tasks) {
         if (running_task->partition_id == partition_id &&
             running_task->node_index == node_index)
-          end_time__task_id_vec.push_back(
-              {running_task->start_time + running_task->time_limit, task_id});
+          end_time__task_id_vec.emplace_back(
+              running_task->start_time + running_task->time_limit, task_id);
       }
       std::sort(end_time__task_id_vec.begin(), end_time__task_id_vec.end(),
                 [](const auto& lhs, const auto& rhs) {

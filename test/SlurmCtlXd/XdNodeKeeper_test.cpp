@@ -254,7 +254,7 @@ TEST_F(XdNodeKeeperTest, OneStub_OneTempAbortedServer) {
   using Xd::XdServer;
   using namespace std::chrono_literals;
 
-  slurmx::SetCloseOnExecFromFd(STDERR_FILENO + 1);
+  util::SetCloseOnExecFromFd(STDERR_FILENO + 1);
 
   std::atomic_bool has_exited = false;
 

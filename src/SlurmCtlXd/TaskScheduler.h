@@ -61,8 +61,8 @@ class MinLoadFirst : public INodeSelectionAlgo {
 };
 
 class TaskScheduler {
-  using Mutex = slurmx::mutex;
-  using LockGuard = slurmx::lock_guard;
+  using Mutex = absl::Mutex;
+  using LockGuard = util::AbslMutexLockGuard;
 
  public:
   TaskScheduler();
@@ -71,10 +71,15 @@ class TaskScheduler {
 
   void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
 
-  SlurmxErr SubmitTask(std::unique_ptr<ITask> task, BasicTaskMeta* task_meta);
+  SlurmxErr SubmitTask(std::unique_ptr<ITask> task, uint32_t* task_id);
+
+  void TaskStatusChange(uint32_t task_id, ITask::Status new_status,
+                        std::optional<std::string> reason);
 
  private:
   void ScheduleThread_();
+
+  void CleanEndedTaskThread_();
 
   std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
 
@@ -84,13 +89,20 @@ class TaskScheduler {
   // Ordered by task id. Those who comes earlier are in the head,
   // Because they have smaller task id.
   absl::btree_map<uint32_t /*Task Id*/, std::unique_ptr<ITask>>
-      m_pending_task_map_;
+      m_pending_task_map_ GUARDED_BY(m_pending_task_map_mtx_);
   Mutex m_pending_task_map_mtx_;
 
-  absl::flat_hash_map<uint32_t, std::unique_ptr<ITask>> m_running_task_map_;
+  absl::flat_hash_map<uint32_t, std::unique_ptr<ITask>> m_running_task_map_
+      GUARDED_BY(m_running_task_map_mtx_);
+  Mutex m_running_task_map_mtx_;
+
+  absl::flat_hash_map<uint32_t, std::unique_ptr<ITask>> m_ended_task_map_
+      GUARDED_BY(m_ended_task_map_mtx_);
+  Mutex m_ended_task_map_mtx_;
 
   std::thread m_schedule_thread_;
-  std::atomic_bool m_thread_stop_;
+  std::thread m_clean_ended_thread_;
+  std::atomic_bool m_thread_stop_{};
 };
 
 }  // namespace CtlXd

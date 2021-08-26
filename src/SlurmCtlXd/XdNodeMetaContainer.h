@@ -15,16 +15,16 @@ namespace CtlXd {
  */
 class XdNodeMetaContainerInterface {
  public:
-  using Mutex = slurmx::recursive_mutex;
-  using LockGuard = slurmx::recursive_lock_guard;
+  using Mutex = util::recursive_mutex;
+  using LockGuard = util::recursive_lock_guard;
 
   using AllPartitionsMetaMap =
       absl::flat_hash_map<uint32_t /*partition id*/, PartitionMetas>;
 
   using AllPartitionsMetaMapPtr =
-      slurmx::ScopeExclusivePtr<AllPartitionsMetaMap, Mutex>;
-  using PartitionMetasPtr = slurmx::ScopeExclusivePtr<PartitionMetas, Mutex>;
-  using NodeMetaPtr = slurmx::ScopeExclusivePtr<XdNodeMeta, Mutex>;
+      util::ScopeExclusivePtr<AllPartitionsMetaMap, Mutex>;
+  using PartitionMetasPtr = util::ScopeExclusivePtr<PartitionMetas, Mutex>;
+  using NodeMetaPtr = util::ScopeExclusivePtr<XdNodeMeta, Mutex>;
 
   virtual ~XdNodeMetaContainerInterface() = default;
 
@@ -57,11 +57,9 @@ class XdNodeMetaContainerInterface {
    */
   virtual uint32_t AllocNodeIndexInPartition(uint32_t partition_id) = 0;
 
-  virtual void MallocResourceFromNode(XdNodeId node_id,
-                                      const boost::uuids::uuid& uuid,
+  virtual void MallocResourceFromNode(XdNodeId node_id, uint32_t task_id,
                                       const Resources& resources) = 0;
-  virtual void FreeResourceFromNode(XdNodeId node_id,
-                                    const boost::uuids::uuid& uuid) = 0;
+  virtual void FreeResourceFromNode(XdNodeId node_id, uint32_t task_id) = 0;
 
   /**
    * Provide a thread-safe way to access NodeMeta.
@@ -82,10 +80,11 @@ class XdNodeMetaContainerInterface {
   virtual uint32_t GetNextPartitionSeq_() = 0;
 };
 
-class XdNodeMetaContainerSimpleImpl : public XdNodeMetaContainerInterface {
+class XdNodeMetaContainerSimpleImpl final
+    : public XdNodeMetaContainerInterface {
  public:
   XdNodeMetaContainerSimpleImpl() = default;
-  ~XdNodeMetaContainerSimpleImpl() = default;
+  ~XdNodeMetaContainerSimpleImpl() override = default;
 
   void AddNode(const XdNodeStaticMeta& static_meta) override;
 
@@ -105,11 +104,10 @@ class XdNodeMetaContainerSimpleImpl : public XdNodeMetaContainerInterface {
 
   uint32_t AllocNodeIndexInPartition(uint32_t partition_id) override;
 
-  void MallocResourceFromNode(XdNodeId node_id, const boost::uuids::uuid& uuid,
+  void MallocResourceFromNode(XdNodeId node_id, uint32_t task_id,
                               const Resources& resources) override;
 
-  void FreeResourceFromNode(XdNodeId node_id,
-                            const boost::uuids::uuid& uuid) override;
+  void FreeResourceFromNode(XdNodeId node_id, uint32_t task_id) override;
 
  private:
   /**

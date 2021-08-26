@@ -35,14 +35,15 @@ class XdNodeStub {
 
   ~XdNodeStub();
 
-  SlurmxErr GrantResourceToken(const boost::uuids::uuid &resource_uuid,
-                               const AllocatableResource &resource);
+  SlurmxErr ExecuteTask(const ITask *task);
+
+  SlurmxErr TerminateTask(uint32_t task_id);
 
   void *GetNodeData() { return m_data_; };
 
   void SetNodeData(void *data) { m_data_ = data; }
 
-  bool Invalid() { return m_invalid_; }
+  bool Invalid() const { return m_invalid_; }
 
  private:
   uint32_t m_slot_offset_;
@@ -101,7 +102,7 @@ class XdNodeKeeper {
    * XdNodeStub otherwise.
    * @attention It's ok to return the pointer of XdNodeStub directly. The
    * XdNodeStub will not be freed before the NodeIsDown() callback returns. The
-   * callback register should do necessary synchronization to clean up all the
+   * callback registerer should do necessary synchronization to clean up all the
    * usage of the XdNodeStub pointer before NodeIsDown() returns.
    */
   XdNodeStub *GetXdStub(XdNodeId node_id);
@@ -141,7 +142,7 @@ class XdNodeKeeper {
   // called.
   std::function<void(XdNodeId, void *)> m_node_is_down_cb_;
 
-  slurmx::mutex m_tag_pool_mtx_;
+  util::mutex m_tag_pool_mtx_;
 
   // Must be declared previous to any grpc::CompletionQueue, so it can be
   // constructed before any CompletionQueue and be destructed after any
@@ -149,8 +150,11 @@ class XdNodeKeeper {
   boost::object_pool<CqTag> m_tag_pool_;
 
   // Protect m_node_vec_, m_node_id_slot_offset_map_ and m_empty_slot_bitset_.
-  slurmx::mutex m_node_mtx_;
+  util::mutex m_node_mtx_;
 
+  // Todo: Change to std::shared_ptr. GRPC has sophisticated error handling
+  //  mechanism. So it's ok to access the stub when the Xd node is down. What
+  //  should be avoided is null pointer accessing.
   // Contains connection-established nodes only.
   std::vector<std::unique_ptr<XdNodeStub>> m_node_vec_;
 
@@ -162,14 +166,14 @@ class XdNodeKeeper {
       m_node_id_slot_offset_map_;
 
   // Protect m_alive_xd_bitset_
-  slurmx::rw_mutex m_alive_xd_rw_mtx_;
+  util::rw_mutex m_alive_xd_rw_mtx_;
 
   // If bit n is set, the xd client n is available to send grpc. (underlying
   // grpc channel state is GRPC_CHANNEL_READY).
   boost::dynamic_bitset<> m_alive_xd_bitset_;
 
   grpc::CompletionQueue m_cq_;
-  slurmx::mutex m_cq_mtx_;
+  util::mutex m_cq_mtx_;
   bool m_cq_closed_;
 
   std::thread m_cq_thread_;

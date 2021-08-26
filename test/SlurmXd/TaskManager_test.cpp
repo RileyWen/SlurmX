@@ -71,7 +71,7 @@ TEST_F(TaskManagerTest, NormalExit) {
       {.cpu_core_limit = 2}, output_callback, finish_callback,
   };
 
-  SlurmxErr err = g_task_mgr->AddTaskAsync(std::move(info));
+  SlurmxErr err = g_task_mgr->DeprecatedAddTaskAsync__(std::move(info));
   SLURMX_TRACE("err value: {}, reason: {}", uint64_t(err), SlurmxErrStr(err));
 
   using namespace std::chrono_literals;
@@ -124,21 +124,21 @@ TEST_F(TaskManagerTest, SigintTermination) {
       {.cpu_core_limit = 2}, output_callback, finish_callback,
   };
 
-  err = g_task_mgr->AddTaskAsync(std::move(info_1));
+  err = g_task_mgr->DeprecatedAddTaskAsync__(std::move(info_1));
   EXPECT_EQ(err, SlurmxErr::kOk);
 
   Xd::TaskInitInfo info_2{
       "RileyTest",           test_prog_path,  {},
       {.cpu_core_limit = 2}, output_callback, finish_callback,
   };
-  err = g_task_mgr->AddTaskAsync(std::move(info_2));
+  err = g_task_mgr->DeprecatedAddTaskAsync__(std::move(info_2));
   EXPECT_EQ(err, SlurmxErr::kExistingTask);
 
   Xd::TaskInitInfo info_3{
       "RileyTest_2",         test_prog_path,  {},
       {.cpu_core_limit = 2}, output_callback, finish_callback,
   };
-  err = g_task_mgr->AddTaskAsync(std::move(info_3));
+  err = g_task_mgr->DeprecatedAddTaskAsync__(std::move(info_3));
   EXPECT_EQ(err, SlurmxErr::kOk);
 
   using namespace std::chrono_literals;
@@ -180,7 +180,7 @@ TEST_F(TaskManagerTest, LsOutput) {
       {.cpu_core_limit = 2}, output_callback, finish_callback,
   };
 
-  err = g_task_mgr->AddTaskAsync(std::move(info_1));
+  err = g_task_mgr->DeprecatedAddTaskAsync__(std::move(info_1));
   EXPECT_EQ(err, SlurmxErr::kOk);
 
   using namespace std::chrono_literals;
@@ -206,19 +206,19 @@ TEST_F(TaskManagerTest, TaskMultiIndexSet) {
 
   TaskMultiIndexSet indexSet;
 
-  auto task1 = std::make_unique<Task>();
+  auto task1 = std::make_unique<TaskInstance>();
   task1->init_info.name = "Task1";
   task1->root_pid = 1;
 
-  auto task2 = std::make_unique<Task>();
+  auto task2 = std::make_unique<TaskInstance>();
   task2->init_info.name = "Task2";
   task2->root_pid = 2;
 
   indexSet.Insert(std::move(task1));
   indexSet.Insert(std::move(task2));
 
-  const Task* p;
-  p = indexSet.FindByName("Task1");
+  const TaskInstance* p;
+  p = indexSet.FindByTaskId("Task1");
   ASSERT_NE(p, nullptr);
   EXPECT_EQ(p->root_pid, 1);
 

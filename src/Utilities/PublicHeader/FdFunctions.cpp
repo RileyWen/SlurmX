@@ -5,7 +5,7 @@
 
 #include <algorithm>
 
-namespace slurmx {
+namespace util {
 
 int GetFdOpenMax() { return static_cast<int>(sysconf(_SC_OPEN_MAX)); }
 

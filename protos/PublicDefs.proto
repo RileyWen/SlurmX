@@ -29,7 +29,7 @@ enum TaskStatus {
   Pending = 0;
   Running = 1;
   Finished = 2;
-  Abort = 3;
+  Failed = 3;
 }
 
 message Task {
@@ -51,19 +51,21 @@ message Task {
   uint32 partition_id = 6;
 
   /* ----- Fields that may change at run time. ----------- */
-  TaskStatus status = 7;
+  TaskStatus status = 7; // Currently only used in SlurmCtlXd
   uint32 node_index = 8;
 
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
-  google.protobuf.Timestamp start_time = 9;
+  google.protobuf.Timestamp start_time = 9; // Currently Only used in SlurmCtlXd
 }
 
 message BatchTaskAdditionalMeta {
-  string output_file_pattern = 1;
+  string executive_path = 1;
+  repeated string arguments = 2;
+  string output_file_pattern = 3;
 }
 
 message InteractiveTaskAdditionalMeta{
-
+  bytes resource_uuid = 1;
 }

@@ -8,6 +8,8 @@
  */
 #pragma once
 
+#include <absl/container/flat_hash_map.h>
+#include <absl/synchronization/mutex.h>
 #include <pthread.h>
 #include <spdlog/spdlog.h>
 
@@ -20,10 +22,9 @@
 
 #include "PublicHeader.h"
 #include "libcgroup.h"
+#include "slurmx/Lock.h"
 
-namespace Cgroup {
-
-static pthread_mutex_t g_cgroups_mutex = PTHREAD_MUTEX_INITIALIZER;
+namespace util {
 
 class CgroupManager;  // Forward Declaration
 
@@ -35,6 +36,7 @@ enum class Controller : uint64_t {
   FREEZE_CONTROLLER,
   BLOCK_CONTROLLER,
   CPU_CONTROLLER,
+  DEVICES_CONTROLLER,
 
   ControllerCount,
 };
@@ -50,6 +52,9 @@ enum class ControllerFile : uint64_t {
 
   BLOCKIO_WEIGHT,
 
+  DEVICES_DENY,
+  DEVICES_ALLOW,
+
   ControllerFileCount
 };
 
@@ -58,7 +63,7 @@ namespace Internal {
 constexpr std::array<std::string_view,
                      static_cast<size_t>(Controller::ControllerCount)>
     ControllerStringView{
-        "memory", "cpuacct", "freezer", "blkio", "cpu",
+        "memory", "cpuacct", "freezer", "blkio", "cpu", "devices",
     };
 
 constexpr std::array<std::string_view,
@@ -73,6 +78,9 @@ constexpr std::array<std::string_view,
         "memory.soft_limit_in_bytes",
 
         "blkio.weight",
+
+        "devices.deny",
+        "devices.allow",
     };
 }  // namespace Internal
 
@@ -178,108 +186,70 @@ const ControllerFlags NO_CONTROLLER_FLAG{};
 //  handles this for us and no additional care needs to be take.
 const ControllerFlags ALL_CONTROLLER_FLAG = (~NO_CONTROLLER_FLAG);
 
-// '0' means that the entry is not set.
-struct CgroupLimit {
-  uint64_t cpu_core_limit = 0;
-  uint64_t cpu_shares = 0;
-  uint64_t memory_limit_bytes = 0;
-  uint64_t memory_sw_limit_bytes = 0;
-  uint64_t memory_soft_limit_bytes = 0;
-  uint64_t blockio_weight = 0;
-};
-
-namespace Internal {
-
-class Cgroup;  // Forward decl
-
-class CgroupManipulator {
- public:
-  explicit CgroupManipulator(const Cgroup &);
-
-  bool set_memory_limit_bytes(uint64_t memory_bytes);
-  bool set_memory_sw_limit_bytes(uint64_t mem_bytes);
-  bool set_memory_soft_limit_bytes(uint64_t memory_bytes);
-  bool set_cpu_core_limit(uint64_t core_num);
-  bool set_cpu_shares(uint64_t share);
-  bool set_blockio_weight(uint64_t weight);
-
- private:
-  bool set_controller_value_(CgroupConstant::Controller controller,
-                             CgroupConstant::ControllerFile controller_file,
-                             uint64_t value);
-
-  const Cgroup &m_cgroup_;
-};
-
 class Cgroup {
  public:
-  Cgroup() : m_cgroup_(nullptr) {}
+  Cgroup(const std::string &path, struct cgroup *handle)
+      : m_cgroup_path_(path), m_cgroup_(handle) {}
   ~Cgroup();
 
-  void destroy();
-
-  struct cgroup &getCgroup() const {
-    if (isValid()) {
-      return *m_cgroup_;
-    }
-    SLURMX_WARN("Accessing invalid cgroup.");
-    return *m_cgroup_;
+  struct cgroup *NativeHandle() {
+    return m_cgroup_;
   }
-  const std::string &getCgroupString() const { return m_cgroup_path_; };
+
+  const std::string &GetCgroupString() const { return m_cgroup_path_; };
 
   // Using the zombie object pattern as exceptions are not available.
-  bool isValid() const { return m_cgroup_ != NULL; }
+  bool Valid() const { return m_cgroup_ != nullptr; }
+
+  bool SetCpuCoreLimit(uint64_t core_num);
+  bool SetCpuShares(uint64_t share);
+  bool SetMemoryLimitBytes(uint64_t memory_bytes);
+  bool SetMemorySwLimitBytes(uint64_t mem_bytes);
+  bool SetMemorySoftLimitBytes(uint64_t memory_bytes);
+  bool SetBlockioWeight(uint64_t weight);
+  bool SetControllerValue(CgroupConstant::Controller controller,
+                          CgroupConstant::ControllerFile controller_file,
+                          uint64_t value);
+  bool SetControllerStr(CgroupConstant::Controller controller,
+                        CgroupConstant::ControllerFile controller_file,
+                        const std::string &str);
 
  private:
   std::string m_cgroup_path_;
   mutable struct cgroup *m_cgroup_;
 
- protected:
-  void setCgroupString(const std::string &cgroup_string) {
-    m_cgroup_path_ = cgroup_string;
-  };
-  void setCgroup(struct cgroup &cgroup);
-
-  friend class ::Cgroup::CgroupManager;
+  friend class CgroupManager;
 };
 
-}  // namespace Internal
-
 class CgroupManager {
- private:
-  struct CgroupInfo {
-    CgroupInfo() : ref_cnt(0){};
-
-    CgroupInfo(CgroupInfo &&) = default;
-    CgroupInfo &operator=(CgroupInfo &&) = default;
-
-    int ref_cnt;
-    std::unique_ptr<Internal::Cgroup> cgroup_ptr;
-
-   private:
-    BOOST_MOVABLE_BUT_NOT_COPYABLE(CgroupInfo);
-  };
-
  public:
-  using CgroupInfoCRefWrapper = std::reference_wrapper<const CgroupInfo>;
+  static CgroupManager &Instance();
 
-  static CgroupManager &getInstance();
-
-  [[nodiscard]] bool isMounted(CgroupConstant::Controller controller) const {
+  bool Mounted(CgroupConstant::Controller controller) const {
     return bool(m_mounted_controllers_ & ControllerFlags{controller});
   }
 
-  bool create_or_open(const std::string &cgroup_string,
-                      ControllerFlags preferred_controllers,
-                      ControllerFlags required_controllers, bool retrieve);
-  bool destroy(const std::string &cgroup_path);
+  Cgroup *CreateOrOpen(const std::string &cgroup_string,
+                       ControllerFlags preferred_controllers,
+                       ControllerFlags required_controllers, bool retrieve)
+      LOCKS_EXCLUDED(m_mtx_);
 
-  std::optional<CgroupInfoCRefWrapper> find_cgroup(
-      const std::string &cgroup_path);
+  /*
+   * Decrease the cgroup reference count by 1.
+   * If the reference reaches 0, the cgroup will be removed in OS.
+   * Returns true on success, false on failure;
+   */
+  bool Release(const std::string &cgroup_path) LOCKS_EXCLUDED(m_mtx_);
 
-  bool migrate_proc_to_cgroup(pid_t pid, const std::string &cgroup_path);
+  Cgroup *Find(const std::string &cgroup_path) LOCKS_EXCLUDED(m_mtx_);
+
+  bool MigrateProcTo(pid_t pid, const std::string &cgroup_path)
+      LOCKS_EXCLUDED(m_mtx_);
 
  private:
+  using Mutex = absl::Mutex;
+  using LockGuard = util::lock_guard;
+
   CgroupManager();
   CgroupManager(const CgroupManager &);
   CgroupManager &operator=(const CgroupManager &);
@@ -291,27 +261,12 @@ class CgroupManager {
                             bool required, bool has_cgroup,
                             bool &changed_cgroup) const;
 
-  bool set_cgroup_limit(const Internal::Cgroup &cg,
-                        const CgroupLimit &cg_limit);
-
   ControllerFlags m_mounted_controllers_;
 
-  static CgroupManager *m_singleton_;
+  absl::flat_hash_map<std::string, std::pair<std::unique_ptr<Cgroup>, size_t>>
+      m_cgroup_ref_count_map_ GUARDED_BY(m_mtx_);
 
-  std::map<std::string, CgroupInfo> m_cgroup_info_;
-
-  class MutexGuard {
-   public:
-    MutexGuard(pthread_mutex_t &mutex) : m_mutex(mutex) {
-      pthread_mutex_lock(&m_mutex);
-    }
-    ~MutexGuard() { pthread_mutex_unlock(&m_mutex); }
-
-   private:
-    pthread_mutex_t &m_mutex;
-  };
-
-  static MutexGuard getGuard() { return MutexGuard(g_cgroups_mutex); }
+  Mutex m_mtx_;
 };
 
-}  // namespace Cgroup
+}  // namespace util

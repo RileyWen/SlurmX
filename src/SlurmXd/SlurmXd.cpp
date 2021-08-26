@@ -1,3 +1,5 @@
+#include <event2/thread.h>
+
 #include <cxxopts.hpp>
 #include <iostream>
 #include <numeric>
@@ -7,6 +9,15 @@
 #include "CtlXdClient.h"
 #include "PublicHeader.h"
 #include "XdServer.h"
+
+void GlobalVariableInit() {
+  // Enable inter-thread custom event notification.
+  evthread_use_pthreads();
+
+  g_task_mgr = std::make_unique<Xd::TaskManager>();
+
+  g_ctlxd_client = std::make_unique<Xd::CtlXdClient>();
+}
 
 int main(int argc, char** argv) {
   // Todo: Add single program instance checking.
@@ -30,7 +41,7 @@ int main(int argc, char** argv) {
   auto parsed_args = options.parse(argc, argv);
 
   // Todo: Check static level setting.
-  const std::string& debug_level = parsed_args["debug-level"].as<std::string>();
+  const auto& debug_level = parsed_args["debug-level"].as<std::string>();
   if (debug_level == "trace")
     spdlog::set_level(spdlog::level::trace);
   else if (debug_level == "debug")
@@ -99,11 +110,10 @@ int main(int argc, char** argv) {
   resource_in_cmd.memory_bytes = memory_bytes;
   resource_in_cmd.memory_sw_bytes = memory_bytes;
 
+  GlobalVariableInit();
+
   SlurmxErr err;
 
-  g_task_mgr = std::make_unique<Xd::TaskManager>();
-
-  g_ctlxd_client = std::make_unique<Xd::CtlXdClient>();
   err =
       g_ctlxd_client->Connect(parsed_args["server-address"].as<std::string>());
   if (err == SlurmxErr::kConnectionTimeout) {
@@ -113,8 +123,8 @@ int main(int argc, char** argv) {
 
   // Todo: Set FD_CLOEXEC on stdin, stdout, stderr
 
-  const std::string& listen_addr = parsed_args["listen"].as<std::string>();
-  g_server = std::make_unique<Xd::XdServer>(listen_addr, resource_in_cmd);
+  const auto& listen_addr = parsed_args["listen"].as<std::string>();
+  g_server = std::make_unique<Xd::XdServer>(listen_addr);
 
   std::regex addr_port_re(R"(^.*:(\d+)$)");
   std::smatch port_group;
