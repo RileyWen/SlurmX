@@ -29,7 +29,9 @@ else()
     FetchContent_Declare(
             gRPC
             GIT_REPOSITORY https://github.com/grpc/grpc
-            GIT_TAG        v1.28.0)
+            GIT_TAG        v1.28.0
+            SOURCE_DIR     ${CMAKE_SOURCE_DIR}/dependencies/download/gRPC
+    )
 
     set(FETCHCONTENT_QUIET OFF CACHE STRING " ")
     FetchContent_GetProperties(gRPC)

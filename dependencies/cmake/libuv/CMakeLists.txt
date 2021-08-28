@@ -1,9 +1,11 @@
 include(FetchContent)
 FetchContent_Declare(
+        #v1.42.0
         libuv
-        GIT_REPOSITORY https://github.com/libuv/libuv
-        GIT_TAG v1.42.0)
-
+        URL https://github.com/libuv/libuv/archive/6ce14710da7079eb248868171f6343bc409ea3a4.zip
+        SOURCE_DIR     ${CMAKE_SOURCE_DIR}/dependencies/download/libuv
+)
+#6ce14710da7079eb248868171f6343bc409ea3a4 is the Git commit hash of the libuv version to use
 FetchContent_GetProperties(libuv)
 if (NOT libuv_POPULATED)
     FetchContent_Populate(libuv)
