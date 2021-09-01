@@ -26,11 +26,14 @@ if(USE_SYSTEM_GRPC)
     endif()
 else()
     include(FetchContent)
+    set(FETCHCONTENT_BASE_DIR "${CMAKE_SOURCE_DIR}/dependencies/download")
+    Set(FETCHCONTENT_QUIET FALSE)
     FetchContent_Declare(
             gRPC
-            GIT_REPOSITORY https://github.com/grpc/grpc
-            GIT_TAG        v1.28.0
-            SOURCE_DIR     ${CMAKE_SOURCE_DIR}/dependencies/download/gRPC
+            GIT_REPOSITORY https://github.com/grpc/grpc.git
+            GIT_TAG        c5789be22cada39b80d70d4ace3738d62f1c0a04     #v1.28.0
+            GIT_SHALLOW TRUE    #work as "git clone --depth 1 --no-single-branch", save time and space
+            GIT_PROGRESS TRUE   #see git clone progress info
     )
 
     set(FETCHCONTENT_QUIET OFF CACHE STRING " ")
