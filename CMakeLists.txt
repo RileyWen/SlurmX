@@ -46,14 +46,9 @@ set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost 1.67 REQUIRED COMPONENTS thread fiber)
 add_definitions(-DBoost_MINOR_VERSION=${Boost_MINOR_VERSION})
 
-#find_package(absl CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/abseil)
-#find_package(Protobuf CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/grpc)
-#find_package(gRPC CONFIG REQUIRED)
-#get_target_property(GRPC_CPP_PLUGIN_LOCATION gRPC::grpc_cpp_plugin LOCATION)
-
-find_package(PkgConfig REQUIRED)
-
-pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
+if(NOT EXISTS ${CMAKE_SOURCE_DIR}/dependencies/download/cgroup/lib/libcgroup.a)
+    message(FATAL_ERROR "Can not find libcgroup.a! Run dependencies/download_cgroup.sh to download and compile static libcgroup")
+endif()
 
 # concurrent queue has no cmake config files. Add it manually as a header-only library.
 add_library(concurrentqueue INTERFACE)
