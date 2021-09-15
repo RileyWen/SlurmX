@@ -5,6 +5,7 @@ file(GLOB_RECURSE SLURMCTLXD_SRC
 add_executable(slurmctlxd ${SLURMCTLXD_SRC})
 
 target_link_libraries(slurmctlxd
+        mimalloc
         spdlog::spdlog
         concurrentqueue
         Utility_AnonymousPipe
