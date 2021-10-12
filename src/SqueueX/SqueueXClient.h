@@ -30,7 +30,7 @@ class SqueueXClient {
   SlurmxErr GetInfo(bool clear_old, SqueueParameters &params);
 
  private:
-  // Send request and presents the response back from the server.
+
   SlurmxErr LoadJobByJobId(JobInfoMsg *job_info_ptr, uint32_t job_id,
                            uint16_t show_flags);
 
