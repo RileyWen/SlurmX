@@ -65,7 +65,7 @@ class TaskScheduler {
   using LockGuard = util::AbslMutexLockGuard;
 
  public:
-  TaskScheduler();
+  explicit TaskScheduler(std::unique_ptr<INodeSelectionAlgo> algo);
 
   ~TaskScheduler();
 
@@ -75,6 +75,8 @@ class TaskScheduler {
 
   void TaskStatusChange(uint32_t task_id, ITask::Status new_status,
                         std::optional<std::string> reason);
+
+  bool QueryXdNodeIdOfRunningTask(uint32_t task_id, XdNodeId* xd_node_id);
 
  private:
   void ScheduleThread_();

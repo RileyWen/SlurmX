@@ -18,7 +18,7 @@ AllocatableResource& AllocatableResource::operator-=(
 
 bool operator<=(const AllocatableResource& lhs,
                 const AllocatableResource& rhs) {
-  if (lhs.cpu_count <= rhs.cpu_count && lhs.memory_bytes && rhs.memory_bytes &&
+  if (lhs.cpu_count <= rhs.cpu_count && lhs.memory_bytes <= rhs.memory_bytes &&
       lhs.memory_sw_bytes <= rhs.memory_sw_bytes)
     return true;
 
@@ -27,7 +27,16 @@ bool operator<=(const AllocatableResource& lhs,
 
 bool operator<(const AllocatableResource& lhs, const AllocatableResource& rhs) {
   if (lhs.cpu_count < rhs.cpu_count && lhs.memory_bytes < rhs.memory_bytes &&
-      lhs.memory_sw_bytes <= rhs.memory_sw_bytes)
+      lhs.memory_sw_bytes < rhs.memory_sw_bytes)
+    return true;
+
+  return false;
+}
+
+bool operator==(const AllocatableResource& lhs,
+                const AllocatableResource& rhs) {
+  if (lhs.cpu_count == rhs.cpu_count && lhs.memory_bytes == rhs.memory_bytes &&
+      lhs.memory_sw_bytes == rhs.memory_sw_bytes)
     return true;
 
   return false;
@@ -74,4 +83,8 @@ bool operator<=(const Resources& lhs, const Resources& rhs) {
 
 bool operator<(const Resources& lhs, const Resources& rhs) {
   return lhs.allocatable_resource < rhs.allocatable_resource;
+}
+
+bool operator==(const Resources& lhs, const Resources& rhs) {
+  return lhs.allocatable_resource == rhs.allocatable_resource;
 }

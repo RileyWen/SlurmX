@@ -1,7 +1,3 @@
-//
-// Created by rileywen on 2/5/21.
-//
-
 #include "CtlXdClient.h"
 
 #include <boost/uuid/uuid_io.hpp>
@@ -119,6 +115,9 @@ void CtlXdClient::AsyncSendThread_() {
         break;
       case ITask::Status::Failed:
         request.set_new_status(SlurmxGrpc::TaskStatus::Failed);
+        break;
+      case ITask::Status::Completing:
+        request.set_new_status(SlurmxGrpc::TaskStatus::Completing);
         break;
     }
     if (status_change.reason.has_value())

@@ -179,6 +179,7 @@ class TaskManager {
   // Note: the three maps below are NOT protected by any mutex.
   //  They should be modified in libev callbacks to avoid races.
 
+  // Contains all the task that is running on this SlurmXd node.
   absl::flat_hash_map<uint32_t /*task id*/, std::unique_ptr<TaskInstance>>
       m_task_map_;
 

@@ -48,7 +48,7 @@ class XdNodeMetaContainerInterface {
    * Otherwise, no operation is performed.
    * @param partition_id
    */
-  virtual void TryReleasePartition(uint32_t partition_id) = 0;
+  [[deprecated]] virtual void TryReleasePartition(uint32_t partition_id) = 0;
 
   /**
    * @return Next unique node index in this partition.

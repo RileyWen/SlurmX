@@ -145,6 +145,7 @@ struct AllocatableResource {
 
 bool operator<=(const AllocatableResource& lhs, const AllocatableResource& rhs);
 bool operator<(const AllocatableResource& lhs, const AllocatableResource& rhs);
+bool operator==(const AllocatableResource& lhs, const AllocatableResource& rhs);
 
 /**
  * Model the dedicated resources in a slurmxd node.
@@ -171,6 +172,7 @@ struct Resources {
 
 bool operator<=(const Resources& lhs, const Resources& rhs);
 bool operator<(const Resources& lhs, const Resources& rhs);
+bool operator==(const Resources& lhs, const Resources& rhs);
 
 struct ITask {
   enum class Type { Interactive, Batch };

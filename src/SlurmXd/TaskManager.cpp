@@ -474,6 +474,11 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
 SlurmxErr TaskManager::ExecuteTaskAsync(std::unique_ptr<ITask> task) {
   auto instance = std::make_unique<TaskInstance>();
 
+  // Simply wrap the Task structure within a TaskInstance structure and
+  // pass it to the event loop. The cgroup field of this task is initialized
+  // in the corresponding handler (EvGrpcExecuteTaskCb_).
+  instance->task = std::move(task);
+
   m_grpc_execute_task_queue_.enqueue(std::move(instance));
   event_active(m_ev_grpc_execute_task_, 0, 0);
 
@@ -482,19 +487,25 @@ SlurmxErr TaskManager::ExecuteTaskAsync(std::unique_ptr<ITask> task) {
 
 void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
-  std::unique_ptr<TaskInstance> instance;
+  std::unique_ptr<TaskInstance> popped_instance;
 
-  if (!this_->m_grpc_execute_task_queue_.try_dequeue(instance)) {
+  if (!this_->m_grpc_execute_task_queue_.try_dequeue(popped_instance)) {
     std::string err_str{fmt::format(
         "GrpcExecuteTask was notified, but m_grpc_execute_task_queue_ is "
         "empty in task #{}",
-        instance->task->task_id)};
+        popped_instance->task->task_id)};
     SLURMX_ERROR(err_str);
-    this_->EvActivateTaskStatusChange_(
-        instance->task->task_id, ITask::Status::Failed, std::move(err_str));
+    this_->EvActivateTaskStatusChange_(popped_instance->task->task_id,
+                                       ITask::Status::Failed,
+                                       std::move(err_str));
     return;
   }
 
+  // Once ExecuteTask RPC is processed, the TaskInstance goes into m_task_map_.
+  auto [iter, ok] = this_->m_task_map_.emplace(popped_instance->task->task_id,
+                                               std::move(popped_instance));
+
+  TaskInstance* instance = iter->second.get();
   instance->cg_path = CgroupStrByTaskId_(instance->task->task_id);
   util::Cgroup* cgroup;
   cgroup = this_->m_cg_mgr_.CreateOrOpen(instance->cg_path,
@@ -531,7 +542,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     process->arguments = batch_task->arguments;
 
     SlurmxErr err;
-    err = this_->SpawnProcessInInstance_(instance.get(), std::move(process));
+    err = this_->SpawnProcessInInstance_(instance, std::move(process));
     if (err != SlurmxErr::kOk) {
       this_->EvActivateTaskStatusChange_(
           instance->task->task_id, ITask::Status::Failed,
@@ -540,6 +551,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
               instance->task->task_id));
     }
   }
+
+  // Todo: Add timer for the time limit here!
 }
 
 void TaskManager::EvTaskStatusChangeCb_(int efd, short events,

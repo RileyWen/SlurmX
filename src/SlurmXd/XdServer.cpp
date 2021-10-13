@@ -325,6 +325,7 @@ grpc::Status SlurmXdServiceImpl::ExecuteTask(
     grpc::ServerContext *context, const SlurmxGrpc::ExecuteTaskRequest *request,
     SlurmxGrpc::ExecuteTaskReply *response) {
   std::unique_ptr<ITask> itask;
+
   if (request->task().type() == SlurmxGrpc::Task::Batch) {
     auto task = std::make_unique<BatchTask>();
 
@@ -333,6 +334,7 @@ grpc::Status SlurmXdServiceImpl::ExecuteTask(
     for (auto &&arg : request->batch_meta().arguments())
       process->arguments.push_back(arg);
 
+    task->task_id = request->task().task_id();
     task->type = ITask::Type::Batch;
     task->output_file_pattern = request->batch_meta().output_file_pattern();
 
@@ -340,6 +342,12 @@ grpc::Status SlurmXdServiceImpl::ExecuteTask(
   } else if (request->task().type() == SlurmxGrpc::Task::Interactive) {
     auto task = std::make_unique<InteractiveTask>();
     task->type = ITask::Type::Interactive;
+
+    const char *uuid_data = request->interactive_meta().resource_uuid().data();
+    std::copy(uuid_data, uuid_data + uuid::static_size(),
+              task->resource_uuid.data);
+
+    task->task_id = request->task().task_id();
     g_server->GrantResourceToken(task->resource_uuid, task->task_id);
 
     itask = std::move(task);

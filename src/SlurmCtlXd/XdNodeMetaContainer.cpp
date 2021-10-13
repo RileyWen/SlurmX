@@ -16,7 +16,8 @@ void XdNodeMetaContainerSimpleImpl::AddNode(
         .partition_global_meta = {.m_resource_total_ = static_meta.res,
                                   .m_resource_avail_ = static_meta.res,
                                   .name = static_meta.partition_name}};
-    auto [part_metas_iter, ok] =
+    bool ok;
+    std::tie(part_metas_iter, ok) =
         partition_metas_map_.emplace(partition_id, std::move(part_metas));
     SLURMX_ASSERT(
         ok == true,
@@ -88,11 +89,13 @@ void XdNodeMetaContainerSimpleImpl::DeleteNodeMeta(XdNodeId node_id) {
 
 XdNodeMetaContainerInterface::PartitionMetasPtr
 XdNodeMetaContainerSimpleImpl::GetPartitionMetasPtr(uint32_t partition_id) {
-  auto iter = partition_metas_map_.find(partition_id);
-  if (iter == partition_metas_map_.end()) return {nullptr};
-
   mtx_.lock();
 
+  auto iter = partition_metas_map_.find(partition_id);
+  if (iter == partition_metas_map_.end()) {
+    mtx_.unlock();
+    return PartitionMetasPtr{nullptr};
+  }
   return PartitionMetasPtr(&iter->second, &mtx_);
 }
 
@@ -172,7 +175,7 @@ XdNodeMetaContainerSimpleImpl::GetNodeMetaPtr(XdNodeId node_id) {
   if (part_metas_iter == partition_metas_map_.end()) {
     // No such partition.
     mtx_.unlock();
-    return {nullptr};
+    return NodeMetaPtr{nullptr};
   }
 
   auto node_meta_iter =
@@ -180,15 +183,16 @@ XdNodeMetaContainerSimpleImpl::GetNodeMetaPtr(XdNodeId node_id) {
   if (node_meta_iter == part_metas_iter->second.xd_node_meta_map.end()) {
     // No such node in this partition.
     mtx_.unlock();
-    return {nullptr};
+    return NodeMetaPtr{nullptr};
   }
 
-  return {&node_meta_iter->second, &mtx_};
+  return NodeMetaPtr{&node_meta_iter->second, &mtx_};
 }
 
 XdNodeMetaContainerInterface::AllPartitionsMetaMapPtr
 XdNodeMetaContainerSimpleImpl::GetAllPartitionsMetaMapPtr() {
-  return {&partition_metas_map_, &mtx_};
+  mtx_.lock();
+  return AllPartitionsMetaMapPtr{&partition_metas_map_, &mtx_};
 }
 
 void XdNodeMetaContainerSimpleImpl::MallocResourceFromNode(

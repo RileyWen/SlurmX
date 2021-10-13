@@ -29,18 +29,18 @@ grpc::Status CtlXd::SlurmCtlXdServiceImpl::RegisterSlurmXd(
   node_id.node_index =
       g_meta_container->AllocNodeIndexInPartition(node_id.partition_id);
 
+  Resources res_total;
+  res_total.allocatable_resource =
+      request->resource_total().allocatable_resource();
   std::future<RegisterNodeResult> result_future = g_node_keeper->RegisterXdNode(
       addr_port, node_id,
-      new XdNodeStaticMeta{
-          .node_index = node_id.node_index,
-          .ipv4_addr = peer_slices[1],
-          .port = request->port(),
-          .node_name = request->node_name(),
-          .partition_id = node_id.partition_id,
-          .partition_name = request->partition_name(),
-          .res = {.allocatable_resource = (AllocatableResource &&)
-                                              request->resource_total()
-                                                  .allocatable_resource()}},
+      new XdNodeStaticMeta{.node_index = node_id.node_index,
+                           .ipv4_addr = peer_slices[1],
+                           .port = request->port(),
+                           .node_name = request->node_name(),
+                           .partition_id = node_id.partition_id,
+                           .partition_name = request->partition_name(),
+                           .res = res_total},
       [](void *data) { delete reinterpret_cast<AllocatableResource *>(data); });
 
   RegisterNodeResult result = result_future.get();
@@ -136,7 +136,7 @@ grpc::Status SlurmCtlXdServiceImpl::QueryInteractiveTaskAllocDetail(
     SlurmxGrpc::QueryInteractiveTaskAllocDetailReply *response) {
   auto *detail = g_ctlxd_server->QueryAllocDetailOfIaTask(request->task_id());
   if (detail) {
-    response->set_ok(false);
+    response->set_ok(true);
     response->mutable_detail()->set_ipv4_addr(detail->ipv4_addr);
     response->mutable_detail()->set_port(detail->port);
     response->mutable_detail()->set_node_index(detail->node_index);
@@ -176,8 +176,21 @@ grpc::Status SlurmCtlXdServiceImpl::TerminateTask(
     grpc::ServerContext *context,
     const SlurmxGrpc::TerminateTaskRequest *request,
     SlurmxGrpc::TerminateTaskReply *response) {
-  g_task_scheduler->TaskStatusChange(request->task_id(),
-                                     ITask::Status::Finished, std::nullopt);
+  uint32_t task_id = request->task_id();
+
+  XdNodeId xd_node_id;  // NOLINT(cppcoreguidelines-pro-type-member-init)
+  bool ok = g_task_scheduler->QueryXdNodeIdOfRunningTask(task_id, &xd_node_id);
+
+  if (ok) {
+    auto stub = g_node_keeper->GetXdStub(xd_node_id);
+    SlurmxErr err = stub->TerminateTask(task_id);
+    if (err == SlurmxErr::kOk)
+      response->set_ok(true);
+    else {
+      // Todo: make the reason be set here!
+      response->set_ok(false);
+    }
+  }
 
   return grpc::Status::OK;
 }

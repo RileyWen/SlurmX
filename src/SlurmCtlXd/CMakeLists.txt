@@ -22,6 +22,8 @@ target_link_libraries(slurmctlxd
         Threads::Threads
 
         absl::btree
+        absl::synchronization
+        absl::flat_hash_map
 
         proto
         )

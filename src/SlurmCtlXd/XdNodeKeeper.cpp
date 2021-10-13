@@ -108,7 +108,10 @@ SlurmxErr XdNodeStub::TerminateTask(uint32_t task_id) {
     return SlurmxErr::kRpcFailure;
   }
 
-  return SlurmxErr::kOk;
+  if (reply.ok())
+    return SlurmxErr::kOk;
+  else
+    return SlurmxErr::kGenericFailure;
 }
 
 XdNodeKeeper::XdNodeKeeper() : m_cq_closed_(false), m_tag_pool_(32, 0) {
@@ -201,8 +204,8 @@ void XdNodeKeeper::StateMonitorThreadFunc_() {
           xd = reinterpret_cast<XdNodeStub *>(tag->data);
           break;
       }
-      SLURMX_TRACE("CQ: ok: {}, tag: {}, xd: {}, prev state: {}", ok, tag->type,
-                   (void *)xd, xd->m_prev_channel_state_);
+      // SLURMX_TRACE("CQ: ok: {}, tag: {}, xd: {}, prev state: {}", ok,
+      // tag->type, (void *)xd, xd->m_prev_channel_state_);
 
       if (ok) {
         CqTag *next_tag = nullptr;
@@ -220,7 +223,7 @@ void XdNodeKeeper::StateMonitorThreadFunc_() {
         if (next_tag) {
           util::lock_guard lock(m_cq_mtx_);
           if (!m_cq_closed_) {
-            SLURMX_TRACE("Registering next tag: {}", next_tag->type);
+            // SLURMX_TRACE("Registering next tag: {}", next_tag->type);
 
             xd->m_prev_channel_state_ = new_state;
             // When cq is closed, do not register any more callbacks on it.
@@ -297,7 +300,7 @@ XdNodeKeeper::CqTag *XdNodeKeeper::InitXdStateMachine_(
         util::write_lock_guard xd_w_lock(m_alive_xd_rw_mtx_);
 
         size_t pos = m_empty_slot_bitset_.find_first();
-        if (pos == m_empty_slot_bitset_.npos) {
+        if (pos == boost::dynamic_bitset<>::npos) {
           // No more room for new elements.
           raw_xd->m_slot_offset_ = m_empty_slot_bitset_.size();
 
@@ -564,21 +567,21 @@ bool XdNodeKeeper::XdNodeValid(uint32_t index) {
 }
 
 void XdNodeKeeper::SetNodeIsUpCb(std::function<void(XdNodeId, void *)> cb) {
-  m_node_is_up_cb_ = cb;
+  m_node_is_up_cb_ = std::move(cb);
 }
 
 void XdNodeKeeper::SetNodeIsDownCb(std::function<void(XdNodeId, void *)> cb) {
-  m_node_is_down_cb_ = cb;
+  m_node_is_down_cb_ = std::move(cb);
 }
 
 void XdNodeKeeper::SetNodeIsTempDownCb(
     std::function<void(XdNodeId, void *)> cb) {
-  m_node_is_temp_down_cb_ = cb;
+  m_node_is_temp_down_cb_ = std::move(cb);
 }
 
 void XdNodeKeeper::SetNodeRecFromTempFailureCb(
     std::function<void(XdNodeId, void *)> cb) {
-  m_node_rec_from_temp_failure_cb_ = cb;
+  m_node_rec_from_temp_failure_cb_ = std::move(cb);
 }
 
 }  // namespace CtlXd

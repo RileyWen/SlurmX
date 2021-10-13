@@ -578,7 +578,7 @@ bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
 
   // Commit cgroup modifications.
   if ((err = cgroup_modify_cgroup(m_cgroup_))) {
-    SLURMX_WARN("Unable to commit {} for cgroup {}: {} {}\n",
+    SLURMX_WARN("Unable to commit {} for cgroup {}: {} {}",
                 CgroupConstant::GetControllerFileStringView(controller_file),
                 m_cgroup_path_, err, cgroup_strerror(err));
     return false;

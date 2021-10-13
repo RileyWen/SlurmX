@@ -30,6 +30,7 @@ enum TaskStatus {
   Running = 1;
   Finished = 2;
   Failed = 3;
+  Completing = 4;
 }
 
 message Task {
