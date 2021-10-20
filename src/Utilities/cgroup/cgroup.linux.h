@@ -10,6 +10,7 @@
 
 #include <absl/container/flat_hash_map.h>
 #include <absl/synchronization/mutex.h>
+#include <libcgroup.h>
 #include <pthread.h>
 #include <spdlog/spdlog.h>
 
@@ -20,9 +21,8 @@
 #include <optional>
 #include <string_view>
 
-#include "PublicHeader.h"
-#include "libcgroup.h"
 #include "slurmx/Lock.h"
+#include "slurmx/PublicHeader.h"
 
 namespace util {
 

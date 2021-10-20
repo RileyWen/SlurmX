@@ -1,4 +1,4 @@
-#include "PublicHeader.h"
+#include "slurmx/PublicHeader.h"
 
 AllocatableResource& AllocatableResource::operator+=(
     const AllocatableResource& rhs) {

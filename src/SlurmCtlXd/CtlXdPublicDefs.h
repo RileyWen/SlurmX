@@ -11,7 +11,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "PublicHeader.h"
+#include "slurmx/PublicHeader.h"
 
 #if Boost_MINOR_VERSION >= 71
 #include <boost/uuid/uuid_hash.hpp>

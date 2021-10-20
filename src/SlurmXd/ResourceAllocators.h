@@ -1,7 +1,7 @@
 #pragma once
 
-#include "PublicHeader.h"
 #include "cgroup.linux.h"
+#include "slurmx/PublicHeader.h"
 
 namespace Xd {
 

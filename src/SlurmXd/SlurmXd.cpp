@@ -7,8 +7,8 @@
 #include <vector>
 
 #include "CtlXdClient.h"
-#include "PublicHeader.h"
 #include "XdServer.h"
+#include "slurmx/PublicHeader.h"
 
 void GlobalVariableInit() {
   // Enable inter-thread custom event notification.

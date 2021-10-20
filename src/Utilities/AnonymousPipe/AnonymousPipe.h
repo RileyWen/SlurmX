@@ -1,10 +1,9 @@
 #pragma once
 
+#include <sys/socket.h>
 #include <unistd.h>
 
-#include "PublicHeader.h"
-#include "spdlog/spdlog.h"
-#include "sys/socket.h"
+#include "slurmx/PublicHeader.h"
 
 class AnonymousPipe {
  public:

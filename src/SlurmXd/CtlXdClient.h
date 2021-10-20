@@ -11,10 +11,10 @@
 #include <queue>
 #include <thread>
 
-#include "PublicHeader.h"
 #include "XdPublicDefs.h"
 #include "protos/slurmx.grpc.pb.h"
 #include "protos/slurmx.pb.h"
+#include "slurmx/PublicHeader.h"
 
 namespace Xd {
 

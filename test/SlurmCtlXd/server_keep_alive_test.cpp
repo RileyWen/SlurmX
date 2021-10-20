@@ -8,8 +8,8 @@
 #include <string_view>
 #include <thread>
 
-#include "PublicHeader.h"
 #include "SharedTestImpl/greeter_service_impl.h"
+#include "slurmx/PublicHeader.h"
 
 using grpc::Channel;
 

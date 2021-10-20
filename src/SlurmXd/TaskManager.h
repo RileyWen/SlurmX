@@ -1,11 +1,13 @@
 #pragma once
 
 #include <absl/container/flat_hash_map.h>
+#include <concurrentqueue/concurrentqueue.h>
 #include <event2/bufferevent.h>
 #include <event2/event.h>
 #include <event2/util.h>
 #include <evrpc.h>
 #include <grpc++/grpc++.h>
+#include <spdlog/spdlog.h>
 #include <sys/eventfd.h>
 #include <sys/wait.h>
 
@@ -22,13 +24,11 @@
 #include <unordered_map>
 
 #include "CtlXdClient.h"
-#include "PublicHeader.h"
 #include "XdPublicDefs.h"
 #include "cgroup.linux.h"
-#include "concurrentqueue/concurrentqueue.h"
 #include "protos/slurmx.grpc.pb.h"
 #include "protos/slurmx.pb.h"
-#include "spdlog/spdlog.h"
+#include "slurmx/PublicHeader.h"
 
 namespace Xd {
 

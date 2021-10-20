@@ -2,9 +2,9 @@
 
 #include <random>
 
-#include "PublicHeader.h"
 #include "SharedTestImpl/GlobalDefs.h"
 #include "gtest/gtest.h"
+#include "slurmx/PublicHeader.h"
 
 using namespace Xd;
 

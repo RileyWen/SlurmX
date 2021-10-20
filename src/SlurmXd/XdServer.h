@@ -18,10 +18,10 @@
 #include <boost/uuid/uuid_hash.hpp>
 #endif
 
-#include "PublicHeader.h"
 #include "TaskManager.h"
 #include "protos/slurmx.grpc.pb.h"
 #include "protos/slurmx.pb.h"
+#include "slurmx/PublicHeader.h"
 
 namespace Xd {
 

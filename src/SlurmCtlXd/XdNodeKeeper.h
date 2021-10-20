@@ -13,10 +13,10 @@
 #include <thread>
 
 #include "CtlXdPublicDefs.h"
-#include "PublicHeader.h"
 #include "protos/slurmx.grpc.pb.h"
 #include "protos/slurmx.pb.h"
 #include "slurmx/Lock.h"
+#include "slurmx/PublicHeader.h"
 
 namespace CtlXd {
 

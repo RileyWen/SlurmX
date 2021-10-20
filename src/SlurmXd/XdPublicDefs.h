@@ -1,6 +1,6 @@
 #pragma once
 
-#include "PublicHeader.h"
+#include "slurmx/PublicHeader.h"
 
 namespace Xd {
 

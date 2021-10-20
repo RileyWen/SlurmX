@@ -9,9 +9,9 @@
 #include <tuple>
 
 #include "CtlXdPublicDefs.h"
-#include "PublicHeader.h"
 #include "XdNodeMetaContainer.h"
 #include "slurmx/Lock.h"
+#include "slurmx/PublicHeader.h"
 
 namespace CtlXd {
 
