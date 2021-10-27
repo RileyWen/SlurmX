@@ -32,22 +32,78 @@
 
 namespace Xd {
 
-struct ProcessInstance {
+class ProcessInstance {
+ public:
+  ProcessInstance(std::string exec_path, std::list<std::string> arg_list)
+      : m_executive_path_(std::move(exec_path)),
+        m_arguments_(std::move(arg_list)),
+        m_pid_(0),
+        m_ev_buf_event_(nullptr),
+        m_user_data_(nullptr) {}
+
+  ~ProcessInstance() {
+    if (m_user_data_) {
+      if (m_clean_cb_)
+        m_clean_cb_(m_user_data_);
+      else
+        SLURMX_ERROR(
+            "user_data in ProcessInstance is set, but clean_cb is not set!");
+    }
+
+    bufferevent_free(m_ev_buf_event_);
+  }
+
+  [[nodiscard]] const std::string& GetExecPath() const {
+    return m_executive_path_;
+  }
+  [[nodiscard]] const std::list<std::string>& GetArgList() const {
+    return m_arguments_;
+  }
+
+  void SetPid(pid_t pid) { m_pid_ = pid; }
+  [[nodiscard]] pid_t GetPid() const { return m_pid_; }
+
+  void SetEvBufEvent(struct bufferevent* ev_buf_event) {
+    m_ev_buf_event_ = ev_buf_event;
+  }
+
+  void SetOutputCb(std::function<void(std::string&&, void*)> cb) {
+    m_output_cb_ = std::move(cb);
+  }
+
+  void SetFinishCb(std::function<void(bool, int, void*)> cb) {
+    m_finish_cb_ = std::move(cb);
+  }
+
+  void Output(std::string&& buf) {
+    if (m_output_cb_) m_output_cb_(std::move(buf), m_user_data_);
+  }
+
+  void Finish(bool is_killed, int val) {
+    if (m_finish_cb_) m_finish_cb_(is_killed, val, m_user_data_);
+  }
+
+  void SetUserDataAndCleanCb(void* data, std::function<void(void*)> cb) {
+    m_user_data_ = data;
+    m_clean_cb_ = std::move(cb);
+  }
+
+ private:
   /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
-  pid_t pid;
+  pid_t m_pid_;
 
   // The underlying event that handles the output of the task.
-  struct bufferevent* ev_buf_event;
+  struct bufferevent* m_ev_buf_event_;
 
   /* ------- Fields set by the caller of SpawnProcessInInstance_  -------- */
-  std::string executive_path;
-  std::list<std::string> arguments;
+  std::string m_executive_path_;
+  std::list<std::string> m_arguments_;
 
   /***
    * The callback function called when a task writes to stdout or stderr.
    * @param[in] buf a slice of output buffer.
    */
-  std::function<void(std::string&& buf)> output_cb;
+  std::function<void(std::string&& buf, void*)> m_output_cb_;
 
   /***
    * The callback function called when a task is finished.
@@ -56,7 +112,10 @@ struct ProcessInstance {
    * @param[in] int the number of signal if bool is true, the return value
    * otherwise.
    */
-  std::function<void(bool, int)> finish_cb;
+  std::function<void(bool, int, void*)> m_finish_cb_;
+
+  void* m_user_data_;
+  std::function<void(void*)> m_clean_cb_;
 };
 
 // Todo: Task may consists of multiple subtasks
@@ -88,8 +147,8 @@ class TaskManager {
   SlurmxErr SpawnInteractiveTaskAsync(
       uint32_t task_id, std::string executive_path,
       std::list<std::string> arguments,
-      std::function<void(std::string&& buf)> output_cb,
-      std::function<void(bool, int)> finish_cb);
+      std::function<void(std::string&&, void*)> output_cb,
+      std::function<void(bool, int, void*)> finish_cb);
 
   void TerminateTaskAsync(uint32_t task_id);
 
@@ -121,8 +180,8 @@ class TaskManager {
     uint32_t task_id;
     std::string executive_path;
     std::list<std::string> arguments;
-    std::function<void(std::string&& buf)> output_cb;
-    std::function<void(bool, int)> finish_cb;
+    std::function<void(std::string&&, void*)> output_cb;
+    std::function<void(bool, int, void*)> finish_cb;
   };
 
   struct EvQueueTaskTerminate {

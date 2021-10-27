@@ -138,28 +138,28 @@ Status SlurmXdServiceImpl::SrunXStream(
             // It's safe to call stream->Write() on a closed stream.
             // (stream->Write() just return false rather than throwing an
             // exception).
-            auto output_callback =
-                [stream, &write_mtx = stream_w_mtx](std::string &&buf) {
-                  SLURMX_TRACE("Output Callback called. buf: {}", buf);
-                  SlurmxGrpc::SrunXStreamReply reply;
-                  reply.set_type(SrunXStreamReply::IoRedirection);
+            auto output_callback = [stream, &write_mtx = stream_w_mtx](
+                                       std::string &&buf, void *user_data) {
+              SLURMX_TRACE("Output Callback called. buf: {}", buf);
+              SlurmxGrpc::SrunXStreamReply reply;
+              reply.set_type(SrunXStreamReply::IoRedirection);
 
-                  std::string *reply_buf = reply.mutable_io()->mutable_buf();
-                  *reply_buf = std::move(buf);
+              std::string *reply_buf = reply.mutable_io()->mutable_buf();
+              *reply_buf = std::move(buf);
 
-                  write_mtx.lock();
-                  stream->Write(reply);
-                  write_mtx.unlock();
+              write_mtx.lock();
+              stream->Write(reply);
+              write_mtx.unlock();
 
-                  SLURMX_TRACE("stream->Write() done.");
-                };
+              SLURMX_TRACE("stream->Write() done.");
+            };
 
             // Call stream->Write() and cause the grpc thread
             // that owns 'stream' to stop the connection handling and quit.
             auto finish_callback = [stream,
                                     &write_mtx = stream_w_mtx /*, context*/](
-                                       bool is_terminated_by_signal,
-                                       int value) {
+                                       bool is_terminated_by_signal, int value,
+                                       void *user_data) {
               SLURMX_TRACE("Finish Callback called. signaled: {}, value: {}",
                            is_terminated_by_signal, value);
               SlurmxGrpc::SrunXStreamReply reply;
@@ -329,10 +329,9 @@ grpc::Status SlurmXdServiceImpl::ExecuteTask(
   if (request->task().type() == SlurmxGrpc::Task::Batch) {
     auto task = std::make_unique<BatchTask>();
 
-    auto process = std::make_unique<ProcessInstance>();
-    process->executive_path = request->batch_meta().executive_path();
+    task->executive_path = request->batch_meta().executive_path();
     for (auto &&arg : request->batch_meta().arguments())
-      process->arguments.push_back(arg);
+      task->arguments.push_back(arg);
 
     task->task_id = request->task().task_id();
     task->type = ITask::Type::Batch;

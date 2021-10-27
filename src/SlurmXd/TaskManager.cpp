@@ -181,7 +181,7 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
 
       uint32_t task_id;
       TaskInstance* instance;
-      const ProcessInstance* proc;
+      ProcessInstance* proc;
 
       auto task_iter = this_->m_pid_task_map_.find(pid);
       auto proc_iter = this_->m_pid_proc_map_.find(pid);
@@ -193,10 +193,7 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
         proc = proc_iter->second;
         task_id = instance->task->task_id;
 
-        proc->finish_cb(sigchld_info.is_terminated_by_signal,
-                        sigchld_info.value);
-
-        bufferevent_free(proc->ev_buf_event);
+        proc->Finish(sigchld_info.is_terminated_by_signal, sigchld_info.value);
 
         // Free the ProcessInstance. ITask struct is not freed here because
         // the ITask for an Interactive task can have no ProcessInstance.
@@ -249,9 +246,9 @@ void TaskManager::EvSubprocessReadCb_(struct bufferevent* bev, void* process) {
   int n_copy = evbuffer_remove(bev->input, str.data(), buf_len);
 
   SLURMX_TRACE("Read {:>4} bytes from subprocess (pid: {}): {}", n_copy,
-               proc->pid, str);
+               proc->GetPid(), str);
 
-  proc->output_cb(std::move(str));
+  proc->Output(std::move(str));
 }
 
 void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
@@ -319,7 +316,7 @@ SlurmxErr TaskManager::KillProcessInstance_(const ProcessInstance* proc,
   //  will not quit when receiving SIGINT.
   if (proc) {
     // Send the signal to the whole process group.
-    int err = kill(-proc->pid, signum);
+    int err = kill(-proc->GetPid(), signum);
 
     if (err == 0)
       return SlurmxErr::kOk;
@@ -365,25 +362,28 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     SLURMX_DEBUG("Subprocess was created for task #{} pid: {}",
                  instance->task->task_id, child_pid);
 
-    process->pid = child_pid;
+    process->SetPid(child_pid);
 
     // Add event for stdout/stderr of the new subprocess
-    process->ev_buf_event =
+    struct bufferevent* ev_buf_event;
+    ev_buf_event =
         bufferevent_socket_new(m_ev_base_, fd, BEV_OPT_CLOSE_ON_FREE);
-    if (!process->ev_buf_event) {
+    if (!ev_buf_event) {
       SLURMX_ERROR(
           "Error constructing bufferevent for the subprocess of task #!",
           instance->task->task_id);
       err = SlurmxErr::kLibEventError;
       goto AskChildToSuicide;
     }
-    bufferevent_setcb(process->ev_buf_event, EvSubprocessReadCb_, nullptr,
-                      nullptr, (void*)process.get());
-    bufferevent_enable(process->ev_buf_event, EV_READ);
-    bufferevent_disable(process->ev_buf_event, EV_WRITE);
+    bufferevent_setcb(ev_buf_event, EvSubprocessReadCb_, nullptr, nullptr,
+                      (void*)process.get());
+    bufferevent_enable(ev_buf_event, EV_READ);
+    bufferevent_disable(ev_buf_event, EV_WRITE);
+
+    process->SetEvBufEvent(ev_buf_event);
 
     // Migrate the new subprocess to newly created cgroup
-    if (!m_cg_mgr_.MigrateProcTo(process->pid, instance->cg_path)) {
+    if (!m_cg_mgr_.MigrateProcTo(process->GetPid(), instance->cg_path)) {
       SLURMX_ERROR(
           "Terminate the subprocess of task #{} due to failure of cgroup "
           "migration.",
@@ -442,22 +442,21 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;
-    argv.push_back(process->executive_path.c_str());
-    for (auto&& arg : process->arguments) {
+    argv.push_back(process->GetExecPath().c_str());
+    for (auto&& arg : process->GetArgList()) {
       argv.push_back(arg.c_str());
     }
     argv.push_back(nullptr);
 
-    SLURMX_TRACE("execv being called subprocess: {} {}",
-                 process->executive_path,
-                 boost::algorithm::join(process->arguments, " "));
+    SLURMX_TRACE("execv being called subprocess: {} {}", process->GetExecPath(),
+                 boost::algorithm::join(process->GetArgList(), " "));
 
     dup2(fd, 1);  // stdout -> pipe
     dup2(fd, 2);  // stderr -> pipe
 
     close(fd);
 
-    execv(process->executive_path.c_str(),
+    execv(process->GetExecPath().c_str(),
           const_cast<char* const*>(argv.data()));
 
     // Error occurred since execv returned. At this point, errno is set.
@@ -536,10 +535,9 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
   // If this is a batch task, run it now.
   if (instance->task->type == ITask::Type::Batch) {
-    auto process = std::make_unique<ProcessInstance>();
     const auto* batch_task = dynamic_cast<BatchTask*>(instance->task.get());
-    process->executive_path = batch_task->executive_path;
-    process->arguments = batch_task->arguments;
+    auto process = std::make_unique<ProcessInstance>(batch_task->executive_path,
+                                                     batch_task->arguments);
 
     SlurmxErr err;
     err = this_->SpawnProcessInInstance_(instance, std::move(process));
@@ -596,8 +594,8 @@ void TaskManager::EvActivateTaskStatusChange_(
 SlurmxErr TaskManager::SpawnInteractiveTaskAsync(
     uint32_t task_id, std::string executive_path,
     std::list<std::string> arguments,
-    std::function<void(std::string&& buf)> output_cb,
-    std::function<void(bool, int)> finish_cb) {
+    std::function<void(std::string&&, void*)> output_cb,
+    std::function<void(bool, int, void*)> finish_cb) {
   EvQueueGrpcInteractiveTask elem{
       .task_id = task_id,
       .executive_path = std::move(executive_path),
@@ -644,11 +642,11 @@ void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
     return;
   }
 
-  auto process = std::make_unique<ProcessInstance>();
-  process->executive_path = std::move(elem.executive_path);
-  process->arguments = std::move(elem.arguments);
-  process->output_cb = std::move(elem.output_cb);
-  process->finish_cb = std::move(elem.finish_cb);
+  auto process = std::make_unique<ProcessInstance>(
+      std::move(elem.executive_path), std::move(elem.arguments));
+
+  process->SetOutputCb(std::move(elem.output_cb));
+  process->SetFinishCb(std::move(elem.finish_cb));
 
   SlurmxErr err;
   err = this_->SpawnProcessInInstance_(task_iter->second.get(),
