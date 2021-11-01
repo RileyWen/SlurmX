@@ -7,9 +7,12 @@ add_executable(slurmxd ${SLURMXD_SRC})
 target_link_libraries(slurmxd
         spdlog::spdlog
         concurrentqueue
+
         Utility_AnonymousPipe
         Utility_cgroup
+        Utility_FileLogger
         Utility_PublicHeader
+
         proto
         Boost::boost
 

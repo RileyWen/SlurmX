@@ -7,6 +7,7 @@
 
 #include "ResourceAllocators.h"
 #include "protos/XdSubprocess.pb.h"
+#include "slurmx/FileLogger.h"
 
 namespace Xd {
 
@@ -538,6 +539,22 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     const auto* batch_task = dynamic_cast<BatchTask*>(instance->task.get());
     auto process = std::make_unique<ProcessInstance>(batch_task->executive_path,
                                                      batch_task->arguments);
+
+    auto* file_logger = new slurmx::FileLogger(
+        fmt::format("{}", instance->task->task_id),
+        fmt::format("/tmp/SlurmX-{}.out", instance->task->task_id));
+
+    auto clean_cb = [](void* data) {
+      delete reinterpret_cast<slurmx::FileLogger*>(data);
+    };
+
+    auto outout_cb = [](std::string&& buf, void* data) {
+      auto* file_logger = reinterpret_cast<slurmx::FileLogger*>(data);
+      file_logger->Output(buf);
+    };
+
+    process->SetUserDataAndCleanCb(file_logger, std::move(clean_cb));
+    process->SetOutputCb(std::move(outout_cb));
 
     SlurmxErr err;
     err = this_->SpawnProcessInInstance_(instance, std::move(process));

@@ -34,7 +34,7 @@ class FileLogger {
   std::string m_file_path_;
   std::shared_ptr<spdlog::logger> m_logger_;
 
-  [[maybe_unused]] static Internal::FileLoggerStaticInitializer
+  [[maybe_unused]] static inline Internal::FileLoggerStaticInitializer
       _s_initializer_{};
 };
 
