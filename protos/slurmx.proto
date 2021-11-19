@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 package SlurmxGrpc;
+option go_package = "github.com/RileyWen/SlurmX/protos";
 
 import "PublicDefs.proto";
 import "google/protobuf/duration.proto";
@@ -75,10 +76,10 @@ message StreamReplyExitStatus {
 
 message SrunXStreamRequest{
   enum Type {
-    NegotiationRequest = 0;
-    CheckResource = 1;
-    ExecutiveInfo = 2;
-    Signal = 3;
+    NegotiationType = 0;
+    CheckResourceType = 1;
+    ExecutiveInfoType = 2;
+    SignalType = 3;
   }
   Type type = 1;
 
@@ -92,9 +93,9 @@ message SrunXStreamRequest{
 
 message SrunXStreamReply {
   enum Type {
-    IoRedirection = 0;
-    ExitStatus = 1;
-    Result = 2;
+    IoRedirectionType = 0;
+    ExitStatusType = 1;
+    ResultType = 2;
   }
   Type type = 1;
 
