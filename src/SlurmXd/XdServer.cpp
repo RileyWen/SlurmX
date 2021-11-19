@@ -42,14 +42,14 @@ Status SlurmXdServiceImpl::SrunXStream(
       case StreamState::kNegotiation:
         ok = stream->Read(&request);
         if (ok) {
-          if (request.type() != SrunXStreamRequest::NegotiationRequest) {
+          if (request.type() != SrunXStreamRequest::NegotiationType) {
             SLURMX_DEBUG("Expect negotiation from peer {}, but none.",
                          context->peer());
             state = StreamState::kAbort;
           } else {
             SLURMX_DEBUG("Negotiation from peer: {}", context->peer());
             reply.Clear();
-            reply.set_type(SrunXStreamReply::Result);
+            reply.set_type(SrunXStreamReply::ResultType);
             reply.mutable_result()->set_ok(true);
 
             stream_w_mtx.lock();
@@ -69,7 +69,7 @@ Status SlurmXdServiceImpl::SrunXStream(
       case StreamState::kCheckResource:
         ok = stream->Read(&request);
         if (ok) {
-          if (request.type() != SrunXStreamRequest::CheckResource) {
+          if (request.type() != SrunXStreamRequest::CheckResourceType) {
             SLURMX_DEBUG("Expect CheckResource from peer {}, but got {}.",
                          context->peer(), request.GetTypeName());
             state = StreamState::kAbort;
@@ -84,7 +84,7 @@ Status SlurmXdServiceImpl::SrunXStream(
             if (err != SlurmxErr::kOk) {
               // The resource uuid provided by Client is invalid. Reject.
               reply.Clear();
-              reply.set_type(SrunXStreamReply::Result);
+              reply.set_type(SrunXStreamReply::ResultType);
 
               auto *result = reply.mutable_result();
               result->set_ok(false);
@@ -101,7 +101,7 @@ Status SlurmXdServiceImpl::SrunXStream(
               state = StreamState::kFinish;
             } else {
               reply.Clear();
-              reply.set_type(SrunXStreamReply::Result);
+              reply.set_type(SrunXStreamReply::ResultType);
               reply.mutable_result()->set_ok(true);
 
               stream_w_mtx.lock();
@@ -122,7 +122,7 @@ Status SlurmXdServiceImpl::SrunXStream(
       case StreamState::kExecutiveInfo:
         ok = stream->Read(&request);
         if (ok) {
-          if (request.type() != SrunXStreamRequest::ExecutiveInfo) {
+          if (request.type() != SrunXStreamRequest::ExecutiveInfoType) {
             SLURMX_DEBUG("Expect CheckResource from peer {}, but got {}.",
                          context->peer(), request.GetTypeName());
             state = StreamState::kAbort;
@@ -142,7 +142,7 @@ Status SlurmXdServiceImpl::SrunXStream(
                                        std::string &&buf, void *user_data) {
               SLURMX_TRACE("Output Callback called. buf: {}", buf);
               SlurmxGrpc::SrunXStreamReply reply;
-              reply.set_type(SrunXStreamReply::IoRedirection);
+              reply.set_type(SrunXStreamReply::IoRedirectionType);
 
               std::string *reply_buf = reply.mutable_io()->mutable_buf();
               *reply_buf = std::move(buf);
@@ -163,7 +163,7 @@ Status SlurmXdServiceImpl::SrunXStream(
               SLURMX_TRACE("Finish Callback called. signaled: {}, value: {}",
                            is_terminated_by_signal, value);
               SlurmxGrpc::SrunXStreamReply reply;
-              reply.set_type(SrunXStreamReply::ExitStatus);
+              reply.set_type(SrunXStreamReply::ExitStatusType);
 
               SlurmxGrpc::StreamReplyExitStatus *stat =
                   reply.mutable_exit_status();
@@ -200,7 +200,7 @@ Status SlurmXdServiceImpl::SrunXStream(
                 std::move(output_callback), std::move(finish_callback));
             if (err == SlurmxErr::kOk) {
               reply.Clear();
-              reply.set_type(SrunXStreamReply::Result);
+              reply.set_type(SrunXStreamReply::ResultType);
 
               auto *result = reply.mutable_result();
               result->set_ok(true);
@@ -212,7 +212,7 @@ Status SlurmXdServiceImpl::SrunXStream(
               state = StreamState::kWaitForEofOrSigOrTaskEnd;
             } else {
               reply.Clear();
-              reply.set_type(SrunXStreamReply::Result);
+              reply.set_type(SrunXStreamReply::ResultType);
 
               auto *result = reply.mutable_result();
               result->set_ok(false);
@@ -245,7 +245,7 @@ Status SlurmXdServiceImpl::SrunXStream(
       case StreamState::kWaitForEofOrSigOrTaskEnd: {
         ok = stream->Read(&request);
         if (ok) {
-          if (request.type() != SrunXStreamRequest::Signal) {
+          if (request.type() != SrunXStreamRequest::SignalType) {
             SLURMX_DEBUG("Expect signal from peer {}, but none.",
                          context->peer());
             state = StreamState::kAbort;

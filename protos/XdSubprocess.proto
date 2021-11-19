@@ -1,6 +1,7 @@
 syntax = "proto3";
 
 package SlurmxGrpc.Xd;
+option go_package = "github.com/RileyWen/SlurmX/protos/xd";
 
 message CanStartMessage {
   bool ok = 1;
