@@ -489,85 +489,78 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
   std::unique_ptr<TaskInstance> popped_instance;
 
-  if (!this_->m_grpc_execute_task_queue_.try_dequeue(popped_instance)) {
-    std::string err_str{fmt::format(
-        "GrpcExecuteTask was notified, but m_grpc_execute_task_queue_ is "
-        "empty in task #{}",
-        popped_instance->task->task_id)};
-    SLURMX_ERROR(err_str);
-    this_->EvActivateTaskStatusChange_(popped_instance->task->task_id,
-                                       ITask::Status::Failed,
-                                       std::move(err_str));
-    return;
-  }
+  while (this_->m_grpc_execute_task_queue_.try_dequeue(popped_instance)) {
+    // Once ExecuteTask RPC is processed, the TaskInstance goes into
+    // m_task_map_.
+    auto [iter, ok] = this_->m_task_map_.emplace(popped_instance->task->task_id,
+                                                 std::move(popped_instance));
 
-  // Once ExecuteTask RPC is processed, the TaskInstance goes into m_task_map_.
-  auto [iter, ok] = this_->m_task_map_.emplace(popped_instance->task->task_id,
-                                               std::move(popped_instance));
-
-  TaskInstance* instance = iter->second.get();
-  instance->cg_path = CgroupStrByTaskId_(instance->task->task_id);
-  util::Cgroup* cgroup;
-  cgroup = this_->m_cg_mgr_.CreateOrOpen(instance->cg_path,
-                                         util::ALL_CONTROLLER_FLAG,
-                                         util::NO_CONTROLLER_FLAG, false);
-  // Create cgroup for the new subprocess
-  if (!cgroup) {
-    SLURMX_ERROR("Failed to create cgroup for task #{}",
-                 instance->task->task_id);
-    this_->EvActivateTaskStatusChange_(
-        instance->task->task_id, ITask::Status::Failed,
-        fmt::format("Cannot create cgroup for the instance of task #{}",
-                    instance->task->task_id));
-    return;
-  }
-
-  if (!AllocatableResourceAllocator::Allocate(
-          instance->task->resources.allocatable_resource, cgroup)) {
-    SLURMX_ERROR(
-        "Failed to allocate allocatable resource in cgroup for task #{}",
-        instance->task->task_id);
-    this_->EvActivateTaskStatusChange_(
-        instance->task->task_id, ITask::Status::Failed,
-        fmt::format("Cannot allocate resources for the instance of task #{}",
-                    instance->task->task_id));
-    return;
-  }
-
-  // If this is a batch task, run it now.
-  if (instance->task->type == ITask::Type::Batch) {
-    const auto* batch_task = dynamic_cast<BatchTask*>(instance->task.get());
-    auto process = std::make_unique<ProcessInstance>(batch_task->executive_path,
-                                                     batch_task->arguments);
-
-    auto* file_logger = new slurmx::FileLogger(
-        fmt::format("{}", instance->task->task_id),
-        fmt::format("/tmp/SlurmX-{}.out", instance->task->task_id));
-
-    auto clean_cb = [](void* data) {
-      delete reinterpret_cast<slurmx::FileLogger*>(data);
-    };
-
-    auto outout_cb = [](std::string&& buf, void* data) {
-      auto* file_logger = reinterpret_cast<slurmx::FileLogger*>(data);
-      file_logger->Output(buf);
-    };
-
-    process->SetUserDataAndCleanCb(file_logger, std::move(clean_cb));
-    process->SetOutputCb(std::move(outout_cb));
-
-    SlurmxErr err;
-    err = this_->SpawnProcessInInstance_(instance, std::move(process));
-    if (err != SlurmxErr::kOk) {
+    TaskInstance* instance = iter->second.get();
+    instance->cg_path = CgroupStrByTaskId_(instance->task->task_id);
+    util::Cgroup* cgroup;
+    cgroup = this_->m_cg_mgr_.CreateOrOpen(instance->cg_path,
+                                           util::ALL_CONTROLLER_FLAG,
+                                           util::NO_CONTROLLER_FLAG, false);
+    // Create cgroup for the new subprocess
+    if (!cgroup) {
+      SLURMX_ERROR("Failed to create cgroup for task #{}",
+                   instance->task->task_id);
       this_->EvActivateTaskStatusChange_(
           instance->task->task_id, ITask::Status::Failed,
-          fmt::format(
-              "Cannot spawn a new process inside the instance of task #{}",
-              instance->task->task_id));
+          fmt::format("Cannot create cgroup for the instance of task #{}",
+                      instance->task->task_id));
+      return;
+    }
+
+    if (!AllocatableResourceAllocator::Allocate(
+            instance->task->resources.allocatable_resource, cgroup)) {
+      SLURMX_ERROR(
+          "Failed to allocate allocatable resource in cgroup for task #{}",
+          instance->task->task_id);
+      this_->EvActivateTaskStatusChange_(
+          instance->task->task_id, ITask::Status::Failed,
+          fmt::format("Cannot allocate resources for the instance of task #{}",
+                      instance->task->task_id));
+      return;
+    }
+
+    // Add a timer to limit the execution time of a task.
+    this_->EvAddTerminationTimer_(instance,
+                                  ToChronoSeconds(instance->task->time_limit));
+
+    // If this is a batch task, run it now.
+    if (instance->task->type == ITask::Type::Batch) {
+      const auto* batch_task = dynamic_cast<BatchTask*>(instance->task.get());
+      auto process = std::make_unique<ProcessInstance>(
+          batch_task->executive_path, batch_task->arguments);
+
+      auto* file_logger = new slurmx::FileLogger(
+          fmt::format("{}", instance->task->task_id),
+          fmt::format("/tmp/SlurmX-{}.out", instance->task->task_id));
+
+      auto clean_cb = [](void* data) {
+        delete reinterpret_cast<slurmx::FileLogger*>(data);
+      };
+
+      auto outout_cb = [](std::string&& buf, void* data) {
+        auto* file_logger = reinterpret_cast<slurmx::FileLogger*>(data);
+        file_logger->Output(buf);
+      };
+
+      process->SetUserDataAndCleanCb(file_logger, std::move(clean_cb));
+      process->SetOutputCb(std::move(outout_cb));
+
+      SlurmxErr err;
+      err = this_->SpawnProcessInInstance_(instance, std::move(process));
+      if (err != SlurmxErr::kOk) {
+        this_->EvActivateTaskStatusChange_(
+            instance->task->task_id, ITask::Status::Failed,
+            fmt::format(
+                "Cannot spawn a new process inside the instance of task #{}",
+                instance->task->task_id));
+      }
     }
   }
-
-  // Todo: Add timer for the time limit here!
 }
 
 void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
@@ -575,27 +568,27 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
   TaskStatusChange status_change;
-  this_->m_task_status_change_queue_.try_dequeue(status_change);
+  while (this_->m_task_status_change_queue_.try_dequeue(status_change)) {
+    if (status_change.new_status == ITask::Status::Finished ||
+        status_change.new_status == ITask::Status::Failed) {
+      SLURMX_DEBUG(R"(Destroying Task structure for "{}".)",
+                   status_change.task_id);
 
-  if (status_change.new_status == ITask::Status::Finished ||
-      status_change.new_status == ITask::Status::Failed) {
-    SLURMX_DEBUG(R"(Destroying Task structure for "{}".)",
-                 status_change.task_id);
+      auto iter = this_->m_task_map_.find(status_change.task_id);
+      SLURMX_ASSERT(iter != this_->m_task_map_.end(),
+                    "Task should be found here.");
 
-    auto iter = this_->m_task_map_.find(status_change.task_id);
-    SLURMX_ASSERT(iter != this_->m_task_map_.end(),
-                  "Task should be found here.");
+      // Destroy the related cgroup.
+      this_->m_cg_mgr_.Release(iter->second->cg_path);
+      SLURMX_DEBUG("Received SIGCHLD. Destroying Cgroup for task #{}",
+                   status_change.task_id);
 
-    // Destroy the related cgroup.
-    this_->m_cg_mgr_.Release(iter->second->cg_path);
-    SLURMX_DEBUG("Received SIGCHLD. Destroying Cgroup for task #{}",
-                 status_change.task_id);
+      // Free the TaskInstance structure
+      this_->m_task_map_.erase(status_change.task_id);
+    }
 
-    // Free the TaskInstance structure
-    this_->m_task_map_.erase(status_change.task_id);
+    g_ctlxd_client->TaskStatusChangeAsync(std::move(status_change));
   }
-
-  g_ctlxd_client->TaskStatusChangeAsync(std::move(status_change));
 }
 
 void TaskManager::EvActivateTaskStatusChange_(
@@ -633,74 +626,86 @@ void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
   EvQueueGrpcInteractiveTask elem;
-  this_->m_grpc_interactive_task_queue_.try_dequeue(elem);
-
-  SLURMX_TRACE("Receive one GrpcSpawnInteractiveTask for task #{}",
-               elem.task_id);
-
-  auto task_iter = this_->m_task_map_.find(elem.task_id);
-  if (task_iter == this_->m_task_map_.end()) {
-    SLURMX_ERROR("Cannot find task #{}", elem.task_id);
-    elem.err_promise.set_value(SlurmxErr::kNonExistent);
-    return;
-  }
-
-  if (task_iter->second->task->type != ITask::Type::Interactive) {
-    SLURMX_ERROR("Try spawning a new process in non-interactive task #{}!",
+  while (this_->m_grpc_interactive_task_queue_.try_dequeue(elem)) {
+    SLURMX_TRACE("Receive one GrpcSpawnInteractiveTask for task #{}",
                  elem.task_id);
-    elem.err_promise.set_value(SlurmxErr::kInvalidParam);
-    return;
+
+    auto task_iter = this_->m_task_map_.find(elem.task_id);
+    if (task_iter == this_->m_task_map_.end()) {
+      SLURMX_ERROR("Cannot find task #{}", elem.task_id);
+      elem.err_promise.set_value(SlurmxErr::kNonExistent);
+      return;
+    }
+
+    if (task_iter->second->task->type != ITask::Type::Interactive) {
+      SLURMX_ERROR("Try spawning a new process in non-interactive task #{}!",
+                   elem.task_id);
+      elem.err_promise.set_value(SlurmxErr::kInvalidParam);
+      return;
+    }
+
+    if (task_iter->second->task->status == ITask::Status::Completing) {
+      // If someone has called TerminateTask, don't spawn a new process in this
+      // task.
+      elem.err_promise.set_value(SlurmxErr::kStop);
+      return;
+    }
+
+    auto process = std::make_unique<ProcessInstance>(
+        std::move(elem.executive_path), std::move(elem.arguments));
+
+    process->SetOutputCb(std::move(elem.output_cb));
+    process->SetFinishCb(std::move(elem.finish_cb));
+
+    SlurmxErr err;
+    err = this_->SpawnProcessInInstance_(task_iter->second.get(),
+                                         std::move(process));
+    elem.err_promise.set_value(err);
+
+    if (err != SlurmxErr::kOk)
+      this_->EvActivateTaskStatusChange_(elem.task_id, ITask::Status::Failed,
+                                         std::string(SlurmxErrStr(err)));
   }
+}
 
-  if (task_iter->second->task->status == ITask::Status::Completing) {
-    // If someone has called TerminateTask, don't spawn a new process in this
-    // task.
-    elem.err_promise.set_value(SlurmxErr::kStop);
-    return;
-  }
+void TaskManager::EvOnTimerCb_(int, short, void* arg_) {
+  auto* arg = reinterpret_cast<EvTimerCbArg*>(arg_);
+  TaskManager* this_ = arg->task_manager;
 
-  auto process = std::make_unique<ProcessInstance>(
-      std::move(elem.executive_path), std::move(elem.arguments));
+  SLURMX_TRACE("Task #{} exceeded its time limit. Terminating it...",
+               arg->task_instance->task->task_id);
 
-  process->SetOutputCb(std::move(elem.output_cb));
-  process->SetFinishCb(std::move(elem.finish_cb));
-
-  SlurmxErr err;
-  err = this_->SpawnProcessInInstance_(task_iter->second.get(),
-                                       std::move(process));
-  elem.err_promise.set_value(err);
-
-  if (err != SlurmxErr::kOk)
-    this_->EvActivateTaskStatusChange_(elem.task_id, ITask::Status::Failed,
-                                       std::string(SlurmxErrStr(err)));
+  EvQueueTaskTerminate ev_task_terminate{arg->task_instance->task->task_id};
+  this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
+  event_active(this_->m_ev_task_terminate_, 0, 0);
 }
 
 void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
   EvQueueTaskTerminate elem;  // NOLINT(cppcoreguidelines-pro-type-member-init)
-  this_->m_task_terminate_queue_.try_dequeue(elem);
+  while (this_->m_task_terminate_queue_.try_dequeue(elem)) {
+    auto iter = this_->m_task_map_.find(elem.task_id);
+    if (iter == this_->m_task_map_.end()) {
+      SLURMX_ERROR("Trying terminating unknown task #{}", elem.task_id);
+      return;
+    }
 
-  auto iter = this_->m_task_map_.find(elem.task_id);
-  if (iter == this_->m_task_map_.end()) {
-    SLURMX_ERROR("Trying terminating unknown task #{}", elem.task_id);
-    return;
-  }
+    const auto& task_instance = iter->second;
+    task_instance->task->status = ITask::Status::Completing;
 
-  const auto& task_instance = iter->second;
-  task_instance->task->status = ITask::Status::Completing;
+    int sig = SIGTERM;  // For BatchTask
+    if (task_instance->task->type == ITask::Type::Interactive) sig = SIGHUP;
 
-  int sig = SIGTERM;  // For BatchTask
-  if (task_instance->task->type == ITask::Type::Interactive) sig = SIGHUP;
-
-  if (task_instance->process) {
-    // For an Interactive task with a process running or a Batch task, we just
-    // send a kill signal here.
-    KillProcessInstance_(task_instance->process.get(), sig);
-  } else {
-    // For an Interactive task with no process running, it ends immediately.
-    this_->EvActivateTaskStatusChange_(elem.task_id, ITask::Status::Finished,
-                                       std::nullopt);
+    if (task_instance->process) {
+      // For an Interactive task with a process running or a Batch task, we just
+      // send a kill signal here.
+      KillProcessInstance_(task_instance->process.get(), sig);
+    } else {
+      // For an Interactive task with no process running, it ends immediately.
+      this_->EvActivateTaskStatusChange_(elem.task_id, ITask::Status::Finished,
+                                         std::nullopt);
+    }
   }
 }
 

@@ -11,6 +11,7 @@ target_link_libraries(slurmctlxd
         Utility_AnonymousPipe
         Utility_cgroup
         Utility_PublicHeader
+        Utility_TimerSet
 
         Boost::boost
         Boost::thread

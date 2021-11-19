@@ -221,3 +221,20 @@ TEST_F(LibEventTest, CustomEvent) {
   std::this_thread::sleep_for(std::chrono::seconds(1));
   event_free(ev);
 }
+
+static void onTimer(int, short, void *arg) { SLURMX_INFO("onTimer!"); }
+
+TEST_F(LibEventTest, TimerEvent) {
+  struct event *timer_event;
+  timer_event = event_new(m_ev_base_, -1, 0, onTimer, nullptr);
+  struct timeval tv {};
+
+  tv.tv_sec = 2;
+
+  evtimer_add(timer_event, &tv);
+
+  event_base_dispatch(m_ev_base_);
+  SLURMX_INFO("Loop Exit");
+
+  event_free(timer_event);
+}

@@ -189,6 +189,12 @@ class TaskManager {
     uint32_t task_id;
   };
 
+  struct EvTimerCbArg {
+    TaskManager* task_manager;
+    TaskInstance* task_instance;
+    struct event* timer_ev;
+  };
+
   static std::string CgroupStrByTaskId_(uint32_t task_id);
 
   /**
@@ -221,6 +227,27 @@ class TaskManager {
    */
   void EvActivateTaskStatusChange_(uint32_t task_id, ITask::Status new_status,
                                    std::optional<std::string> reason);
+
+  template <typename Duration>
+  void EvAddTerminationTimer_(TaskInstance* instance, Duration duration) {
+    std::chrono::seconds const sec =
+        std::chrono::duration_cast<std::chrono::seconds>(duration);
+
+    auto* arg = new EvTimerCbArg;
+    arg->task_manager = this;
+    arg->task_instance = instance;
+
+    timeval tv{
+        sec.count(),
+        std::chrono::duration_cast<std::chrono::microseconds>(duration - sec)
+            .count()};
+
+    struct event* ev = event_new(m_ev_base_, -1, 0, EvOnTimerCb_, arg);
+    SLURMX_ASSERT(ev != nullptr, "Failed to create new timer.");
+    arg->timer_ev = ev;
+
+    evtimer_add(ev, &tv);
+  }
 
   /**
    * Send a signal to the process group to which the processes in
@@ -270,6 +297,8 @@ class TaskManager {
                                  void* user_data);
 
   static void EvExitEventCb_(evutil_socket_t, short events, void* user_data);
+
+  static void EvOnTimerCb_(evutil_socket_t, short, void* arg);
 
   struct event_base* m_ev_base_;
   struct event* m_ev_sigchld_;

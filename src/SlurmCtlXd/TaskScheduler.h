@@ -1,5 +1,7 @@
 #pragma once
 
+#include <event2/event.h>
+
 #include <atomic>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>

@@ -164,8 +164,6 @@ TEST(cgroup, memory_limit) {
       space = nullptr;
     }
 
-    (space);
-
     if (space) {
       delete[] space;
     }

@@ -1,4 +1,4 @@
-#include <grpc++/grpc++.h>
+#include <event2/thread.h>
 
 #include <condition_variable>
 #include <cxxopts.hpp>
@@ -19,6 +19,9 @@ void InitializeCtlXdGlobalVariables() {
 
   g_task_scheduler =
       std::make_unique<TaskScheduler>(std::make_unique<MinLoadFirst>());
+
+  // Enable inter-thread custom event notification.
+  evthread_use_pthreads();
 }
 
 void DestroyCtlXdGlobalVariables() {
