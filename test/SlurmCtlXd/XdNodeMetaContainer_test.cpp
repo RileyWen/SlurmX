@@ -26,7 +26,7 @@ TEST(Draft, FreeStubWhenCallingRpc) {
     std::this_thread::sleep_for(3s);
 
     (void)greeter_server.get();
-    slurmx::CloseFdFrom(0);
+    util::CloseFdFrom(0);
 
     std::terminate();
   } else {

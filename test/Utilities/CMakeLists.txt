@@ -8,10 +8,12 @@ target_link_libraries(utility_test
         Threads::Threads
         libevent::core
         cxxopts::cxxopts
+        absl::synchronization
 
         Utility_cgroup
         Utility_PublicHeader
         Utility_AnonymousPipe
+        Utility_TimerSet
         proto
 
         test_proto

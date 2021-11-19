@@ -16,8 +16,9 @@ void XdNodeMetaContainerSimpleImpl::AddNode(
         .partition_global_meta = {.m_resource_total_ = static_meta.res,
                                   .m_resource_avail_ = static_meta.res,
                                   .name = static_meta.partition_name}};
-    auto [part_metas_iter, ok] =
-        partition_metas_map_.emplace(partition_id, part_metas);
+    bool ok;
+    std::tie(part_metas_iter, ok) =
+        partition_metas_map_.emplace(partition_id, std::move(part_metas));
     SLURMX_ASSERT(
         ok == true,
         "AddNode should never fails when creating a non-existent partition.");
@@ -31,12 +32,13 @@ void XdNodeMetaContainerSimpleImpl::AddNode(
       "Add the resource of Node {} (cpu: {}, mem: {}) to partition [{}]'s "
       "global resource. partition [{}]'s Global resource now: "
       "cpu: {}, mem: {})",
-      static_meta.node_index, static_meta.res.cpu_count,
-      slurmx::ReadableMemory(static_meta.res.memory_bytes),
+      static_meta.node_index, static_meta.res.allocatable_resource.cpu_count,
+      util::ReadableMemory(static_meta.res.allocatable_resource.memory_bytes),
       static_meta.partition_name, static_meta.partition_name,
-      part_metas.partition_global_meta.m_resource_total_.cpu_count,
-      slurmx::ReadableMemory(
-          part_metas.partition_global_meta.m_resource_total_.memory_bytes));
+      part_metas.partition_global_meta.m_resource_total_.allocatable_resource
+          .cpu_count,
+      util::ReadableMemory(part_metas.partition_global_meta.m_resource_total_
+                               .allocatable_resource.memory_bytes));
 
   XdNodeMeta node_meta{
       .static_meta = static_meta,
@@ -87,11 +89,13 @@ void XdNodeMetaContainerSimpleImpl::DeleteNodeMeta(XdNodeId node_id) {
 
 XdNodeMetaContainerInterface::PartitionMetasPtr
 XdNodeMetaContainerSimpleImpl::GetPartitionMetasPtr(uint32_t partition_id) {
-  auto iter = partition_metas_map_.find(partition_id);
-  if (iter == partition_metas_map_.end()) return {nullptr};
-
   mtx_.lock();
 
+  auto iter = partition_metas_map_.find(partition_id);
+  if (iter == partition_metas_map_.end()) {
+    mtx_.unlock();
+    return PartitionMetasPtr{nullptr};
+  }
   return PartitionMetasPtr(&iter->second, &mtx_);
 }
 
@@ -116,7 +120,7 @@ uint32_t XdNodeMetaContainerSimpleImpl::GetPartitionId_(
     PartitionMetas part_metas{
         .partition_global_meta = {.name = partition_name}};
     auto [part_metas_iter, ok] =
-        partition_metas_map_.emplace(part_id, part_metas);
+        partition_metas_map_.emplace(part_id, std::move(part_metas));
     SLURMX_ASSERT(ok == true,
                   "GetPartitionId_ should never fails when creating a "
                   "non-existent partition.");
@@ -171,7 +175,7 @@ XdNodeMetaContainerSimpleImpl::GetNodeMetaPtr(XdNodeId node_id) {
   if (part_metas_iter == partition_metas_map_.end()) {
     // No such partition.
     mtx_.unlock();
-    return {nullptr};
+    return NodeMetaPtr{nullptr};
   }
 
   auto node_meta_iter =
@@ -179,10 +183,73 @@ XdNodeMetaContainerSimpleImpl::GetNodeMetaPtr(XdNodeId node_id) {
   if (node_meta_iter == part_metas_iter->second.xd_node_meta_map.end()) {
     // No such node in this partition.
     mtx_.unlock();
-    return {nullptr};
+    return NodeMetaPtr{nullptr};
   }
 
-  return {&node_meta_iter->second, &mtx_};
+  return NodeMetaPtr{&node_meta_iter->second, &mtx_};
+}
+
+XdNodeMetaContainerInterface::AllPartitionsMetaMapPtr
+XdNodeMetaContainerSimpleImpl::GetAllPartitionsMetaMapPtr() {
+  mtx_.lock();
+  return AllPartitionsMetaMapPtr{&partition_metas_map_, &mtx_};
+}
+
+void XdNodeMetaContainerSimpleImpl::MallocResourceFromNode(
+    XdNodeId node_id, uint32_t task_id, const Resources& resources) {
+  LockGuard guard(mtx_);
+
+  auto part_metas_iter = partition_metas_map_.find(node_id.partition_id);
+  if (part_metas_iter == partition_metas_map_.end()) {
+    // No such partition.
+    return;
+  }
+
+  auto node_meta_iter =
+      part_metas_iter->second.xd_node_meta_map.find(node_id.node_index);
+  if (node_meta_iter == part_metas_iter->second.xd_node_meta_map.end()) {
+    // No such node in this partition.
+    return;
+  }
+
+  node_meta_iter->second.running_task_resource_map.emplace(task_id, resources);
+  part_metas_iter->second.partition_global_meta.m_resource_avail_ -= resources;
+  part_metas_iter->second.partition_global_meta.m_resource_in_use_ += resources;
+  node_meta_iter->second.res_avail -= resources;
+  node_meta_iter->second.res_in_use += resources;
+}
+
+void XdNodeMetaContainerSimpleImpl::FreeResourceFromNode(XdNodeId node_id,
+                                                         uint32_t task_id) {
+  LockGuard guard(mtx_);
+
+  auto part_metas_iter = partition_metas_map_.find(node_id.partition_id);
+  if (part_metas_iter == partition_metas_map_.end()) {
+    // No such partition.
+    return;
+  }
+
+  auto node_meta_iter =
+      part_metas_iter->second.xd_node_meta_map.find(node_id.node_index);
+  if (node_meta_iter == part_metas_iter->second.xd_node_meta_map.end()) {
+    // No such node in this partition.
+    return;
+  }
+
+  auto resource_iter =
+      node_meta_iter->second.running_task_resource_map.find(task_id);
+  if (resource_iter == node_meta_iter->second.running_task_resource_map.end()) {
+    // Invalid task_id
+    return;
+  }
+
+  const Resources& resources = resource_iter->second;
+  part_metas_iter->second.partition_global_meta.m_resource_avail_ += resources;
+  part_metas_iter->second.partition_global_meta.m_resource_in_use_ -= resources;
+  node_meta_iter->second.res_avail += resources;
+  node_meta_iter->second.res_in_use -= resources;
+
+  node_meta_iter->second.running_task_resource_map.erase(resource_iter);
 }
 
 }  // namespace CtlXd

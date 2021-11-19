@@ -1,9 +1,8 @@
 #include "SharedTestImpl/greeter_service_impl.h"
 
-#include <chrono>
 #include <thread>
 
-#include "PublicHeader.h"
+#include "slurmx/PublicHeader.h"
 
 grpc::Status GreeterServiceImpl::SayHello(
     grpc::ServerContext* context, const grpc_example::HelloRequest* request,

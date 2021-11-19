@@ -76,7 +76,7 @@ class XdNodeKeeperTest : public ::testing::Test {
 TEST_F(XdNodeKeeperTest, FailToConnect) {
   std::string server_addr{"127.0.0.1:50011"};
 
-  resource_t res;
+  AllocatableResource res;
   res.cpu_count = 10;
   res.memory_bytes = 1024 * 1024 * 1024;
   res.memory_sw_bytes = 1024 * 1024 * 1024;
@@ -93,14 +93,14 @@ TEST_F(XdNodeKeeperTest, OneStub_OneAbortedServer) {
 
   std::string server_addr{"127.0.0.1:50011"};
 
-  resource_t res;
+  AllocatableResource res;
   res.cpu_count = 10;
   res.memory_bytes = 1024 * 1024 * 1024;
   res.memory_sw_bytes = 1024 * 1024 * 1024;
 
   std::atomic_bool has_exited = false;
 
-  auto xd_server = std::make_unique<XdServer>(server_addr, res);
+  auto xd_server = std::make_unique<XdServer>(server_addr);
   std::this_thread::sleep_for(1s);
 
   ON_CALL((*m_mock_ctlxd_server_), XdNodeIsUpCb(XdNodeId{0, 0}, _))
@@ -166,7 +166,7 @@ TEST_F(XdNodeKeeperTest, OneStub_OneTempDownServer) {
 
   std::string server_addr{"127.0.0.1:50011"};
 
-  resource_t res;
+  AllocatableResource res;
   res.cpu_count = 10;
   res.memory_bytes = 1024 * 1024 * 1024;
   res.memory_sw_bytes = 1024 * 1024 * 1024;
@@ -211,7 +211,7 @@ TEST_F(XdNodeKeeperTest, OneStub_OneTempDownServer) {
       .Times(1)
       .InSequence(seq);
 
-  auto xd_server = std::make_unique<XdServer>(server_addr, res);
+  auto xd_server = std::make_unique<XdServer>(server_addr);
   std::this_thread::sleep_for(1s);
 
   auto result_future =
@@ -229,7 +229,7 @@ TEST_F(XdNodeKeeperTest, OneStub_OneTempDownServer) {
   xd_server->Shutdown();
   xd_server.reset();
 
-  xd_server = std::make_unique<XdServer>(server_addr, res);
+  xd_server = std::make_unique<XdServer>(server_addr);
   std::this_thread::sleep_for(2s);
   xd_server->Shutdown();
   xd_server.reset();
@@ -254,7 +254,7 @@ TEST_F(XdNodeKeeperTest, OneStub_OneTempAbortedServer) {
   using Xd::XdServer;
   using namespace std::chrono_literals;
 
-  slurmx::SetCloseOnExecFromFd(STDERR_FILENO + 1);
+  util::SetCloseOnExecFromFd(STDERR_FILENO + 1);
 
   std::atomic_bool has_exited = false;
 
@@ -303,7 +303,7 @@ TEST_F(XdNodeKeeperTest, OneStub_OneTempAbortedServer) {
 
   std::string server_addr{"127.0.0.1:50011"};
 
-  resource_t res;
+  AllocatableResource res;
   res.cpu_count = 10;
   res.memory_bytes = 1024 * 1024 * 1024;
   res.memory_sw_bytes = 1024 * 1024 * 1024;
@@ -322,7 +322,7 @@ TEST_F(XdNodeKeeperTest, OneStub_OneTempAbortedServer) {
 
     pid_t child_pid = fork();
     if (child_pid == 0) {  // Child
-      auto xd_server = std::make_unique<XdServer>(server_addr, res);
+      auto xd_server = std::make_unique<XdServer>(server_addr);
       ipc->init_barrier.wait();
 
       ipc->terminate_barrier.wait();
@@ -360,7 +360,7 @@ TEST_F(XdNodeKeeperTest, OneStub_OneTempAbortedServer) {
 
     pid_t child_pid = fork();
     if (child_pid == 0) {  // Child
-      auto xd_server = std::make_unique<XdServer>(server_addr, res);
+      auto xd_server = std::make_unique<XdServer>(server_addr);
 
       (void)xd_server.get();
       ipc->terminate_barrier.wait();
@@ -391,7 +391,7 @@ TEST_F(XdNodeKeeperTest, TwoStubs_TwoTempDownServers) {
   std::string server_addr_0{"127.0.0.1:50011"};
   std::string server_addr_1{"127.0.0.1:50012"};
 
-  resource_t res;
+  AllocatableResource res;
   res.cpu_count = 10;
   res.memory_bytes = 1024 * 1024 * 1024;
   res.memory_sw_bytes = 1024 * 1024 * 1024;
@@ -472,7 +472,7 @@ TEST_F(XdNodeKeeperTest, TwoStubs_TwoTempDownServers) {
       .InSequence(seq_1);
 
   std::thread t0([&] {
-    auto xd_server = std::make_unique<XdServer>(server_addr_0, res);
+    auto xd_server = std::make_unique<XdServer>(server_addr_0);
     init_barrier_0->wait();
 
     // Wait for client stub 0 to connect.
@@ -498,7 +498,7 @@ TEST_F(XdNodeKeeperTest, TwoStubs_TwoTempDownServers) {
   t0.join();
 
   std::thread t1([&] {
-    auto xd_server = std::make_unique<XdServer>(server_addr_1, res);
+    auto xd_server = std::make_unique<XdServer>(server_addr_1);
 
     // Wait for client stub 1 to connect.
     terminate_barrier_1->wait();
@@ -524,7 +524,7 @@ TEST_F(XdNodeKeeperTest, TwoStubs_TwoTempDownServers) {
   terminate_barrier_0 = std::make_unique<boost::fibers::barrier>(2);
 
   std::thread t0_restart([&] {
-    auto xd_server = std::make_unique<XdServer>(server_addr_0, res);
+    auto xd_server = std::make_unique<XdServer>(server_addr_0);
 
     // Wait for client stub 0 to re-connect.
     terminate_barrier_0->wait();
@@ -543,7 +543,7 @@ TEST_F(XdNodeKeeperTest, CheckReuseOfSlot) {
   std::string server_addr_1{"127.0.0.1:50012"};
   std::string server_addr_2{"127.0.0.1:50013"};
 
-  resource_t res;
+  AllocatableResource res;
   res.cpu_count = 10;
   res.memory_bytes = 1024 * 1024 * 1024;
   res.memory_sw_bytes = 1024 * 1024 * 1024;
@@ -640,7 +640,7 @@ TEST_F(XdNodeKeeperTest, CheckReuseOfSlot) {
   }
 
   std::thread t0([&] {
-    auto xd_server = std::make_unique<XdServer>(server_addr_0, res);
+    auto xd_server = std::make_unique<XdServer>(server_addr_0);
     terminate_barriers[0]->wait();
     xd_server->Shutdown();
   });
@@ -648,14 +648,14 @@ TEST_F(XdNodeKeeperTest, CheckReuseOfSlot) {
   // Server 0 and 2 serve as the slot occupier and they will be shut down at the
   // same time.
   std::thread t2([&] {
-    auto xd_server = std::make_unique<XdServer>(server_addr_2, res);
+    auto xd_server = std::make_unique<XdServer>(server_addr_2);
     terminate_barriers[2]->wait();
     xd_server->Shutdown();
   });
 
   std::thread t1;
   t1 = std::thread([&] {
-    auto xd_server = std::make_unique<XdServer>(server_addr_1, res);
+    auto xd_server = std::make_unique<XdServer>(server_addr_1);
     terminate_barriers[1]->wait();
     xd_server->Shutdown();
   });
@@ -701,7 +701,7 @@ TEST_F(XdNodeKeeperTest, CheckReuseOfSlot) {
 
   terminate_barriers[1] = std::make_unique<boost::fibers::barrier>(2);
   t1 = std::thread([&] {
-    auto xd_server = std::make_unique<XdServer>(server_addr_1, res);
+    auto xd_server = std::make_unique<XdServer>(server_addr_1);
     terminate_barriers[1]->wait();
     xd_server->Shutdown();
   });

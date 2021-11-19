@@ -1,5 +1,7 @@
 #pragma once
 
+#include <absl/container/flat_hash_map.h>
+
 #include <unordered_map>
 
 #include "CtlXdPublicDefs.h"
@@ -13,11 +15,16 @@ namespace CtlXd {
  */
 class XdNodeMetaContainerInterface {
  public:
-  using Mutex = slurmx::recursive_mutex;
-  using LockGuard = slurmx::recursive_lock_guard;
+  using Mutex = util::recursive_mutex;
+  using LockGuard = util::recursive_lock_guard;
 
-  using PartitionMetasPtr = slurmx::ScopeExclusivePtr<PartitionMetas, Mutex>;
-  using NodeMetaPtr = slurmx::ScopeExclusivePtr<XdNodeMeta, Mutex>;
+  using AllPartitionsMetaMap =
+      absl::flat_hash_map<uint32_t /*partition id*/, PartitionMetas>;
+
+  using AllPartitionsMetaMapPtr =
+      util::ScopeExclusivePtr<AllPartitionsMetaMap, Mutex>;
+  using PartitionMetasPtr = util::ScopeExclusivePtr<PartitionMetas, Mutex>;
+  using NodeMetaPtr = util::ScopeExclusivePtr<XdNodeMeta, Mutex>;
 
   virtual ~XdNodeMetaContainerInterface() = default;
 
@@ -41,7 +48,7 @@ class XdNodeMetaContainerInterface {
    * Otherwise, no operation is performed.
    * @param partition_id
    */
-  virtual void TryReleasePartition(uint32_t partition_id) = 0;
+  [[deprecated]] virtual void TryReleasePartition(uint32_t partition_id) = 0;
 
   /**
    * @return Next unique node index in this partition.
@@ -49,6 +56,10 @@ class XdNodeMetaContainerInterface {
    * If partition id does not exist, 0xFFFFFFFF is returned.
    */
   virtual uint32_t AllocNodeIndexInPartition(uint32_t partition_id) = 0;
+
+  virtual void MallocResourceFromNode(XdNodeId node_id, uint32_t task_id,
+                                      const Resources& resources) = 0;
+  virtual void FreeResourceFromNode(XdNodeId node_id, uint32_t task_id) = 0;
 
   /**
    * Provide a thread-safe way to access NodeMeta.
@@ -61,16 +72,19 @@ class XdNodeMetaContainerInterface {
 
   virtual NodeMetaPtr GetNodeMetaPtr(XdNodeId node_id) = 0;
 
+  virtual AllPartitionsMetaMapPtr GetAllPartitionsMetaMapPtr() = 0;
+
  protected:
   XdNodeMetaContainerInterface() = default;
 
   virtual uint32_t GetNextPartitionSeq_() = 0;
 };
 
-class XdNodeMetaContainerSimpleImpl : public XdNodeMetaContainerInterface {
+class XdNodeMetaContainerSimpleImpl final
+    : public XdNodeMetaContainerInterface {
  public:
   XdNodeMetaContainerSimpleImpl() = default;
-  ~XdNodeMetaContainerSimpleImpl() = default;
+  ~XdNodeMetaContainerSimpleImpl() override = default;
 
   void AddNode(const XdNodeStaticMeta& static_meta) override;
 
@@ -80,6 +94,8 @@ class XdNodeMetaContainerSimpleImpl : public XdNodeMetaContainerInterface {
 
   NodeMetaPtr GetNodeMetaPtr(XdNodeId node_id) override;
 
+  AllPartitionsMetaMapPtr GetAllPartitionsMetaMapPtr() override;
+
   bool PartitionExists(const std::string& partition_name) override;
 
   uint32_t GetPartitionId(const std::string& partition_name) override;
@@ -87,6 +103,11 @@ class XdNodeMetaContainerSimpleImpl : public XdNodeMetaContainerInterface {
   void TryReleasePartition(uint32_t partition_id) override;
 
   uint32_t AllocNodeIndexInPartition(uint32_t partition_id) override;
+
+  void MallocResourceFromNode(XdNodeId node_id, uint32_t task_id,
+                              const Resources& resources) override;
+
+  void FreeResourceFromNode(XdNodeId node_id, uint32_t task_id) override;
 
  private:
   /**
@@ -105,10 +126,9 @@ class XdNodeMetaContainerSimpleImpl : public XdNodeMetaContainerInterface {
    */
   uint32_t GetPartitionId_(const std::string& partition_name);
 
-  std::unordered_map<uint32_t /*partition id*/, PartitionMetas>
-      partition_metas_map_;
+  AllPartitionsMetaMap partition_metas_map_;
 
-  std::unordered_map<std::string /*partition name*/, uint32_t /*partition id*/>
+  absl::flat_hash_map<std::string /*partition name*/, uint32_t /*partition id*/>
       partition_name_id_map_;
   uint32_t partition_seq_ = 0;
 

@@ -1,4 +1,4 @@
-#include <grpc++/grpc++.h>
+#include <event2/thread.h>
 
 #include <condition_variable>
 #include <cxxopts.hpp>
@@ -7,14 +7,21 @@
 #include <thread>
 
 #include "CtlXdGrpcServer.h"
-#include "PublicHeader.h"
+#include "TaskScheduler.h"
 #include "XdNodeKeeper.h"
 #include "XdNodeMetaContainer.h"
+#include "slurmx/PublicHeader.h"
 
 void InitializeCtlXdGlobalVariables() {
   using namespace CtlXd;
   g_node_keeper = std::make_unique<XdNodeKeeper>();
   g_meta_container = std::make_unique<XdNodeMetaContainerSimpleImpl>();
+
+  g_task_scheduler =
+      std::make_unique<TaskScheduler>(std::make_unique<MinLoadFirst>());
+
+  // Enable inter-thread custom event notification.
+  evthread_use_pthreads();
 }
 
 void DestroyCtlXdGlobalVariables() {

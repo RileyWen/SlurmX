@@ -68,7 +68,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
 
 list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/libuv")
-pkg_check_modules(libuv IMPORTED_TARGET libuv>=1.40.0)
+pkg_check_modules(libuv-static IMPORTED_TARGET libuv-static>=1.40.0)
 
 # concurrent queue has no cmake config files. Add it manually as a header-only library.
 add_library(concurrentqueue INTERFACE)

@@ -1,6 +1,6 @@
 #pragma once
 
-namespace slurmx {
+namespace util {
 
 /**
  *
@@ -10,7 +10,7 @@ namespace slurmx {
 template <typename T, typename Lockable>
 class ScopeExclusivePtr {
  public:
-  ScopeExclusivePtr(T* data, Lockable* lock = nullptr) noexcept
+  explicit ScopeExclusivePtr(T* data, Lockable* lock = nullptr) noexcept
       : data_(data), lock_(lock) {}
 
   ~ScopeExclusivePtr() noexcept {
@@ -23,11 +23,20 @@ class ScopeExclusivePtr {
   T& operator*() { return *data_; }
   T* operator->() { return data_; }
 
-  operator bool() { return data_ != nullptr; }
+  explicit operator bool() { return data_ != nullptr; }
+
+  ScopeExclusivePtr(ScopeExclusivePtr const&) = delete;
+  ScopeExclusivePtr& operator=(ScopeExclusivePtr const&) = delete;
+
+  ScopeExclusivePtr(ScopeExclusivePtr&& val) noexcept {
+    data_ = val.data_;
+    lock_ = val.lock_;
+    val.lock_ = nullptr;
+  }
 
  private:
   T* data_;
   Lockable* lock_;
 };
 
-}  // namespace slurmx
+}  // namespace util
