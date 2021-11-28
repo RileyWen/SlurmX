@@ -578,8 +578,15 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
       SLURMX_ASSERT(iter != this_->m_task_map_.end(),
                     "Task should be found here.");
 
+      TaskInstance* task_instance = iter->second.get();
+
+      if (task_instance->termination_timer) {
+        event_del(task_instance->termination_timer);
+        event_free(task_instance->termination_timer);
+      }
+
       // Destroy the related cgroup.
-      this_->m_cg_mgr_.Release(iter->second->cg_path);
+      this_->m_cg_mgr_.Release(task_instance->cg_path);
       SLURMX_DEBUG("Received SIGCHLD. Destroying Cgroup for task #{}",
                    status_change.task_id);
 
@@ -678,6 +685,10 @@ void TaskManager::EvOnTimerCb_(int, short, void* arg_) {
   EvQueueTaskTerminate ev_task_terminate{arg->task_instance->task->task_id};
   this_->m_task_terminate_queue_.enqueue(ev_task_terminate);
   event_active(this_->m_ev_task_terminate_, 0, 0);
+
+  event_del(arg->timer_ev);
+  event_free(arg->timer_ev);
+  arg->task_instance->termination_timer = nullptr;
 }
 
 void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {

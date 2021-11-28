@@ -1,7 +1,8 @@
 #include "CtlXdGrpcServer.h"
 
-#include <signal.h>
+#include <google/protobuf/util/time_util.h>
 
+#include <csignal>
 #include <limits>
 #include <utility>
 
@@ -25,7 +26,7 @@ grpc::Status CtlXd::SlurmCtlXdServiceImpl::RegisterSlurmXd(
 
   XdNodeId node_id{};
   node_id.partition_id =
-      g_meta_container->GetPartitionId(request->partition_name());
+      g_meta_container->AllocPartitionId(request->partition_name());
   node_id.node_index =
       g_meta_container->AllocNodeIndexInPartition(node_id.partition_id);
 
@@ -191,6 +192,21 @@ grpc::Status SlurmCtlXdServiceImpl::TerminateTask(
       response->set_ok(false);
     }
   }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status SlurmCtlXdServiceImpl::QueryJobsInPartition(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryJobsInPartitionRequest *request,
+    SlurmxGrpc::QueryJobsInPartitionReply *response) {
+  uint32_t partition_id;
+
+  if (!g_meta_container->GetPartitionId(request->partition(), &partition_id))
+    return grpc::Status::OK;
+  g_task_scheduler->QueryTaskBriefMetaInPartition(
+      partition_id, QueryBriefTaskMetaFieldControl{true, true, true},
+      response->mutable_task_metas());
 
   return grpc::Status::OK;
 }

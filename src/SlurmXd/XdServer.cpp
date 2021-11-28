@@ -326,7 +326,7 @@ grpc::Status SlurmXdServiceImpl::ExecuteTask(
     SlurmxGrpc::ExecuteTaskReply *response) {
   std::unique_ptr<ITask> itask;
 
-  if (request->task().type() == SlurmxGrpc::Task::Batch) {
+  if (request->task().type() == SlurmxGrpc::Batch) {
     auto task = std::make_unique<BatchTask>();
 
     task->executive_path = request->batch_meta().executive_path();
@@ -338,7 +338,7 @@ grpc::Status SlurmXdServiceImpl::ExecuteTask(
     task->output_file_pattern = request->batch_meta().output_file_pattern();
 
     itask = std::move(task);
-  } else if (request->task().type() == SlurmxGrpc::Task::Interactive) {
+  } else if (request->task().type() == SlurmxGrpc::Interactive) {
     auto task = std::make_unique<InteractiveTask>();
     task->type = ITask::Type::Interactive;
 

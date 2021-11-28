@@ -1,7 +1,7 @@
 syntax = "proto3";
 
 package SlurmxGrpc;
-option go_package = "github.com/RileyWen/SlurmX/protos";
+option go_package = "/protos";
 
 import "PublicDefs.proto";
 import "google/protobuf/duration.proto";
@@ -185,6 +185,14 @@ message TerminateTaskReply {
   string reason = 2;
 }
 
+message QueryJobsInPartitionRequest {
+  string partition = 1;
+}
+
+message QueryJobsInPartitionReply {
+  repeated BriefTaskMeta task_metas = 1;
+}
+
 // Todo: Divide service into two parts: one for SlurmXd and one for SrunX
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -197,13 +205,18 @@ service SlurmCtlXd {
   /* RPCs called from SrunX */
   /* When SrunX request an interactive job, it will first request SrunX to allocate
      an interactive task and get the related meta information. */
-  rpc AllocateInteractiveTask(InteractiveTaskAllocRequest) returns(InteractiveTaskAllocReply);
-  rpc QueryInteractiveTaskAllocDetail(QueryInteractiveTaskAllocDetailRequest) returns(QueryInteractiveTaskAllocDetailReply);
+  rpc AllocateInteractiveTask(InteractiveTaskAllocRequest) returns (InteractiveTaskAllocReply);
+  rpc QueryInteractiveTaskAllocDetail(QueryInteractiveTaskAllocDetailRequest) returns (QueryInteractiveTaskAllocDetailReply);
 
   rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
 
+
   /* RPCs called from sbatch */
-  rpc SubmitBatchTask(SubmitBatchTaskRequest) returns(SubmitBatchTaskReply);
+  rpc SubmitBatchTask(SubmitBatchTaskRequest) returns (SubmitBatchTaskReply);
+
+
+  /* RPCs called from SqueueX */
+  rpc QueryJobsInPartition(QueryJobsInPartitionRequest) returns (QueryJobsInPartitionReply);
 }
 
 service SlurmXd {

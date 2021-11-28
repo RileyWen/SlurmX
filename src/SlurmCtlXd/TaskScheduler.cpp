@@ -24,6 +24,10 @@ TaskScheduler::~TaskScheduler() {
 
 void TaskScheduler::ScheduleThread_() {
   while (!m_thread_stop_) {
+    // Note: In other parts of code, we must avoid the happening of the
+    // situation where m_running_task_map_mtx is acquired and then
+    // m_pending_task_map_mtx_ needs to be acquired. Deadlock may happen under
+    // such a situation.
     m_pending_task_map_mtx_.Lock();
     if (!m_pending_task_map_.empty()) {  // all_part_metas is locked here.
       auto all_part_metas = g_meta_container->GetAllPartitionsMetaMapPtr();
@@ -41,6 +45,8 @@ void TaskScheduler::ScheduleThread_() {
         auto& task = it.first;
         uint32_t partition_id = task->partition_id;
         uint32_t node_index = it.second;
+
+        task->status = ITask::Status::Running;
 
         XdNodeId node_id{partition_id, node_index};
         g_meta_container->MallocResourceFromNode(node_id, task->task_id,
@@ -66,7 +72,12 @@ void TaskScheduler::ScheduleThread_() {
         const auto* task_ptr = task.get();
 
         m_running_task_map_mtx_.Lock();
+        m_task_indexes_mtx_.Lock();
+
+        m_node_to_tasks_map_[node_id.node_index].emplace(task->task_id);
         m_running_task_map_.emplace(task->task_id, std::move(task));
+
+        m_task_indexes_mtx_.Unlock();
         m_running_task_map_mtx_.Unlock();
 
         XdNodeStub* node_stub = g_node_keeper->GetXdStub(node_id);
@@ -92,6 +103,12 @@ void TaskScheduler::CleanEndedTaskThread_() {
                 absl::Seconds(kEndedTaskKeepingTimeSeconds) >
             absl::Now()) {
           auto copy_iter = iter++;
+
+          ITask* task = copy_iter->second.get();
+          {
+            LockGuard indexes_guard(m_task_indexes_mtx_);
+            m_partition_to_tasks_map_[task->partition_id].erase(task->task_id);
+          }
           m_ended_task_map_.erase(copy_iter);
         } else
           iter++;
@@ -110,12 +127,9 @@ void TaskScheduler::SetNodeSelectionAlgo(
 
 SlurmxErr TaskScheduler::SubmitTask(std::unique_ptr<ITask> task,
                                     uint32_t* task_id) {
-  // Check whether the selected partition exists.
-  if (!g_meta_container->PartitionExists(task->partition_name))
+  uint32_t partition_id;
+  if (!g_meta_container->GetPartitionId(task->partition_name, &partition_id))
     return SlurmxErr::kNonExistent;
-
-  uint32_t partition_id =
-      g_meta_container->GetPartitionId(task->partition_name);
 
   // Check whether the selected partition is able to run this task.
   auto metas_ptr = g_meta_container->GetPartitionMetasPtr(partition_id);
@@ -138,6 +152,10 @@ SlurmxErr TaskScheduler::SubmitTask(std::unique_ptr<ITask> task,
 
   *task_id = task->task_id;
 
+  m_task_indexes_mtx_.Lock();
+  m_partition_to_tasks_map_[task->partition_id].emplace(task->task_id);
+  m_task_indexes_mtx_.Unlock();
+
   m_pending_task_map_mtx_.Lock();
   m_pending_task_map_.emplace(task->task_id, std::move(task));
   m_pending_task_map_mtx_.Unlock();
@@ -147,7 +165,9 @@ SlurmxErr TaskScheduler::SubmitTask(std::unique_ptr<ITask> task,
 
 void TaskScheduler::TaskStatusChange(uint32_t task_id, ITask::Status new_status,
                                      std::optional<std::string> reason) {
+  // The order of LockGuards matters.
   LockGuard running_guard(m_running_task_map_mtx_);
+  LockGuard indexes_guard(m_task_indexes_mtx_);
   LockGuard ended_guard(m_ended_task_map_mtx_);
 
   auto iter = m_running_task_map_.find(task_id);
@@ -170,21 +190,113 @@ void TaskScheduler::TaskStatusChange(uint32_t task_id, ITask::Status new_status,
 
   g_meta_container->FreeResourceFromNode({task->partition_id, task->node_index},
                                          task_id);
+
+  m_node_to_tasks_map_[task->node_index].erase(task_id);
+
   m_ended_task_map_.emplace(task_id, std::move(task));
 }
 
 bool TaskScheduler::QueryXdNodeIdOfRunningTask(uint32_t task_id,
-                                               XdNodeId* xd_node_id) {
+                                               XdNodeId* node_id) {
   LockGuard running_guard(m_running_task_map_mtx_);
-
   auto iter = m_running_task_map_.find(task_id);
-  if (iter == m_running_task_map_.end()) {
-    SLURMX_ERROR("Unknown task id {} when change task status.", task_id);
-    return false;
-  }
-  xd_node_id->partition_id = iter->second->partition_id;
-  xd_node_id->node_index = iter->second->node_index;
+  if (iter == m_running_task_map_.end()) return false;
+
+  node_id->node_index = iter->second->node_index;
+  node_id->partition_id = iter->second->partition_id;
   return true;
+}
+
+void TaskScheduler::QueryTaskBriefMetaInPartition(
+    uint32_t partition_id, const QueryBriefTaskMetaFieldControl& field_control,
+    google::protobuf::RepeatedPtrField<SlurmxGrpc::BriefTaskMeta>* task_metas) {
+  static auto fn_fill_brief_meta =
+      [](ITask* task, const QueryBriefTaskMetaFieldControl& field_control,
+         SlurmxGrpc::BriefTaskMeta* task_meta) {
+        task_meta->set_task_id(task->task_id);
+        if (field_control.type) {
+          switch (task->type) {
+            case ITask::Type::Interactive:
+              task_meta->set_type(SlurmxGrpc::Interactive);
+              break;
+            case ITask::Type::Batch:
+              task_meta->set_type(SlurmxGrpc::Batch);
+              break;
+          }
+        }
+        if (field_control.status) {
+          switch (task->status) {
+            case ITask::Status::Pending:
+              task_meta->set_status(SlurmxGrpc::Pending);
+              break;
+            case ITask::Status::Running:
+              task_meta->set_status(SlurmxGrpc::Running);
+              break;
+            case ITask::Status::Completing:
+              task_meta->set_status(SlurmxGrpc::Completing);
+              break;
+            case ITask::Status::Finished:
+              task_meta->set_status(SlurmxGrpc::Finished);
+              break;
+            case ITask::Status::Failed:
+              task_meta->set_status(SlurmxGrpc::Failed);
+              break;
+          }
+        }
+        if (field_control.start_time) {
+          auto* timestamp = task_meta->mutable_estimated_start_time();
+          timeval tv = ToTimeval(task->start_time);
+          timestamp->set_seconds(tv.tv_sec);
+          timestamp->set_nanos(tv.tv_usec * 1000);
+        }
+      };
+
+  std::list<uint32_t> tasks_in_partition;
+
+  m_task_indexes_mtx_.Lock();
+  for (uint32_t task_id : m_partition_to_tasks_map_[partition_id])
+    tasks_in_partition.emplace_back(task_id);
+  m_task_indexes_mtx_.Unlock();
+
+  {
+    LockGuard pending_guard(m_pending_task_map_mtx_);
+    for (auto iter = tasks_in_partition.begin();
+         iter != tasks_in_partition.end();) {
+      auto map_iter = m_pending_task_map_.find(*iter);
+      if (map_iter != m_pending_task_map_.end()) {
+        fn_fill_brief_meta(map_iter->second.get(), field_control,
+                           task_metas->Add());
+        iter = tasks_in_partition.erase(iter);
+      } else
+        std::advance(iter, 1);
+    }
+  }
+  {
+    LockGuard running_guard(m_running_task_map_mtx_);
+    for (auto iter = tasks_in_partition.begin();
+         iter != tasks_in_partition.end();) {
+      auto map_iter = m_running_task_map_.find(*iter);
+      if (map_iter != m_running_task_map_.end()) {
+        fn_fill_brief_meta(map_iter->second.get(), field_control,
+                           task_metas->Add());
+        iter = tasks_in_partition.erase(iter);
+      } else
+        std::advance(iter, 1);
+    }
+  }
+  {
+    LockGuard ended_guard(m_ended_task_map_mtx_);
+    for (auto iter = tasks_in_partition.begin();
+         iter != tasks_in_partition.end();) {
+      auto map_iter = m_ended_task_map_.find(*iter);
+      if (map_iter != m_ended_task_map_.end()) {
+        fn_fill_brief_meta(map_iter->second.get(), field_control,
+                           task_metas->Add());
+        iter = tasks_in_partition.erase(iter);
+      } else
+        std::advance(iter, 1);
+    }
+  }
 }
 
 void MinLoadFirst::NodeSelect(

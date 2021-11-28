@@ -49,9 +49,9 @@ SlurmxErr XdNodeStub::ExecuteTask(const ITask *task) {
 
   // Set type
   if (task->type == ITask::Type::Interactive)
-    mutable_task->set_type(SlurmxGrpc::Task::Interactive);
+    mutable_task->set_type(SlurmxGrpc::Interactive);
   else if (task->type == ITask::Type::Batch)
-    mutable_task->set_type(SlurmxGrpc::Task::Batch);
+    mutable_task->set_type(SlurmxGrpc::Batch);
   else
     SLURMX_ASSERT(false, "Unknown task type.");
 
