@@ -205,7 +205,7 @@ grpc::Status SlurmCtlXdServiceImpl::QueryJobsInPartition(
   if (!g_meta_container->GetPartitionId(request->partition(), &partition_id))
     return grpc::Status::OK;
   g_task_scheduler->QueryTaskBriefMetaInPartition(
-      partition_id, QueryBriefTaskMetaFieldControl{true, true, true},
+      partition_id, QueryBriefTaskMetaFieldControl{true, true, true, true},
       response->mutable_task_metas());
 
   return grpc::Status::OK;

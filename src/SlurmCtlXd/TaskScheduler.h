@@ -27,6 +27,7 @@ struct QueryBriefTaskMetaFieldControl {
   bool type;
   bool status;
   bool start_time;
+  bool node_index;
 };
 
 class INodeSelectionAlgo {

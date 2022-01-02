@@ -47,6 +47,7 @@ void TaskScheduler::ScheduleThread_() {
         uint32_t node_index = it.second;
 
         task->status = ITask::Status::Running;
+        task->node_index = node_index;
 
         XdNodeId node_id{partition_id, node_index};
         g_meta_container->MallocResourceFromNode(node_id, task->task_id,
@@ -248,6 +249,9 @@ void TaskScheduler::QueryTaskBriefMetaInPartition(
           timeval tv = ToTimeval(task->start_time);
           timestamp->set_seconds(tv.tv_sec);
           timestamp->set_nanos(tv.tv_usec * 1000);
+        }
+        if (field_control.node_index) {
+          task_meta->set_node_index(task->node_index);
         }
       };
 
