@@ -1,5 +1,7 @@
 #pragma once
 
+#include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
 #include <event2/event.h>
 
 #include <atomic>
@@ -12,10 +14,21 @@
 
 #include "CtlXdPublicDefs.h"
 #include "XdNodeMetaContainer.h"
+#include "protos/slurmx.pb.h"
 #include "slurmx/Lock.h"
 #include "slurmx/PublicHeader.h"
 
 namespace CtlXd {
+
+// Task ID is used for querying this structure.
+// The node index has also been recorded in XdNodeMetaContainer, so there's no
+// need to query it here.
+struct QueryBriefTaskMetaFieldControl {
+  bool type;
+  bool status;
+  bool start_time;
+  bool node_index;
+};
 
 class INodeSelectionAlgo {
  public:
@@ -66,6 +79,12 @@ class TaskScheduler {
   using Mutex = absl::Mutex;
   using LockGuard = util::AbslMutexLockGuard;
 
+  template <typename K, typename V>
+  using HashMap = absl::flat_hash_map<K, V>;
+
+  template <typename K>
+  using HashSet = absl::flat_hash_set<K>;
+
  public:
   explicit TaskScheduler(std::unique_ptr<INodeSelectionAlgo> algo);
 
@@ -78,7 +97,14 @@ class TaskScheduler {
   void TaskStatusChange(uint32_t task_id, ITask::Status new_status,
                         std::optional<std::string> reason);
 
-  bool QueryXdNodeIdOfRunningTask(uint32_t task_id, XdNodeId* xd_node_id);
+  // Temporary inconsistency may happen. If 'false' is returned, just ignore it.
+  void QueryTaskBriefMetaInPartition(
+      uint32_t partition_id,
+      const QueryBriefTaskMetaFieldControl& field_control,
+      google::protobuf::RepeatedPtrField<SlurmxGrpc::BriefTaskMeta>*
+          task_metas);
+
+  bool QueryXdNodeIdOfRunningTask(uint32_t task_id, XdNodeId* node_id);
 
  private:
   void ScheduleThread_();
@@ -103,6 +129,13 @@ class TaskScheduler {
   absl::flat_hash_map<uint32_t, std::unique_ptr<ITask>> m_ended_task_map_
       GUARDED_BY(m_ended_task_map_mtx_);
   Mutex m_ended_task_map_mtx_;
+
+  // Task Indexes
+  HashMap<uint32_t /* Node Index */, HashSet<uint32_t /* Task ID*/>>
+      m_node_to_tasks_map_ GUARDED_BY(m_task_indexes_mtx_);
+  HashMap<uint32_t /* Partition ID */, HashSet<uint32_t /* Task ID */>>
+      m_partition_to_tasks_map_ GUARDED_BY(m_task_indexes_mtx_);
+  Mutex m_task_indexes_mtx_;
 
   std::thread m_schedule_thread_;
   std::thread m_clean_ended_thread_;

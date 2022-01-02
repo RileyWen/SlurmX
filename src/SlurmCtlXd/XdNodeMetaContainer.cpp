@@ -8,7 +8,7 @@ void XdNodeMetaContainerSimpleImpl::AddNode(
     const XdNodeStaticMeta& static_meta) {
   LockGuard guard(mtx_);
 
-  uint32_t partition_id = GetPartitionId_(static_meta.partition_name);
+  uint32_t partition_id = AllocPartitionId(static_meta.partition_name);
   auto part_metas_iter = partition_metas_map_.find(partition_id);
   if (part_metas_iter == partition_metas_map_.end()) {
     // New partition. May be redundant here. See GetPartitionId_().
@@ -103,14 +103,19 @@ uint32_t XdNodeMetaContainerSimpleImpl::GetNextPartitionSeq_() {
   return partition_seq_++;
 }
 
-uint32_t XdNodeMetaContainerSimpleImpl::GetPartitionId(
-    const std::string& partition_name) {
+bool XdNodeMetaContainerSimpleImpl::GetPartitionId(
+    const std::string& partition_name, uint32_t* partition_id) {
   LockGuard guard(mtx_);
+  auto iter = partition_name_id_map_.find(partition_name);
+  if (iter == partition_name_id_map_.end()) {
+    return false;
+  }
 
-  return GetPartitionId_(partition_name);
+  *partition_id = iter->second;
+  return true;
 }
 
-uint32_t XdNodeMetaContainerSimpleImpl::GetPartitionId_(
+uint32_t XdNodeMetaContainerSimpleImpl::AllocPartitionId(
     const std::string& partition_name) {
   auto iter = partition_name_id_map_.find(partition_name);
   if (iter == partition_name_id_map_.end()) {
@@ -122,7 +127,7 @@ uint32_t XdNodeMetaContainerSimpleImpl::GetPartitionId_(
     auto [part_metas_iter, ok] =
         partition_metas_map_.emplace(part_id, std::move(part_metas));
     SLURMX_ASSERT(ok == true,
-                  "GetPartitionId_ should never fails when creating a "
+                  "AllocPartitionId should never fails when creating a "
                   "non-existent partition.");
     return part_id;
   }

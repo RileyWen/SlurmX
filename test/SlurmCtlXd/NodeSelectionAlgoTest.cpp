@@ -11,7 +11,7 @@ TEST(NodeSelectionAlgo, MinLoadFirst) {  // NOLINT(cert-err58-cpp)
   g_meta_container = std::make_unique<XdNodeMetaContainerSimpleImpl>();
   const std::string partition_name{"Part1"};
 
-  uint32_t part_id = g_meta_container->GetPartitionId(partition_name);
+  uint32_t part_id = g_meta_container->AllocPartitionId(partition_name);
   ASSERT_EQ(part_id, 0);
 
   uint32_t node_index = g_meta_container->AllocNodeIndexInPartition(part_id);

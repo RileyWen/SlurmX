@@ -41,7 +41,10 @@ class XdNodeMetaContainerInterface {
    * @return The partition id. If partition name doesn't exist, a new partition
    * id will be allocated to this partition name.
    */
-  virtual uint32_t GetPartitionId(const std::string& partition_name) = 0;
+  virtual bool GetPartitionId(const std::string& partition_name,
+                              uint32_t* partition_id) = 0;
+
+  virtual uint32_t AllocPartitionId(const std::string& partition_name) = 0;
 
   /**
    * Free all the structures of a partition if this partition is empty.
@@ -98,7 +101,10 @@ class XdNodeMetaContainerSimpleImpl final
 
   bool PartitionExists(const std::string& partition_name) override;
 
-  uint32_t GetPartitionId(const std::string& partition_name) override;
+  bool GetPartitionId(const std::string& partition_name,
+                      uint32_t* partition_id) override;
+
+  uint32_t AllocPartitionId(const std::string& partition_name);
 
   void TryReleasePartition(uint32_t partition_id) override;
 
@@ -120,11 +126,6 @@ class XdNodeMetaContainerSimpleImpl final
    * @return next unique partition sequence number.
    */
   uint32_t GetNextPartitionSeq_() override;
-
-  /**
-   * This function is not thread-safe.
-   */
-  uint32_t GetPartitionId_(const std::string& partition_name);
 
   AllPartitionsMetaMap partition_metas_map_;
 

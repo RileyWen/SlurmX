@@ -127,6 +127,7 @@ struct TaskInstance {
 
   // The cgroup name that restrains the TaskInstance.
   std::string cg_path;
+  struct event* termination_timer;
 
   std::unique_ptr<ProcessInstance> process;
 };
@@ -244,9 +245,10 @@ class TaskManager {
 
     struct event* ev = event_new(m_ev_base_, -1, 0, EvOnTimerCb_, arg);
     SLURMX_ASSERT(ev != nullptr, "Failed to create new timer.");
-    arg->timer_ev = ev;
-
     evtimer_add(ev, &tv);
+
+    arg->timer_ev = ev;
+    arg->task_instance->termination_timer = ev;
   }
 
   /**
