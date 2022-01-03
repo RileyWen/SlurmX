@@ -131,8 +131,8 @@ struct fmt::formatter<XdNodeId> {
 // It contains CPU and memory by now.
 struct AllocatableResource {
   uint32_t cpu_count = 0;
-  uint64_t memory_bytes = 0;
-  uint64_t memory_sw_bytes = 0;
+  uint64_t memory_bytes = 0;     // Todo: Add comment
+  uint64_t memory_sw_bytes = 0;  // Todo: Add comment
 
   AllocatableResource() = default;
   explicit AllocatableResource(const SlurmxGrpc::AllocatableResource&);
@@ -151,7 +151,7 @@ bool operator==(const AllocatableResource& lhs, const AllocatableResource& rhs);
  * Model the dedicated resources in a slurmxd node.
  * It contains GPU, NIC, etc.
  */
-struct DedicatedResource {};
+struct DedicatedResource {};  // Todo: Slurm GRES
 
 /**
  * When a task is allocated a resource UUID, it holds one instance of Resources
