@@ -134,15 +134,27 @@ SlurmxErr TaskScheduler::SubmitTask(std::unique_ptr<ITask> task,
 
   // Check whether the selected partition is able to run this task.
   auto metas_ptr = g_meta_container->GetPartitionMetasPtr(partition_id);
-  if (metas_ptr->partition_global_meta.m_resource_avail_ < task->resources) {
+  if (!(task->resources <=
+        metas_ptr->partition_global_meta.m_resource_total_)) {
     SLURMX_TRACE(
-        "Resource not enough. Avail: cpu {}, mem: {}, mem+sw: {}",
-        metas_ptr->partition_global_meta.m_resource_avail_.allocatable_resource
+        "Resource not enough. Partition total: cpu {}, mem: {}, mem+sw: {}",
+        metas_ptr->partition_global_meta.m_resource_total_.allocatable_resource
             .cpu_count,
-        util::ReadableMemory(metas_ptr->partition_global_meta.m_resource_avail_
+        util::ReadableMemory(metas_ptr->partition_global_meta.m_resource_total_
                                  .allocatable_resource.memory_bytes),
-        util::ReadableMemory(metas_ptr->partition_global_meta.m_resource_avail_
+        util::ReadableMemory(metas_ptr->partition_global_meta.m_resource_total_
                                  .allocatable_resource.memory_sw_bytes));
+    return SlurmxErr::kNoResource;
+  }
+
+  bool fit_in_a_node = false;
+  for (auto&& [node_index, node_meta] : metas_ptr->xd_node_meta_map) {
+    if (!(task->resources <= node_meta.res_total)) continue;
+    fit_in_a_node = true;
+    break;
+  }
+  if (!fit_in_a_node) {
+    SLURMX_TRACE("Resource not enough. Task cannot fit in any node.");
     return SlurmxErr::kNoResource;
   }
 
@@ -319,13 +331,12 @@ void MinLoadFirst::NodeSelect(
   using TimeAvailResMap = std::map<absl::Time, Resources>;
 
   struct NodeSelectionInfo {
-    absl::btree_multimap<uint32_t /* # of running tasks */,
-                         uint32_t /* node index */>
+    std::multimap<uint32_t /* # of running tasks */, uint32_t /* node index */>
         task_num_node_id_map;
-    absl::flat_hash_map<uint32_t /* Node Index*/, TimeAvailResMap>
+    std::unordered_map<uint32_t /* Node Index*/, TimeAvailResMap>
         node_time_avail_res_map;
   };
-  absl::flat_hash_map<uint32_t /* Partition ID */, NodeSelectionInfo>
+  std::unordered_map<uint32_t /* Partition ID */, NodeSelectionInfo>
       part_id_node_info_map;
 
   // Truncated by 1s
@@ -370,6 +381,9 @@ void MinLoadFirst::NodeSelect(
       //  second task end, ...] in this node.
       auto& time_avail_res_map =
           node_info_in_a_partition.node_time_avail_res_map[node_index];
+
+      // Insert [now, inf) interval and thus guarantee time_avail_res_map is not
+      // null.
       time_avail_res_map[now] = node_meta.res_avail;
 
       {  // Limit the scope of `iter`
@@ -429,11 +443,27 @@ void MinLoadFirst::NodeSelect(
   //  task to run in its partition.
   for (auto it = pending_task_map->begin(); it != pending_task_map->end();) {
     uint32_t task_id = it->first;
+    uint32_t part_id = it->second->partition_id;
     auto& task = it->second;
-    NodeSelectionInfo& node_info = part_id_node_info_map[task->partition_id];
 
-    uint32_t min_load_node_index =
-        node_info.task_num_node_id_map.begin()->second;
+    NodeSelectionInfo& node_info = part_id_node_info_map[part_id];
+    auto& part_meta = all_partitions_meta_map.at(part_id);
+
+    uint32_t min_load_node_index;
+    for (auto&& [_, node_index] : node_info.task_num_node_id_map) {
+      auto& node_meta = part_meta.xd_node_meta_map.at(node_index);
+      if (!(it->second->resources <= node_meta.res_total)) {
+        SLURMX_TRACE(
+            "Task #{} needs more resource than that of node {} in partition "
+            "{}. Skipping this partition.",
+            task_id, node_index, part_id);
+        continue;
+      }
+      min_load_node_index = node_index;
+      task->node_index = node_index;
+      break;
+    }
+
     TimeAvailResMap& time_avail_res_map =
         node_info.node_time_avail_res_map[min_load_node_index];
 
@@ -443,11 +473,11 @@ void MinLoadFirst::NodeSelect(
     // time point, all tasks will end and this pending task can eventually be
     // run.
     absl::Time expected_start_time;
-    TimeAvailResMap::iterator task_duration_begin_it;
+    auto task_duration_begin_it = time_avail_res_map.begin();
     TimeAvailResMap::iterator task_duration_end_it;
-    for (task_duration_begin_it = time_avail_res_map.begin();
-         task_duration_begin_it != time_avail_res_map.end();
-         task_duration_begin_it++) {
+
+    for (; task_duration_begin_it != time_avail_res_map.end();
+         ++task_duration_begin_it) {
       absl::Time end_time = task_duration_begin_it->first + task->time_limit;
 
       bool resource_enough_in_this_duration = true;
@@ -466,7 +496,7 @@ void MinLoadFirst::NodeSelect(
 
 #endif
       for (auto in_duration_it = task_duration_begin_it;
-           in_duration_it != task_duration_end_it; in_duration_it++)
+           in_duration_it != task_duration_end_it; ++in_duration_it)
         if (!(task->resources <= in_duration_it->second)) {
           // Some kind of resources exceeds the current available amount.
           resource_enough_in_this_duration = false;
@@ -474,6 +504,7 @@ void MinLoadFirst::NodeSelect(
         }
 
       if (resource_enough_in_this_duration) {
+        // `expected_start_time` must be assigned at least once.
         expected_start_time = task_duration_begin_it->first;
         break;
       }
@@ -481,6 +512,10 @@ void MinLoadFirst::NodeSelect(
 
     absl::Time task_end_time_plus_1s =
         expected_start_time + task->time_limit + absl::Seconds(1);
+#ifndef NDEBUG
+    SLURMX_TRACE("\t task #{} end time + 1s = {}, ", task_id,
+                 absl::ToInt64Seconds(task_end_time_plus_1s - now));
+#endif
     if (time_avail_res_map.count(task_end_time_plus_1s) == 0) {
       // Assume one task end at time x-2,
       // If "x-2" lies in the interval [x, y-1) in time__avail_res__map,
