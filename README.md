@@ -37,7 +37,6 @@
 
 ### SlurmCtlXd
 
-- [ ] Fix bugs in the scheduling algorithm. 22/10/12
 - [ ] Persistence of task queues
   - [ ] Investigate the db table in slurm.
 
@@ -48,8 +47,6 @@
 
 ### SBatchX
 
-- [ ] Implement a simple parser of sbatch file. 22/01/10-22/01/10
-- [ ] acquire UID of invoking user 22/01/11-22/01/11
 - [ ] --time arg. Adapt "hh:mm:ss" format 22/01/11-22/01/11
 - [ ] -o arg, -e arg
 - [ ] --node arg, --task-per-node arg
@@ -62,11 +59,14 @@
 
 ### SlurmCtlXd
 
+- [x] Fix bugs in the scheduling algorithm. 22/10/12
 - [x] Basic support for task submission, termination and querying.
 - [x] Basic scheduling algorithm.
 
 ### SlurmXd
 
+- [x] Implement a simple parser of sbatch file. 22/01/10-22/01/10
+- [x] acquire UID of invoking user 22/01/11-22/01/11
 - [x] Resource constraint on CPU and memory based on cgroup.
 - [x] Basic task output redirection.
 - [x] Termination for timed out tasks
