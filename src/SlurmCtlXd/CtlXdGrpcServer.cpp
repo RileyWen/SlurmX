@@ -108,10 +108,7 @@ grpc::Status SlurmCtlXdServiceImpl::SubmitBatchTask(
       request->required_resources().allocatable_resource();
   task->time_limit = absl::Seconds(request->time_limit().seconds());
 
-  task->executive_path = request->executive_path();
-  for (auto &&arg : request->arguments()) {
-    task->arguments.push_back(arg);
-  }
+  task->sh_script = request->sh_script();
   task->output_file_pattern = request->output_file_pattern();
 
   task->type = ITask::Type::Batch;

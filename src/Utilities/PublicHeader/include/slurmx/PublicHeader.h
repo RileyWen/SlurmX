@@ -214,8 +214,8 @@ struct InteractiveTask : public ITask {
 
 struct BatchTask : public ITask {
   using ITask::ITask;
-  std::string executive_path;
-  std::list<std::string> arguments;
+  std::string sh_script;
+  std::string sh_script_path;
   std::string output_file_pattern;
 };
 

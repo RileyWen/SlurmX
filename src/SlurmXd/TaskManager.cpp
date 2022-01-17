@@ -2,6 +2,7 @@
 
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
+#include <sys/stat.h>
 
 #include <utility>
 
@@ -524,19 +525,34 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       return;
     }
 
-    // Add a timer to limit the execution time of a task.
-    this_->EvAddTerminationTimer_(instance,
-                                  ToChronoSeconds(instance->task->time_limit));
-
     // If this is a batch task, run it now.
     if (instance->task->type == ITask::Type::Batch) {
-      const auto* batch_task = dynamic_cast<BatchTask*>(instance->task.get());
+      auto* batch_task = dynamic_cast<BatchTask*>(instance->task.get());
+      batch_task->sh_script_path =
+          fmt::format("/tmp/slurmx-{}.sh", instance->task->task_id);
+
+      FILE* fptr = fopen(batch_task->sh_script_path.c_str(), "w");
+      if (fptr == nullptr) {
+        SLURMX_ERROR("Cannot write shell script for batch task #{}",
+                     instance->task->task_id);
+        this_->EvActivateTaskStatusChange_(
+            instance->task->task_id, ITask::Status::Failed,
+            fmt::format("Cannot write shell script for batch task #{}",
+                        instance->task->task_id));
+        return;
+      }
+      fputs(batch_task->sh_script.c_str(), fptr);
+      fclose(fptr);
+
+      chmod(batch_task->sh_script_path.c_str(), strtol("0755", nullptr, 8));
+
       auto process = std::make_unique<ProcessInstance>(
-          batch_task->executive_path, batch_task->arguments);
+          batch_task->sh_script_path, std::list<std::string>());
 
       auto* file_logger = new slurmx::FileLogger(
           fmt::format("{}", instance->task->task_id),
-          fmt::format("/tmp/SlurmX-{}.out", instance->task->task_id));
+          fmt::format("{}SlurmX-{}.out", batch_task->output_file_pattern,
+                      instance->task->task_id));
 
       auto clean_cb = [](void* data) {
         delete reinterpret_cast<slurmx::FileLogger*>(data);
@@ -560,6 +576,10 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
                 instance->task->task_id));
       }
     }
+
+    // Add a timer to limit the execution time of a task.
+    this_->EvAddTerminationTimer_(instance,
+                                  ToChronoSeconds(instance->task->time_limit));
   }
 }
 

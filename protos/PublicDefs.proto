@@ -60,6 +60,8 @@ message Task {
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
   google.protobuf.Timestamp start_time = 9; // Currently Only used in SlurmCtlXd
+
+  uint32 uid = 10;
 }
 
 message BriefTaskMeta {
@@ -71,9 +73,11 @@ message BriefTaskMeta {
 }
 
 message BatchTaskAdditionalMeta {
-  string executive_path = 1;
-  repeated string arguments = 2;
+  string sh_script = 1;
   string output_file_pattern = 3;
+
+  uint32 node_num = 4;
+  uint32 task_per_node = 5;
 }
 
 message InteractiveTaskAdditionalMeta{

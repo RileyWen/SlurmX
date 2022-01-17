@@ -144,8 +144,8 @@ message TaskStatusChangeReply {
 
 message SubmitBatchTaskRequest {
   /* --------- Fields that are shared between all types of tasks ----------------- */
-  string executive_path = 1;
-  repeated string arguments = 2;
+  string sh_script = 1;
+  uint32 uid = 2;
 
   google.protobuf.Duration time_limit = 3;
   string partition_name = 4;
@@ -153,6 +153,8 @@ message SubmitBatchTaskRequest {
 
   /* -------------------- Fields that are batch task only ------------------------ */
   string output_file_pattern = 6;
+  uint32 node_num = 7;
+  uint32 task_per_node = 8;
 }
 
 message SubmitBatchTaskReply {

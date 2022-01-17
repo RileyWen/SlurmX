@@ -329,10 +329,7 @@ grpc::Status SlurmXdServiceImpl::ExecuteTask(
   if (request->task().type() == SlurmxGrpc::Batch) {
     auto task = std::make_unique<BatchTask>();
 
-    task->executive_path = request->batch_meta().executive_path();
-    for (auto &&arg : request->batch_meta().arguments())
-      task->arguments.push_back(arg);
-
+    task->sh_script = request->batch_meta().sh_script();
     task->task_id = request->task().task_id();
     task->type = ITask::Type::Batch;
     task->output_file_pattern = request->batch_meta().output_file_pattern();

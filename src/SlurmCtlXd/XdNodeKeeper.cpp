@@ -71,12 +71,8 @@ SlurmxErr XdNodeStub::ExecuteTask(const ITask *task) {
   } else if (task->type == ITask::Type::Batch) {
     auto *batch_task = dynamic_cast<const BatchTask *>(task);
     auto *mutable_meta = request.mutable_batch_meta();
-    mutable_meta->set_executive_path(batch_task->executive_path);
     mutable_meta->set_output_file_pattern(batch_task->output_file_pattern);
-
-    auto *mutable_args = mutable_meta->mutable_arguments();
-    for (const auto &arg : batch_task->arguments)
-      mutable_args->Add(std::string(arg));
+    mutable_meta->set_sh_script(batch_task->sh_script);
   }
 
   status = m_stub_->ExecuteTask(&context, request, &reply);
