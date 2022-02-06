@@ -333,6 +333,8 @@ grpc::Status SlurmXdServiceImpl::ExecuteTask(
     task->task_id = request->task().task_id();
     task->type = ITask::Type::Batch;
     task->output_file_pattern = request->batch_meta().output_file_pattern();
+    task->task_per_node = request->batch_meta().task_per_node();
+    task->node_num = request->batch_meta().node_num();
 
     itask = std::move(task);
   } else if (request->task().type() == SlurmxGrpc::Interactive) {

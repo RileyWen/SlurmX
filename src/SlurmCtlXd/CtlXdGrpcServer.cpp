@@ -113,6 +113,9 @@ grpc::Status SlurmCtlXdServiceImpl::SubmitBatchTask(
 
   task->type = ITask::Type::Batch;
 
+  task->node_num = request->node_num();
+  task->task_per_node = request->task_per_node();
+
   uint32_t task_id;
   err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
   if (err == SlurmxErr::kOk) {

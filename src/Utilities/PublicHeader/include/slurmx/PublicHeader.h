@@ -217,6 +217,8 @@ struct BatchTask : public ITask {
   std::string sh_script;
   std::string sh_script_path;
   std::string output_file_pattern;
+  uint32_t node_num{0};
+  uint32_t task_per_node{0};
 };
 
 namespace Internal {

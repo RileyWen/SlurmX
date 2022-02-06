@@ -73,6 +73,8 @@ SlurmxErr XdNodeStub::ExecuteTask(const ITask *task) {
     auto *mutable_meta = request.mutable_batch_meta();
     mutable_meta->set_output_file_pattern(batch_task->output_file_pattern);
     mutable_meta->set_sh_script(batch_task->sh_script);
+    mutable_meta->set_node_num(batch_task->node_num);
+    mutable_meta->set_task_per_node(batch_task->task_per_node);
   }
 
   status = m_stub_->ExecuteTask(&context, request, &reply);

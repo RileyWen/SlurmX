@@ -199,26 +199,36 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
 
         // Free the ProcessInstance. ITask struct is not freed here because
         // the ITask for an Interactive task can have no ProcessInstance.
-        instance->process.reset(nullptr);
-
-        // Remove indexes from pid to TaskInstance*, ProcessInstance*
-        this_->m_pid_task_map_.erase(task_iter);
-        this_->m_pid_proc_map_.erase(proc_iter);
-
-        // See the comment of EvActivateTaskStatusChange_.
-        if (instance->task->type == ITask::Type::Batch) {
-          // For a Batch task, the end of the process means it is done.
-          if (sigchld_info.is_terminated_by_signal)
-            this_->EvActivateTaskStatusChange_(task_id, ITask::Status::Failed,
-                                               std::nullopt);
-          else
-            this_->EvActivateTaskStatusChange_(task_id, ITask::Status::Finished,
-                                               std::nullopt);
+        auto pr_it = instance->process.find(pid);
+        if (pr_it == instance->process.end()) {
+          SLURMX_ERROR("Failed to find pid {} in task #{}'s ProcessInstances",
+                       task_id, pid);
         } else {
-          // For a COMPLETING Interactive task with a process running, the end
-          // of this process means that this task is done.
-          this_->EvActivateTaskStatusChange_(task_id, ITask::Status::Finished,
-                                             std::nullopt);
+          instance->process.erase(pr_it);
+
+          // Remove indexes from pid to ProcessInstance*
+          this_->m_pid_proc_map_.erase(proc_iter);
+
+          if (instance->process.empty()) {
+            // Remove indexes from pid to TaskInstance*
+            this_->m_pid_task_map_.erase(task_iter);
+
+            // See the comment of EvActivateTaskStatusChange_.
+            if (instance->task->type == ITask::Type::Batch) {
+              // For a Batch task, the end of the process means it is done.
+              if (sigchld_info.is_terminated_by_signal)
+                this_->EvActivateTaskStatusChange_(
+                    task_id, ITask::Status::Failed, std::nullopt);
+              else
+                this_->EvActivateTaskStatusChange_(
+                    task_id, ITask::Status::Finished, std::nullopt);
+            } else {
+              // For a COMPLETING Interactive task with a process running, the
+              // end of this process means that this task is done.
+              this_->EvActivateTaskStatusChange_(
+                  task_id, ITask::Status::Finished, std::nullopt);
+            }
+          }
         }
       }
 
@@ -269,8 +279,9 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
     } else {
       // Send SIGINT to all tasks and the event loop will stop
       // when the ev_sigchld_cb_ of the last task is called.
-      for (auto&& [task_id, instance] : this_->m_task_map_) {
-        KillProcessInstance_(instance->process.get(), SIGINT);
+      for (auto&& [task_id, task_instance] : this_->m_task_map_) {
+        for (auto&& [pid, pr_instance] : task_instance->process)
+          KillProcessInstance_(pr_instance.get(), SIGINT);
       }
     }
   } else {
@@ -415,7 +426,7 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     m_pid_proc_map_.emplace(child_pid, process.get());
 
     // Move the ownership of ProcessInstance into the TaskInstance.
-    instance->process = std::move(process);
+    instance->process.emplace(child_pid, std::move(process));
 
     return SlurmxErr::kOk;
 
@@ -546,34 +557,36 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
       chmod(batch_task->sh_script_path.c_str(), strtol("0755", nullptr, 8));
 
-      auto process = std::make_unique<ProcessInstance>(
-          batch_task->sh_script_path, std::list<std::string>());
+      for (int i = 0; i < batch_task->task_per_node; ++i) {
+        auto process = std::make_unique<ProcessInstance>(
+            batch_task->sh_script_path, std::list<std::string>());
 
-      auto* file_logger = new slurmx::FileLogger(
-          fmt::format("{}", instance->task->task_id),
-          fmt::format("{}SlurmX-{}.out", batch_task->output_file_pattern,
-                      instance->task->task_id));
+        auto* file_logger = new slurmx::FileLogger(
+            fmt::format("{}-{}", instance->task->task_id, i),
+            fmt::format("{}SlurmX-{}-{}.out", batch_task->output_file_pattern,
+                        instance->task->task_id, i));
 
-      auto clean_cb = [](void* data) {
-        delete reinterpret_cast<slurmx::FileLogger*>(data);
-      };
+        auto clean_cb = [](void* data) {
+          delete reinterpret_cast<slurmx::FileLogger*>(data);
+        };
 
-      auto outout_cb = [](std::string&& buf, void* data) {
-        auto* file_logger = reinterpret_cast<slurmx::FileLogger*>(data);
-        file_logger->Output(buf);
-      };
+        auto outout_cb = [](std::string&& buf, void* data) {
+          auto* file_logger = reinterpret_cast<slurmx::FileLogger*>(data);
+          file_logger->Output(buf);
+        };
 
-      process->SetUserDataAndCleanCb(file_logger, std::move(clean_cb));
-      process->SetOutputCb(std::move(outout_cb));
+        process->SetUserDataAndCleanCb(file_logger, std::move(clean_cb));
+        process->SetOutputCb(std::move(outout_cb));
 
-      SlurmxErr err;
-      err = this_->SpawnProcessInInstance_(instance, std::move(process));
-      if (err != SlurmxErr::kOk) {
-        this_->EvActivateTaskStatusChange_(
-            instance->task->task_id, ITask::Status::Failed,
-            fmt::format(
-                "Cannot spawn a new process inside the instance of task #{}",
-                instance->task->task_id));
+        SlurmxErr err;
+        err = this_->SpawnProcessInInstance_(instance, std::move(process));
+        if (err != SlurmxErr::kOk) {
+          this_->EvActivateTaskStatusChange_(
+              instance->task->task_id, ITask::Status::Failed,
+              fmt::format(
+                  "Cannot spawn a new process inside the instance of task #{}",
+                  instance->task->task_id));
+        }
       }
     }
 
@@ -728,10 +741,11 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
     int sig = SIGTERM;  // For BatchTask
     if (task_instance->task->type == ITask::Type::Interactive) sig = SIGHUP;
 
-    if (task_instance->process) {
+    if (!task_instance->process.empty()) {
       // For an Interactive task with a process running or a Batch task, we just
       // send a kill signal here.
-      KillProcessInstance_(task_instance->process.get(), sig);
+      for (auto&& [pid, pr_instance] : task_instance->process)
+        KillProcessInstance_(pr_instance.get(), sig);
     } else {
       // For an Interactive task with no process running, it ends immediately.
       this_->EvActivateTaskStatusChange_(elem.task_id, ITask::Status::Finished,
