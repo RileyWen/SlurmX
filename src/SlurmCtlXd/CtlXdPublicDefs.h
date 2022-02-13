@@ -10,6 +10,7 @@
 #include <chrono>
 #include <string>
 #include <unordered_map>
+#include <variant>
 
 #include "slurmx/PublicHeader.h"
 
@@ -88,6 +89,48 @@ struct PartitionGlobalMeta {
 struct PartitionMetas {
   PartitionGlobalMeta partition_global_meta;
   XdNodeMetaMap xd_node_meta_map;
+};
+
+struct InteractiveMetaInTask {
+  boost::uuids::uuid resource_uuid;
+};
+
+struct BatchMetaInTask {
+  std::string sh_script;
+  std::string output_file_pattern;
+};
+
+struct TaskInCtlXd {
+  /* -------- Fields that are set at the submission time. ------- */
+  absl::Duration time_limit;
+
+  std::string partition_name;
+  Resources resources;
+
+  SlurmxGrpc::TaskType type;
+
+  uint32_t node_num{0};
+  uint32_t task_per_node{0};
+
+  /* ------- Fields that won't change after this task is accepted. -------- */
+  uint32_t task_id;
+  uint32_t partition_id;
+
+  /* ----- Fields that may change at run time. ----------- */
+  SlurmxGrpc::TaskStatus status;
+  bool is_completing{false};
+
+  std::list<uint32_t> node_indexes;
+  std::unordered_set<uint32_t> end_node_set;
+
+  // If this task is PENDING, start_time is either not set (default constructed)
+  // or an estimated start time.
+  // If this task is RUNNING, start_time is the actual starting time.
+  absl::Time start_time;
+
+  absl::Time end_time;
+
+  std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 };
 
 }  // namespace CtlXd

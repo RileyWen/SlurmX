@@ -35,7 +35,7 @@ class XdNodeStub {
 
   ~XdNodeStub();
 
-  SlurmxErr ExecuteTask(const ITask *task);
+  SlurmxErr ExecuteTask(const TaskInCtlXd *task);
 
   SlurmxErr TerminateTask(uint32_t task_id);
 

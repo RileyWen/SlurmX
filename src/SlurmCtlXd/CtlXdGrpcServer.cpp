@@ -71,17 +71,18 @@ grpc::Status SlurmCtlXdServiceImpl::AllocateInteractiveTask(
     const SlurmxGrpc::InteractiveTaskAllocRequest *request,
     SlurmxGrpc::InteractiveTaskAllocReply *response) {
   SlurmxErr err;
-  auto interactive_task = std::make_unique<InteractiveTask>();
+  auto task = std::make_unique<TaskInCtlXd>();
 
-  interactive_task->partition_name = request->partition_name();
-  interactive_task->resources.allocatable_resource =
+  task->partition_name = request->partition_name();
+  task->resources.allocatable_resource =
       request->required_resources().allocatable_resource();
-  interactive_task->time_limit = absl::Seconds(request->time_limit_sec());
-  interactive_task->type = ITask::Type::Interactive;
+  task->time_limit = absl::Seconds(request->time_limit_sec());
+  task->type = SlurmxGrpc::Interactive;
+  task->meta = InteractiveMetaInTask{};
 
   // Todo: Eliminate useless allocation here when err!=kOk.
   uint32_t task_id;
-  err = g_task_scheduler->SubmitTask(std::move(interactive_task), &task_id);
+  err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
 
   if (err == SlurmxErr::kOk) {
     response->set_ok(true);
@@ -102,30 +103,40 @@ grpc::Status SlurmCtlXdServiceImpl::SubmitBatchTask(
     SlurmxGrpc::SubmitBatchTaskReply *response) {
   SlurmxErr err;
 
-  auto task = std::make_unique<BatchTask>();
-  task->partition_name = request->partition_name();
+  auto task = std::make_unique<TaskInCtlXd>();
+  task->partition_name = request->task().partition_name();
   task->resources.allocatable_resource =
-      request->required_resources().allocatable_resource();
-  task->time_limit = absl::Seconds(request->time_limit().seconds());
+      request->task().resources().allocatable_resource();
+  task->time_limit = absl::Seconds(request->task().time_limit().seconds());
 
-  task->sh_script = request->sh_script();
-  task->output_file_pattern = request->output_file_pattern();
+  task->meta = BatchMetaInTask{};
+  auto &batch_meta = std::get<BatchMetaInTask>(task->meta);
+  batch_meta.sh_script = request->task().batch_meta().sh_script();
+  batch_meta.output_file_pattern =
+      request->task().batch_meta().output_file_pattern();
 
-  task->type = ITask::Type::Batch;
+  task->type = SlurmxGrpc::Batch;
 
-  task->node_num = request->node_num();
-  task->task_per_node = request->task_per_node();
+  task->node_num = request->task().node_num();
+  task->task_per_node = request->task().task_per_node();
 
   uint32_t task_id;
   err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
   if (err == SlurmxErr::kOk) {
     response->set_ok(true);
     response->set_task_id(task_id);
+    SLURMX_DEBUG("Received an batch task request. Task id allocated: {}",
+                 task_id);
   } else {
+    std::string reason(err == SlurmxErr::kNonExistent
+                           ? "Partition doesn't exist!"
+                           : "Resource not enough!");
     response->set_ok(false);
-    response->set_reason(err == SlurmxErr::kNonExistent
-                             ? "Partition doesn't exist!"
-                             : "Resource not enough!");
+    response->set_reason(reason);
+    SLURMX_DEBUG(
+        "Received an batch task request "
+        "but the allocation failed. Reason: {}",
+        reason);
   }
 
   return grpc::Status::OK;
@@ -154,11 +165,11 @@ grpc::Status SlurmCtlXdServiceImpl::TaskStatusChange(
     grpc::ServerContext *context,
     const SlurmxGrpc::TaskStatusChangeRequest *request,
     SlurmxGrpc::TaskStatusChangeReply *response) {
-  ITask::Status status{};
+  SlurmxGrpc::TaskStatus status{};
   if (request->new_status() == SlurmxGrpc::Finished)
-    status = ITask::Status::Finished;
+    status = SlurmxGrpc::Finished;
   else if (request->new_status() == SlurmxGrpc::Failed)
-    status = ITask::Status::Failed;
+    status = SlurmxGrpc::Failed;
   else
     SLURMX_ERROR(
         "Task #{}: When TaskStatusChange RPC is called, the task should either "
@@ -168,7 +179,8 @@ grpc::Status SlurmCtlXdServiceImpl::TaskStatusChange(
   std::optional<std::string> reason;
   if (!request->reason().empty()) reason = request->reason();
 
-  g_task_scheduler->TaskStatusChange(request->task_id(), status, reason);
+  g_task_scheduler->TaskStatusChange(request->task_id(), request->node_index(),
+                                     status, reason);
 
   return grpc::Status::OK;
 }
@@ -179,37 +191,26 @@ grpc::Status SlurmCtlXdServiceImpl::TerminateTask(
     SlurmxGrpc::TerminateTaskReply *response) {
   uint32_t task_id = request->task_id();
 
-  XdNodeId xd_node_id;  // NOLINT(cppcoreguidelines-pro-type-member-init)
-  bool ok = g_task_scheduler->QueryXdNodeIdOfRunningTask(task_id, &xd_node_id);
-
-  if (ok) {
-    auto stub = g_node_keeper->GetXdStub(xd_node_id);
-    SlurmxErr err = stub->TerminateTask(task_id);
-    if (err == SlurmxErr::kOk)
-      response->set_ok(true);
-    else {
-      // Todo: make the reason be set here!
-      response->set_ok(false);
-    }
-  }
-
+  bool ok = g_task_scheduler->TerminateTask(task_id);
+  // Todo: make the reason be set here!
+  response->set_ok(ok);
   return grpc::Status::OK;
 }
 
-grpc::Status SlurmCtlXdServiceImpl::QueryJobsInPartition(
-    grpc::ServerContext *context,
-    const SlurmxGrpc::QueryJobsInPartitionRequest *request,
-    SlurmxGrpc::QueryJobsInPartitionReply *response) {
-  uint32_t partition_id;
-
-  if (!g_meta_container->GetPartitionId(request->partition(), &partition_id))
-    return grpc::Status::OK;
-  g_task_scheduler->QueryTaskBriefMetaInPartition(
-      partition_id, QueryBriefTaskMetaFieldControl{true, true, true, true},
-      response->mutable_task_metas());
-
-  return grpc::Status::OK;
-}
+// grpc::Status SlurmCtlXdServiceImpl::QueryJobsInPartition(
+//     grpc::ServerContext *context,
+//     const SlurmxGrpc::QueryJobsInPartitionRequest *request,
+//     SlurmxGrpc::QueryJobsInPartitionReply *response) {
+//   uint32_t partition_id;
+//
+//   if (!g_meta_container->GetPartitionId(request->partition(), &partition_id))
+//     return grpc::Status::OK;
+//   g_task_scheduler->QueryTaskBriefMetaInPartition(
+//       partition_id, QueryBriefTaskMetaFieldControl{true, true, true, true},
+//       response->mutable_task_metas());
+//
+//   return grpc::Status::OK;
+// }
 
 CtlXdServer::CtlXdServer(std::string listen_address)
     : m_listen_address_(std::move(listen_address)) {

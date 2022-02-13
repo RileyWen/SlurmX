@@ -104,7 +104,7 @@ class XdNodeMetaContainerSimpleImpl final
   bool GetPartitionId(const std::string& partition_name,
                       uint32_t* partition_id) override;
 
-  uint32_t AllocPartitionId(const std::string& partition_name);
+  uint32_t AllocPartitionId(const std::string& partition_name) override;
 
   void TryReleasePartition(uint32_t partition_id) override;
 

@@ -21,12 +21,12 @@
 #define SLURMX_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
 
 #ifndef NDEBUG
-#define SLURMX_ASSERT(condition, ...)                                        \
-  do {                                                                       \
-    if (!(condition)) {                                                      \
-      SLURMX_CRITICAL("Assertion failed: \"" #condition "\".", __VA_ARGS__); \
-      std::terminate();                                                      \
-    }                                                                        \
+#define SLURMX_ASSERT(condition, message)                                 \
+  do {                                                                    \
+    if (!(condition)) {                                                   \
+      SLURMX_CRITICAL("Assertion failed: \"" #condition "\": " #message); \
+      std::terminate();                                                   \
+    }                                                                     \
   } while (false)
 #else
 #define ASSERT(condition, message) \
@@ -94,8 +94,8 @@ inline std::string_view SlurmxErrStr(SlurmxErr err) {
 
 // (partition id, node index), by which a Xd node is uniquely identified.
 struct XdNodeId {
-  uint32_t partition_id;
-  uint32_t node_index;
+  uint32_t partition_id{0x3f3f3f3f};
+  uint32_t node_index{0x3f3f3f3f};
 
   struct Hash {
     std::size_t operator()(const XdNodeId& val) const {
@@ -173,53 +173,6 @@ struct Resources {
 bool operator<=(const Resources& lhs, const Resources& rhs);
 bool operator<(const Resources& lhs, const Resources& rhs);
 bool operator==(const Resources& lhs, const Resources& rhs);
-
-struct ITask {
-  enum class Type { Interactive, Batch };
-  enum class Status { Pending, Running, Completing, Finished, Failed };
-
-  /* -------- Fields that are set at the submission time. ------- */
-  absl::Duration time_limit;
-
-  std::string partition_name;
-  Resources resources;
-
-  Type type;
-
-  /* ------- Fields that won't change after this task is accepted. -------- */
-  uint32_t task_id;
-  uint32_t partition_id;
-
-  /* ----- Fields that may change at run time. ----------- */
-  Status status;
-  uint32_t node_index;
-
-  // If this task is PENDING, start_time is either not set (default constructed)
-  // or an estimated start time.
-  // If this task is RUNNING, start_time is the actual starting time.
-  absl::Time start_time;
-
-  absl::Time end_time;
-
-  virtual ~ITask() = default;
-
- protected:
-  ITask() = default;
-};
-
-struct InteractiveTask : public ITask {
-  using ITask::ITask;
-  boost::uuids::uuid resource_uuid;
-};
-
-struct BatchTask : public ITask {
-  using ITask::ITask;
-  std::string sh_script;
-  std::string sh_script_path;
-  std::string output_file_pattern;
-  uint32_t node_num{0};
-  uint32_t task_per_node{0};
-};
 
 namespace Internal {
 

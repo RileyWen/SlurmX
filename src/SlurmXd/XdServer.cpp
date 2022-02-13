@@ -324,43 +324,9 @@ SlurmxErr XdServer::RevokeResourceToken(const uuid &resource_uuid) {
 grpc::Status SlurmXdServiceImpl::ExecuteTask(
     grpc::ServerContext *context, const SlurmxGrpc::ExecuteTaskRequest *request,
     SlurmxGrpc::ExecuteTaskReply *response) {
-  std::unique_ptr<ITask> itask;
+  SLURMX_TRACE("Received a task with id {}", request->task().task_id());
 
-  if (request->task().type() == SlurmxGrpc::Batch) {
-    auto task = std::make_unique<BatchTask>();
-
-    task->sh_script = request->batch_meta().sh_script();
-    task->task_id = request->task().task_id();
-    task->type = ITask::Type::Batch;
-    task->output_file_pattern = request->batch_meta().output_file_pattern();
-    task->task_per_node = request->batch_meta().task_per_node();
-    task->node_num = request->batch_meta().node_num();
-
-    itask = std::move(task);
-  } else if (request->task().type() == SlurmxGrpc::Interactive) {
-    auto task = std::make_unique<InteractiveTask>();
-    task->type = ITask::Type::Interactive;
-
-    const char *uuid_data = request->interactive_meta().resource_uuid().data();
-    std::copy(uuid_data, uuid_data + uuid::static_size(),
-              task->resource_uuid.data);
-
-    task->task_id = request->task().task_id();
-    g_server->GrantResourceToken(task->resource_uuid, task->task_id);
-
-    itask = std::move(task);
-  }
-
-  int64_t time_limit_millis =
-      google::protobuf::util::TimeUtil::DurationToMilliseconds(
-          request->task().time_limit());
-  itask->time_limit = absl::Milliseconds(time_limit_millis);
-  itask->partition_name = request->task().partition_name();
-  itask->resources.allocatable_resource =
-      request->task().resources().allocatable_resource();
-  itask->status = ITask::Status::Running;
-
-  g_task_mgr->ExecuteTaskAsync(std::move(itask));
+  g_task_mgr->ExecuteTaskAsync(request->task());
 
   response->set_ok(true);
   return Status::OK;
