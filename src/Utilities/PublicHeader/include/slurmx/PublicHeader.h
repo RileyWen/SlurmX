@@ -59,6 +59,7 @@ enum class SlurmxErr : uint16_t {
 
 inline const char* kCtlXdDefaultPort = "10011";
 inline const char* kXdDefaultPort = "10010";
+inline const char* kDefaultConfigPath = "/etc/slurmx/config.yaml";
 
 namespace Internal {
 

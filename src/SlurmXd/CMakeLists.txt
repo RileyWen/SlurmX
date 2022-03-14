@@ -25,4 +25,6 @@ target_link_libraries(slurmxd
 
         absl::flat_hash_map
         absl::synchronization
+
+        yaml-cpp
         )

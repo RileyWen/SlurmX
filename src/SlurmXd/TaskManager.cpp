@@ -513,6 +513,17 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         popped_instance->task.task_id(), std::move(popped_instance));
 
     TaskInstance* instance = iter->second.get();
+    instance->pwd_entry.Init(instance->task.uid());
+    if (!instance->pwd_entry.Valid()) {
+      SLURMX_DEBUG("Failed to look up password entry for uid {} of task #{}",
+                   instance->task.uid(), instance->task.task_id());
+      this_->EvActivateTaskStatusChange_(
+          instance->task.task_id(), SlurmxGrpc::TaskStatus::Failed,
+          fmt::format("Failed to look up password entry for uid {} of task #{}",
+                      instance->task.uid(), instance->task.task_id()));
+      return;
+    }
+
     instance->cg_path = CgroupStrByTaskId_(instance->task.task_id());
     util::Cgroup* cgroup;
     cgroup = this_->m_cg_mgr_.CreateOrOpen(instance->cg_path,

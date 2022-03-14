@@ -112,6 +112,8 @@ struct TaskInCtlXd {
   uint32_t node_num{0};
   uint32_t task_per_node{0};
 
+  uid_t uid;
+
   /* ------- Fields that won't change after this task is accepted. -------- */
   uint32_t task_id;
   uint32_t partition_id;

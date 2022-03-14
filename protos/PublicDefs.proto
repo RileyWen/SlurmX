@@ -77,6 +77,8 @@ message TaskToXd {
   uint32 node_num = 7;
   uint32 task_per_node = 8;
 
+  uint32 uid = 9;
+
   oneof payload {
     BatchTaskAdditionalMeta batch_meta = 10;
     InteractiveTaskAdditionalMeta interactive_meta = 11;

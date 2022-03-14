@@ -133,6 +133,7 @@ struct BatchMetaInTaskInstance {
 struct TaskInstance {
   SlurmxGrpc::TaskToXd task;
 
+  PasswordEntry pwd_entry;
   BatchMetaInTaskInstance batch_meta;
   bool already_failed;
 
