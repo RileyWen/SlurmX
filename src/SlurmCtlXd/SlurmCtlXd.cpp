@@ -87,6 +87,8 @@ void InitializeCtlXdGlobalVariables() {
   spdlog::flush_on(spdlog::level::err);
   spdlog::flush_every(std::chrono::seconds(1));
 
+  spdlog::set_level(spdlog::level::trace);
+
   char hostname[HOST_NAME_MAX + 1];
   int err = gethostname(hostname, HOST_NAME_MAX + 1);
   if (err != 0) {

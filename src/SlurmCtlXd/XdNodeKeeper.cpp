@@ -264,7 +264,7 @@ void XdNodeKeeper::StateMonitorThreadFunc_() {
          * allocated tag. */
         util::lock_guard lock(m_cq_mtx_);
         if (!m_cq_closed_) {
-          SLURMX_TRACE("Registering next tag: {}", tag->type);
+          // SLURMX_TRACE("Registering next tag: {}", tag->type);
 
           // When cq is closed, do not register any more callbacks on it.
           xd->m_channel_->NotifyOnStateChange(

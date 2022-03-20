@@ -132,8 +132,11 @@ struct fmt::formatter<XdNodeId> {
 // It contains CPU and memory by now.
 struct AllocatableResource {
   uint32_t cpu_count = 0;
-  uint64_t memory_bytes = 0;     // Todo: Add comment
-  uint64_t memory_sw_bytes = 0;  // Todo: Add comment
+
+  // See documentation of cgroup memory.
+  // https://www.kernel.org/doc/Documentation/cgroup-v1/memory.txt
+  uint64_t memory_bytes = 0;     // limit of memory usage
+  uint64_t memory_sw_bytes = 0;  // limit of memory+Swap usage
 
   AllocatableResource() = default;
   explicit AllocatableResource(const SlurmxGrpc::AllocatableResource&);

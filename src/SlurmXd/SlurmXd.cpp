@@ -96,6 +96,8 @@ void GlobalVariableInit() {
   spdlog::flush_on(spdlog::level::err);
   spdlog::flush_every(std::chrono::seconds(1));
 
+  spdlog::set_level(spdlog::level::trace);
+
   g_task_mgr = std::make_unique<Xd::TaskManager>();
 
   g_ctlxd_client = std::make_unique<Xd::CtlXdClient>();

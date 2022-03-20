@@ -729,7 +729,10 @@ void MinLoadFirst::NodeSelect(
     absl::Time expected_start_time;
     bool ok = CalculateRunningNodesAndStartTime_(
         node_info, part_meta, task.get(), now, &node_ids, &expected_start_time);
-    if (!ok) continue;
+    if (!ok) {
+      ++pending_task_it;
+      continue;
+    }
 
     // The start time and node ids have been determined.
     // Modify the corresponding NodeSelectionInfo now.
