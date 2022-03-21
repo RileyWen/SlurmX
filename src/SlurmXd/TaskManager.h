@@ -257,7 +257,7 @@ class TaskManager {
             .count()};
 
     struct event* ev = event_new(m_ev_base_, -1, 0, EvOnTimerCb_, arg);
-    SLURMX_ASSERT(ev != nullptr, "Failed to create new timer.");
+    SLURMX_ASSERT_MSG(ev != nullptr, "Failed to create new timer.");
     evtimer_add(ev, &tv);
 
     arg->timer_ev = ev;
@@ -273,7 +273,7 @@ class TaskManager {
     timeval tv{static_cast<__time_t>(secs), 0};
 
     struct event* ev = event_new(m_ev_base_, -1, 0, EvOnTimerCb_, arg);
-    SLURMX_ASSERT(ev != nullptr, "Failed to create new timer.");
+    SLURMX_ASSERT_MSG(ev != nullptr, "Failed to create new timer.");
     evtimer_add(ev, &tv);
 
     arg->timer_ev = ev;

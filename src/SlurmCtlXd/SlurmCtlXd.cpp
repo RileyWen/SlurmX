@@ -20,32 +20,6 @@
 #include "XdNodeMetaContainer.h"
 #include "slurmx/PublicHeader.h"
 
-struct Node {
-  uint32_t cpu;
-  uint64_t memory_bytes;
-
-  std::string partition_name;
-};
-
-struct Partition {
-  std::unordered_set<std::string> nodes;
-  std::unordered_set<std::string> AllowAccounts;
-};
-
-struct Config {
-  std::string SlurmCtlXdListenAddr;
-  std::string SlurmCtlXdListenPort;
-  std::string SlurmCtlXdDebugLevel;
-  std::string SlurmCtlXdLogFile;
-  bool SlurmCtlXdForeground{};
-
-  std::string Hostname;
-  std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
-  std::unordered_map<std::string, Partition> Partitions;
-};
-
-Config g_config;
-
 void InitializeCtlXdGlobalVariables() {
   using namespace CtlXd;
 
@@ -99,8 +73,10 @@ void InitializeCtlXdGlobalVariables() {
   g_config.Hostname.assign(hostname);
   SLURMX_INFO("Hostname of slurmctlxd: {}", g_config.Hostname);
 
-  g_node_keeper = std::make_unique<XdNodeKeeper>();
   g_meta_container = std::make_unique<XdNodeMetaContainerSimpleImpl>();
+  g_meta_container->InitFromConfig(g_config);
+
+  g_node_keeper = std::make_unique<XdNodeKeeper>();
 
   g_task_scheduler =
       std::make_unique<TaskScheduler>(std::make_unique<MinLoadFirst>());
@@ -219,7 +195,7 @@ int main(int argc, char** argv) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();
              ++it) {
           auto node = it->as<YAML::Node>();
-          auto node_ptr = std::make_shared<Node>();
+          auto node_ptr = std::make_shared<CtlXd::Config::Node>();
           std::string name;
 
           if (node["name"]) {
@@ -264,7 +240,7 @@ int main(int argc, char** argv) {
           auto partition = it->as<YAML::Node>();
           std::string name;
           std::string nodes;
-          Partition part;
+          CtlXd::Config::Partition part;
 
           if (partition["name"]) {
             name.append(partition["name"].Scalar());

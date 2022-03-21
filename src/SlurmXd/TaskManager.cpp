@@ -628,8 +628,8 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
                    status_change.task_id);
 
       auto iter = this_->m_task_map_.find(status_change.task_id);
-      SLURMX_ASSERT(iter != this_->m_task_map_.end(),
-                    "Task should be found here.");
+      SLURMX_ASSERT_MSG(iter != this_->m_task_map_.end(),
+                        "Task should be found here.");
 
       TaskInstance* task_instance = iter->second.get();
 

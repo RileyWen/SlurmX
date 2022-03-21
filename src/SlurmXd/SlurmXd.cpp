@@ -139,9 +139,7 @@ void StartServer() {
     std::exit(1);
   }
 
-  err = g_ctlxd_client->RegisterOnCtlXd(node_it->second->partition_name,
-                                        resource_in_cmd,
-                                        std::stoul(port_group[1]));
+  err = g_ctlxd_client->RegisterOnCtlXd(std::stoul(port_group[1]));
   if (err != SlurmxErr::kOk) {
     SLURMX_ERROR("Exit due to registration error... Shutting down server...");
     g_server->Shutdown();

@@ -58,7 +58,7 @@ void TaskScheduler::ScheduleThread_() {
                                        .xd_node_meta_map.at(node_index);
             InteractiveTaskAllocationDetail detail{
                 .node_index = node_index,
-                .ipv4_addr = node_meta.static_meta.ipv4_addr,
+                .ipv4_addr = node_meta.static_meta.hostname,
                 .port = node_meta.static_meta.port,
                 .resource_uuid = m_uuid_gen_(),
             };
@@ -484,8 +484,8 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
   }
 
   if (selected_node_cnt < task->node_num) return false;
-  SLURMX_ASSERT(selected_node_cnt == task->node_num,
-                "selected_node_cnt != task->node_num");
+  SLURMX_ASSERT_MSG(selected_node_cnt == task->node_num,
+                    "selected_node_cnt != task->node_num");
 
   for (uint32_t node_id : node_ids_) {
     auto& time_avail_res_map =
@@ -799,7 +799,7 @@ void MinLoadFirst::NodeSelect(
         TimeAvailResMap::iterator inserted_it;
         std::tie(inserted_it, ok) = time_avail_res_map.emplace(
             task_end_time_plus_1s, task_duration_begin_it->second);
-        SLURMX_ASSERT(ok == true, "Insertion must be successful.");
+        SLURMX_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
         if (task_duration_begin_it->first == expected_start_time) {
           // Situation #1
@@ -808,7 +808,7 @@ void MinLoadFirst::NodeSelect(
           // Situation #2
           std::tie(inserted_it, ok) = time_avail_res_map.emplace(
               expected_start_time, task_duration_begin_it->second);
-          SLURMX_ASSERT(ok == true, "Insertion must be successful.");
+          SLURMX_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
           inserted_it->second -= task->resources;
         }
@@ -839,7 +839,7 @@ void MinLoadFirst::NodeSelect(
           TimeAvailResMap::iterator inserted_it;
           std::tie(inserted_it, ok) = time_avail_res_map.emplace(
               expected_start_time, task_duration_begin_it->second);
-          SLURMX_ASSERT(ok == true, "Insertion must be successful.");
+          SLURMX_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
           inserted_it->second -= task->resources;
           task_duration_begin_it = std::next(inserted_it);
@@ -865,7 +865,7 @@ void MinLoadFirst::NodeSelect(
           TimeAvailResMap::iterator inserted_it;
           std::tie(inserted_it, ok) = time_avail_res_map.emplace(
               task_end_time_plus_1s, task_duration_end_it->second);
-          SLURMX_ASSERT(ok == true, "Insertion must be successful.");
+          SLURMX_ASSERT_MSG(ok == true, "Insertion must be successful.");
 
           task_duration_end_it->second -= task->resources;
         }

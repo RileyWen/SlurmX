@@ -28,14 +28,20 @@ class XdNodeMetaContainerInterface {
 
   virtual ~XdNodeMetaContainerInterface() = default;
 
-  virtual void AddNode(const XdNodeStaticMeta& static_meta) = 0;
+  virtual void NodeUp(const XdNodeId& node_id) = 0;
 
-  virtual void DeleteNodeMeta(XdNodeId node_id) = 0;
+  virtual void NodeDown(XdNodeId node_id) = 0;
+
+  virtual void InitFromConfig(const Config& config) = 0;
 
   /**
    * Check whether partition exists.
    */
   virtual bool PartitionExists(const std::string& partition_name) = 0;
+
+  virtual bool CheckNodeAllowed(const std::string& hostname) = 0;
+
+  virtual bool GetNodeId(const std::string& hostname, XdNodeId* node_id) = 0;
 
   /**
    * @return The partition id. If partition name doesn't exist, a new partition
@@ -43,22 +49,6 @@ class XdNodeMetaContainerInterface {
    */
   virtual bool GetPartitionId(const std::string& partition_name,
                               uint32_t* partition_id) = 0;
-
-  virtual uint32_t AllocPartitionId(const std::string& partition_name) = 0;
-
-  /**
-   * Free all the structures of a partition if this partition is empty.
-   * Otherwise, no operation is performed.
-   * @param partition_id
-   */
-  [[deprecated]] virtual void TryReleasePartition(uint32_t partition_id) = 0;
-
-  /**
-   * @return Next unique node index in this partition.
-   * Caller Must make sure that the partition exists when calling this function.
-   * If partition id does not exist, 0xFFFFFFFF is returned.
-   */
-  virtual uint32_t AllocNodeIndexInPartition(uint32_t partition_id) = 0;
 
   virtual void MallocResourceFromNode(XdNodeId node_id, uint32_t task_id,
                                       const Resources& resources) = 0;
@@ -79,8 +69,6 @@ class XdNodeMetaContainerInterface {
 
  protected:
   XdNodeMetaContainerInterface() = default;
-
-  virtual uint32_t GetNextPartitionSeq_() = 0;
 };
 
 class XdNodeMetaContainerSimpleImpl final
@@ -89,9 +77,13 @@ class XdNodeMetaContainerSimpleImpl final
   XdNodeMetaContainerSimpleImpl() = default;
   ~XdNodeMetaContainerSimpleImpl() override = default;
 
-  void AddNode(const XdNodeStaticMeta& static_meta) override;
+  void InitFromConfig(const Config& config) override;
 
-  void DeleteNodeMeta(XdNodeId node_id) override;
+  bool GetNodeId(const std::string& hostname, XdNodeId* node_id) override;
+
+  void NodeUp(const XdNodeId& node_id) override;
+
+  void NodeDown(XdNodeId node_id) override;
 
   PartitionMetasPtr GetPartitionMetasPtr(uint32_t partition_id) override;
 
@@ -101,14 +93,10 @@ class XdNodeMetaContainerSimpleImpl final
 
   bool PartitionExists(const std::string& partition_name) override;
 
+  bool CheckNodeAllowed(const std::string& hostname) override;
+
   bool GetPartitionId(const std::string& partition_name,
                       uint32_t* partition_id) override;
-
-  uint32_t AllocPartitionId(const std::string& partition_name) override;
-
-  void TryReleasePartition(uint32_t partition_id) override;
-
-  uint32_t AllocNodeIndexInPartition(uint32_t partition_id) override;
 
   void MallocResourceFromNode(XdNodeId node_id, uint32_t task_id,
                               const Resources& resources) override;
@@ -116,22 +104,17 @@ class XdNodeMetaContainerSimpleImpl final
   void FreeResourceFromNode(XdNodeId node_id, uint32_t task_id) override;
 
  private:
-  /**
-   * This function is not thread-safe.
-   */
-  void TryReleasePartition_(uint32_t partition_id);
-
-  /**
-   * This function is not thread-safe.
-   * @return next unique partition sequence number.
-   */
-  uint32_t GetNextPartitionSeq_() override;
-
   AllPartitionsMetaMap partition_metas_map_;
 
   absl::flat_hash_map<std::string /*partition name*/, uint32_t /*partition id*/>
       partition_name_id_map_;
-  uint32_t partition_seq_ = 0;
+
+  absl::flat_hash_map<std::string /*node hostname*/, uint32_t /*partition id*/>
+      node_hostname_part_id_map_;
+
+  absl::flat_hash_map<std::pair<uint32_t, std::string /*hostname*/>,
+                      uint32_t /*node index in a partition*/>
+      part_id_host_index_map_;
 
   Mutex mtx_;
 };

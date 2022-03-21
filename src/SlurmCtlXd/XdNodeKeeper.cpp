@@ -163,7 +163,7 @@ std::future<RegisterNodeResult> XdNodeKeeper::RegisterXdNode(
   cq_tag_data->xd->m_stub_ =
       SlurmxGrpc::SlurmXd::NewStub(cq_tag_data->xd->m_channel_);
 
-  cq_tag_data->xd->m_maximum_retry_times_ = 4;
+  cq_tag_data->xd->m_maximum_retry_times_ = 2;
 
   CqTag *tag;
   {
@@ -233,7 +233,9 @@ void XdNodeKeeper::StateMonitorThreadFunc_() {
             SLURMX_TRACE("Set future to false");
             auto *tag_data =
                 reinterpret_cast<InitializingXdTagData *>(tag->data);
-            tag_data->register_result.set_value({std::nullopt});
+            tag_data->register_result.set_value(RegisterNodeResult{
+                false, fmt::format("Cannot connect to node {}",
+                                   tag_data->xd->m_node_id_)});
             delete tag_data;
           } else if (tag->type == CqTag::kEstablishedXd) {
             if (m_node_is_down_cb_)
@@ -327,7 +329,7 @@ XdNodeKeeper::CqTag *XdNodeKeeper::InitXdStateMachine_(
         m_node_is_up_cb_(raw_xd->m_node_id_, raw_xd->m_data_);
 
       // Set future of RegisterNodeResult and free tag_data
-      tag_data->register_result.set_value({raw_xd->m_node_id_});
+      tag_data->register_result.set_value(RegisterNodeResult{true});
       delete tag_data;
 
       // Switch to EstablishedXd state machine
@@ -546,13 +548,19 @@ uint32_t XdNodeKeeper::AvailableNodeCount() {
   return m_alive_xd_bitset_.count();
 }
 
-XdNodeStub *XdNodeKeeper::GetXdStub(XdNodeId node_id) {
+XdNodeStub *XdNodeKeeper::GetXdStub(const XdNodeId &node_id) {
   util::lock_guard lock(m_node_mtx_);
   auto iter = m_node_id_slot_offset_map_.find(node_id);
   if (iter != m_node_id_slot_offset_map_.end())
     return m_node_vec_[iter->second].get();
   else
     return nullptr;
+}
+
+bool XdNodeKeeper::CheckNodeIdExists(const XdNodeId &node_id) {
+  util::lock_guard lock(m_node_mtx_);
+  size_t cnt = m_node_id_slot_offset_map_.count(node_id);
+  return cnt > 0;
 }
 
 bool XdNodeKeeper::XdNodeValid(uint32_t index) {

@@ -41,9 +41,7 @@ class CtlXdClient {
    */
   SlurmxErr Connect(const std::string& server_address);
 
-  SlurmxErr RegisterOnCtlXd(const std::string& partition_name,
-                            const AllocatableResource& resource,
-                            uint32_t my_port);
+  SlurmxErr RegisterOnCtlXd(uint32_t my_port);
 
   void TaskStatusChangeAsync(TaskStatusChange&& task_status_change);
 

@@ -109,11 +109,6 @@ message SlurmXdRegisterRequest {
   Negotiation header = 1;
 
   uint32 port = 2;
-  string node_name = 3;
-  string partition_name = 4;
-
-  Resources resource_total = 5;
-  uint64 time_limit_for_task_in_sec = 6;
 
   /* Todo: Add fields describing what tasks the SlurmXd is still running and the current usage of this node in case that
       from CtlXd's view, this node is down due to network problem and however this node is still running.

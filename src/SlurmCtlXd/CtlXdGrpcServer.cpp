@@ -9,6 +9,7 @@
 #include "TaskScheduler.h"
 #include "XdNodeKeeper.h"
 #include "XdNodeMetaContainer.h"
+#include "slurmx/Network.h"
 #include "slurmx/String.h"
 
 namespace CtlXd {
@@ -22,45 +23,51 @@ grpc::Status CtlXd::SlurmCtlXdServiceImpl::RegisterSlurmXd(
   // ["ipv4", "<address>, "<port>"]
   boost::algorithm::split(peer_slices, peer, boost::is_any_of(":"));
 
-  std::string addr_port = fmt::format("{}:{}", peer_slices[1], request->port());
+  const auto &ipv4 = peer_slices[1];
+  std::string addr_port = fmt::format("{}:{}", ipv4, request->port());
 
-  XdNodeId node_id{};
-  node_id.partition_id =
-      g_meta_container->AllocPartitionId(request->partition_name());
-  node_id.node_index =
-      g_meta_container->AllocNodeIndexInPartition(node_id.partition_id);
+  std::string hostname;
+  if (!slurmx::ResolveHostnameFromIpv4(ipv4, &hostname)) {
+    response->set_ok(false);
+    response->set_reason(fmt::format(
+        "could not resolve hostname for the ip ({}) of this node", ipv4));
 
-  Resources res_total;
-  res_total.allocatable_resource =
-      request->resource_total().allocatable_resource();
+    return grpc::Status::OK;
+  }
+
+  XdNodeId node_id;
+  if (!g_meta_container->GetNodeId(hostname, &node_id)) {
+    response->set_ok(false);
+    response->set_reason(
+        fmt::format("The hostname of this node ({}) is not allowed", hostname));
+
+    return grpc::Status::OK;
+  }
+
+  if (g_node_keeper->CheckNodeIdExists(node_id)) {
+    response->set_ok(false);
+    response->set_reason("This node is maintained in XdNodeKeeper. Waiting..");
+
+    return grpc::Status::OK;
+  }
+
   std::future<RegisterNodeResult> result_future = g_node_keeper->RegisterXdNode(
-      addr_port, node_id,
-      new XdNodeStaticMeta{.node_index = node_id.node_index,
-                           .ipv4_addr = peer_slices[1],
-                           .port = request->port(),
-                           .node_name = request->node_name(),
-                           .partition_id = node_id.partition_id,
-                           .partition_name = request->partition_name(),
-                           .res = res_total},
-      [](void *data) { delete reinterpret_cast<AllocatableResource *>(data); });
+      addr_port, node_id, nullptr, [](void *data) {});
 
   RegisterNodeResult result = result_future.get();
 
-  if (result.node_id.has_value()) {
+  if (result.result) {
     response->set_ok(true);
-    response->mutable_node_id()->set_partition_id(
-        result.node_id.value().partition_id);
-    response->mutable_node_id()->set_node_index(
-        result.node_id.value().node_index);
+    response->mutable_node_id()->set_partition_id(node_id.partition_id);
+    response->mutable_node_id()->set_node_index(node_id.node_index);
   } else {
     response->set_ok(false);
     response->set_reason("CtlXd cannot connect to Xd backward");
 
-    SLURMX_TRACE("Failed to establish the backward channel to XdClient {}.",
-                 addr_port);
-
-    // Avoid memory leak.
-    g_meta_container->TryReleasePartition(node_id.partition_id);
+    SLURMX_TRACE(
+        "Failed to establish the backward channel to XdClient {}, hostname: "
+        "{}.",
+        addr_port, hostname);
   }
 
   return grpc::Status::OK;
@@ -253,26 +260,18 @@ void CtlXdServer::XdNodeIsUpCb_(XdNodeId node_id, void *node_data) {
       node_id);
 
   XdNodeStub *xd_stub = g_node_keeper->GetXdStub(node_id);
-  SLURMX_ASSERT(xd_stub != nullptr,
-                "Got nullptr of XdNodeStub in NodeIsUp() callback!");
+  SLURMX_ASSERT_MSG(xd_stub != nullptr,
+                    "Got nullptr of XdNodeStub in NodeIsUp() callback!");
 
-  auto *static_meta = reinterpret_cast<XdNodeStaticMeta *>(node_data);
+  g_meta_container->NodeUp(node_id);
 
-  g_meta_container->AddNode(*static_meta);
-
-  SLURMX_INFO(
-      "Node {} registered. cpu: {}, mem: {}, mem+sw: {}", node_id,
-      static_meta->res.allocatable_resource.cpu_count,
-      util::ReadableMemory(static_meta->res.allocatable_resource.memory_bytes),
-      util::ReadableMemory(
-          static_meta->res.allocatable_resource.memory_sw_bytes));
+  SLURMX_INFO("Node {} is up.", node_id);
 
   // Delete node_data(node_res) (allocated in RegisterSlurmXd) here because it's
   // useless now. The resource information is now kept in global MetaContainer.
   // Set it to nullptr, so next delete call in clean_up_cb will not delete it
   // again.
   xd_stub->SetNodeData(nullptr);
-  delete static_meta;
 }
 
 void CtlXdServer::XdNodeIsDownCb_(XdNodeId node_id, void *) {
@@ -281,7 +280,7 @@ void CtlXdServer::XdNodeIsDownCb_(XdNodeId node_id, void *) {
       "pool.",
       node_id);
 
-  g_meta_container->DeleteNodeMeta(node_id);
+  g_meta_container->NodeDown(node_id);
 }
 
 void CtlXdServer::AddAllocDetailToIaTask(

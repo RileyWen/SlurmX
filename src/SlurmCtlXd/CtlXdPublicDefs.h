@@ -38,10 +38,9 @@ struct InteractiveTaskAllocationDetail {
  */
 struct XdNodeStaticMeta {
   uint32_t node_index;  // Allocated when this node is up.
-  std::string ipv4_addr;
-  uint32_t port;
 
-  std::string node_name;  // a node name corresponds to the node index
+  std::string hostname;  // the hostname corresponds to the node index
+  uint32_t port;
 
   uint32_t partition_id;  // Allocated if partition_name is new or
                           // use existing partition id of the partition_name.
@@ -79,11 +78,10 @@ struct PartitionGlobalMeta {
   Resources m_resource_avail_;
   Resources m_resource_in_use_;
 
-  std::string name;
+  // Include resources in unavailable nodes.
+  Resources m_resource_total_inc_dead_;
 
-  // It is used to generate next node index for newly incoming Xd nodes in this
-  // partition.
-  uint32_t next_node_index = 0;
+  std::string name;
 };
 
 struct PartitionMetas {
@@ -135,4 +133,30 @@ struct TaskInCtlXd {
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 };
 
+struct Config {
+  struct Node {
+    uint32_t cpu;
+    uint64_t memory_bytes;
+
+    std::string partition_name;
+  };
+
+  struct Partition {
+    std::unordered_set<std::string> nodes;
+    std::unordered_set<std::string> AllowAccounts;
+  };
+
+  std::string SlurmCtlXdListenAddr;
+  std::string SlurmCtlXdListenPort;
+  std::string SlurmCtlXdDebugLevel;
+  std::string SlurmCtlXdLogFile;
+  bool SlurmCtlXdForeground{};
+
+  std::string Hostname;
+  std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
+  std::unordered_map<std::string, Partition> Partitions;
+};
+
 }  // namespace CtlXd
+
+inline CtlXd::Config g_config;

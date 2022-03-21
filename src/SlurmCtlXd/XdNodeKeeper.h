@@ -23,7 +23,8 @@ namespace CtlXd {
 class XdNodeKeeper;
 
 struct RegisterNodeResult {
-  std::optional<XdNodeId> node_id;
+  bool result{false};
+  std::string reason;
 };
 
 /**
@@ -105,7 +106,9 @@ class XdNodeKeeper {
    * callback registerer should do necessary synchronization to clean up all the
    * usage of the XdNodeStub pointer before NodeIsDown() returns.
    */
-  XdNodeStub *GetXdStub(XdNodeId node_id);
+  XdNodeStub *GetXdStub(const XdNodeId &node_id);
+
+  bool CheckNodeIdExists(const XdNodeId &node_id);
 
   void SetNodeIsUpCb(std::function<void(XdNodeId, void *)> cb);
 
