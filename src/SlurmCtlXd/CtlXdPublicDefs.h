@@ -10,6 +10,7 @@
 #include <chrono>
 #include <string>
 #include <unordered_map>
+#include <variant>
 
 #include "slurmx/PublicHeader.h"
 
@@ -19,9 +20,9 @@
 
 namespace CtlXd {
 
-constexpr uint64_t kTaskScheduleIntervalMs = 1000;
-constexpr uint64_t kEndedTaskCleanIntervalSeconds = 1;
-constexpr uint64_t kEndedTaskKeepingTimeSeconds = 3600;
+constexpr uint64_t kTaskScheduleIntervalMs = 1000;       // Todo: Add comment
+constexpr uint64_t kEndedTaskCleanIntervalSeconds = 1;   // Todo: Add comment
+constexpr uint64_t kEndedTaskKeepingTimeSeconds = 3600;  // Todo: Add comment
 
 struct InteractiveTaskAllocationDetail {
   uint32_t node_index;
@@ -37,10 +38,9 @@ struct InteractiveTaskAllocationDetail {
  */
 struct XdNodeStaticMeta {
   uint32_t node_index;  // Allocated when this node is up.
-  std::string ipv4_addr;
-  uint32_t port;
 
-  std::string node_name;  // a node name corresponds to the node index
+  std::string hostname;  // the hostname corresponds to the node index
+  uint32_t port;
 
   uint32_t partition_id;  // Allocated if partition_name is new or
                           // use existing partition id of the partition_name.
@@ -54,6 +54,8 @@ struct XdNodeStaticMeta {
  */
 struct XdNodeMeta {
   XdNodeStaticMeta static_meta;
+
+  bool alive{false};
 
   // total = avail + in-use
   Resources res_total;  // A copy of res in XdNodeStaticMeta,
@@ -78,11 +80,13 @@ struct PartitionGlobalMeta {
   Resources m_resource_avail_;
   Resources m_resource_in_use_;
 
-  std::string name;
+  // Include resources in unavailable nodes.
+  Resources m_resource_total_inc_dead_;
 
-  // It is used to generate next node index for newly incoming Xd nodes in this
-  // partition.
-  uint32_t next_node_index = 0;
+  std::string name;
+  std::string nodelist_str;
+  uint32_t node_cnt;
+  uint32_t alive_node_cnt;
 };
 
 struct PartitionMetas {
@@ -90,4 +94,75 @@ struct PartitionMetas {
   XdNodeMetaMap xd_node_meta_map;
 };
 
+struct InteractiveMetaInTask {
+  boost::uuids::uuid resource_uuid;
+};
+
+struct BatchMetaInTask {
+  std::string sh_script;
+  std::string output_file_pattern;
+};
+
+struct TaskInCtlXd {
+  /* -------- Fields that are set at the submission time. ------- */
+  absl::Duration time_limit;
+
+  std::string partition_name;
+  Resources resources;
+
+  SlurmxGrpc::TaskType type;
+
+  uint32_t node_num{0};
+  uint32_t task_per_node{0};
+
+  uid_t uid;
+
+  /* ------- Fields that won't change after this task is accepted. -------- */
+  uint32_t task_id;
+  uint32_t partition_id;
+
+  /* ----- Fields that may change at run time. ----------- */
+  SlurmxGrpc::TaskStatus status;
+  bool is_completing{false};
+
+  std::list<uint32_t> node_indexes;
+  std::unordered_set<uint32_t> end_node_set;
+
+  // If this task is PENDING, start_time is either not set (default constructed)
+  // or an estimated start time.
+  // If this task is RUNNING, start_time is the actual starting time.
+  absl::Time start_time;
+
+  absl::Time end_time;
+
+  std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
+};
+
+struct Config {
+  struct Node {
+    uint32_t cpu;
+    uint64_t memory_bytes;
+
+    std::string partition_name;
+  };
+
+  struct Partition {
+    std::string nodelist_str;
+    std::unordered_set<std::string> nodes;
+    std::unordered_set<std::string> AllowAccounts;
+  };
+
+  std::string SlurmCtlXdListenAddr;
+  std::string SlurmCtlXdListenPort;
+  std::string SlurmCtlXdDebugLevel;
+  std::string SlurmCtlXdLogFile;
+  bool SlurmCtlXdForeground{};
+
+  std::string Hostname;
+  std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
+  std::unordered_map<std::string, Partition> Partitions;
+};
+
 }  // namespace CtlXd
+
+inline CtlXd::Config g_config;

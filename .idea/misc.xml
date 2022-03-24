@@ -16,6 +16,8 @@
       <file path="$PROJECT_DIR$/dependencies/online/spdlog" />
     </libraryRoots>
     <excludeRoots>
+      <file path="$PROJECT_DIR$/cmake-build-debug" />
+      <file path="$PROJECT_DIR$/cmake-build-debug-pku" />
       <file path="$PROJECT_DIR$/dependencies/online" />
       <file path="$PROJECT_DIR$/dependencies/tarballs" />
     </excludeRoots>

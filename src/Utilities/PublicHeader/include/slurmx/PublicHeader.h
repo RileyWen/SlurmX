@@ -21,16 +21,28 @@
 #define SLURMX_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
 
 #ifndef NDEBUG
-#define SLURMX_ASSERT(condition, ...)                                        \
-  do {                                                                       \
-    if (!(condition)) {                                                      \
-      SLURMX_CRITICAL("Assertion failed: \"" #condition "\".", __VA_ARGS__); \
-      std::terminate();                                                      \
-    }                                                                        \
+#define SLURMX_ASSERT_MSG(condition, message)                             \
+  do {                                                                    \
+    if (!(condition)) {                                                   \
+      SLURMX_CRITICAL("Assertion failed: \"" #condition "\": " #message); \
+      std::terminate();                                                   \
+    }                                                                     \
+  } while (false)
+
+#define SLURMX_ASSERT(condition)                               \
+  do {                                                         \
+    if (!(condition)) {                                        \
+      SLURMX_CRITICAL("Assertion failed: \"" #condition "\""); \
+      std::terminate();                                        \
+    }                                                          \
   } while (false)
 #else
-#define ASSERT(condition, message) \
-  do {                             \
+#define SLURM_ASSERT_MSG(condition, message) \
+  do {                                       \
+  } while (false)
+
+#define SLURM_ASSERT_MSG(condition) \
+  do {                              \
   } while (false)
 #endif
 
@@ -59,6 +71,7 @@ enum class SlurmxErr : uint16_t {
 
 inline const char* kCtlXdDefaultPort = "10011";
 inline const char* kXdDefaultPort = "10010";
+inline const char* kDefaultConfigPath = "/etc/slurmx/config.yaml";
 
 namespace Internal {
 
@@ -94,8 +107,8 @@ inline std::string_view SlurmxErrStr(SlurmxErr err) {
 
 // (partition id, node index), by which a Xd node is uniquely identified.
 struct XdNodeId {
-  uint32_t partition_id;
-  uint32_t node_index;
+  uint32_t partition_id{0x3f3f3f3f};
+  uint32_t node_index{0x3f3f3f3f};
 
   struct Hash {
     std::size_t operator()(const XdNodeId& val) const {
@@ -131,8 +144,11 @@ struct fmt::formatter<XdNodeId> {
 // It contains CPU and memory by now.
 struct AllocatableResource {
   uint32_t cpu_count = 0;
-  uint64_t memory_bytes = 0;
-  uint64_t memory_sw_bytes = 0;
+
+  // See documentation of cgroup memory.
+  // https://www.kernel.org/doc/Documentation/cgroup-v1/memory.txt
+  uint64_t memory_bytes = 0;     // limit of memory usage
+  uint64_t memory_sw_bytes = 0;  // limit of memory+Swap usage
 
   AllocatableResource() = default;
   explicit AllocatableResource(const SlurmxGrpc::AllocatableResource&);
@@ -151,7 +167,7 @@ bool operator==(const AllocatableResource& lhs, const AllocatableResource& rhs);
  * Model the dedicated resources in a slurmxd node.
  * It contains GPU, NIC, etc.
  */
-struct DedicatedResource {};
+struct DedicatedResource {};  // Todo: Slurm GRES
 
 /**
  * When a task is allocated a resource UUID, it holds one instance of Resources
@@ -173,51 +189,6 @@ struct Resources {
 bool operator<=(const Resources& lhs, const Resources& rhs);
 bool operator<(const Resources& lhs, const Resources& rhs);
 bool operator==(const Resources& lhs, const Resources& rhs);
-
-struct ITask {
-  enum class Type { Interactive, Batch };
-  enum class Status { Pending, Running, Completing, Finished, Failed };
-
-  /* -------- Fields that are set at the submission time. ------- */
-  absl::Duration time_limit;
-
-  std::string partition_name;
-  Resources resources;
-
-  Type type;
-
-  /* ------- Fields that won't change after this task is accepted. -------- */
-  uint32_t task_id;
-  uint32_t partition_id;
-
-  /* ----- Fields that may change at run time. ----------- */
-  Status status;
-  uint32_t node_index;
-
-  // If this task is PENDING, start_time is either not set (default constructed)
-  // or an estimated start time.
-  // If this task is RUNNING, start_time is the actual starting time.
-  absl::Time start_time;
-
-  absl::Time end_time;
-
-  virtual ~ITask() = default;
-
- protected:
-  ITask() = default;
-};
-
-struct InteractiveTask : public ITask {
-  using ITask::ITask;
-  boost::uuids::uuid resource_uuid;
-};
-
-struct BatchTask : public ITask {
-  using ITask::ITask;
-  std::string executive_path;
-  std::list<std::string> arguments;
-  std::string output_file_pattern;
-};
 
 namespace Internal {
 

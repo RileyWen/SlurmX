@@ -69,3 +69,9 @@ TEST(Misc, AbseilMutexCondition) {
 
   t.join();
 }
+
+TEST(Misc, AbslTime) {
+  absl::Time now = absl::Now();
+  absl::Time Inf = now + absl::InfiniteDuration();
+  EXPECT_TRUE(now < Inf);
+}

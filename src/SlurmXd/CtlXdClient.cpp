@@ -13,19 +13,10 @@ CtlXdClient::~CtlXdClient() {
   m_async_send_thread_.join();
 }
 
-SlurmxErr CtlXdClient::RegisterOnCtlXd(const std::string& partition_name,
-                                       const AllocatableResource& resource,
-                                       uint32_t my_port) {
+SlurmxErr CtlXdClient::RegisterOnCtlXd(uint32_t my_port) {
   SlurmXdRegisterRequest req;
 
-  req.set_partition_name(partition_name);
   req.set_port(my_port);
-
-  SlurmxGrpc::AllocatableResource* resource_total =
-      req.mutable_resource_total()->mutable_allocatable_resource();
-  resource_total->set_cpu_core_limit(resource.cpu_count);
-  resource_total->set_memory_limit_bytes(resource.memory_bytes);
-  resource_total->set_memory_sw_limit_bytes(resource.memory_sw_bytes);
 
   SlurmXdRegisterResult result;
 
@@ -102,21 +93,22 @@ void CtlXdClient::AsyncSendThread_() {
     SlurmxGrpc::TaskStatusChangeReply reply;
     grpc::Status status;
 
+    request.set_node_index(m_node_id_.node_index);
     request.set_task_id(status_change.task_id);
     switch (status_change.new_status) {
-      case ITask::Status::Pending:
+      case SlurmxGrpc::Pending:
         request.set_new_status(SlurmxGrpc::TaskStatus::Pending);
         break;
-      case ITask::Status::Running:
+      case SlurmxGrpc::Running:
         request.set_new_status(SlurmxGrpc::TaskStatus::Running);
         break;
-      case ITask::Status::Finished:
+      case SlurmxGrpc::Finished:
         request.set_new_status(SlurmxGrpc::TaskStatus::Finished);
         break;
-      case ITask::Status::Failed:
+      case SlurmxGrpc::Failed:
         request.set_new_status(SlurmxGrpc::TaskStatus::Failed);
         break;
-      case ITask::Status::Completing:
+      case SlurmxGrpc::Completing:
         request.set_new_status(SlurmxGrpc::TaskStatus::Completing);
         break;
     }

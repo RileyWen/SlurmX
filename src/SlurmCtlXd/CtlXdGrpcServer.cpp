@@ -9,6 +9,7 @@
 #include "TaskScheduler.h"
 #include "XdNodeKeeper.h"
 #include "XdNodeMetaContainer.h"
+#include "slurmx/Network.h"
 #include "slurmx/String.h"
 
 namespace CtlXd {
@@ -22,45 +23,51 @@ grpc::Status CtlXd::SlurmCtlXdServiceImpl::RegisterSlurmXd(
   // ["ipv4", "<address>, "<port>"]
   boost::algorithm::split(peer_slices, peer, boost::is_any_of(":"));
 
-  std::string addr_port = fmt::format("{}:{}", peer_slices[1], request->port());
+  const auto &ipv4 = peer_slices[1];
+  std::string addr_port = fmt::format("{}:{}", ipv4, request->port());
 
-  XdNodeId node_id{};
-  node_id.partition_id =
-      g_meta_container->AllocPartitionId(request->partition_name());
-  node_id.node_index =
-      g_meta_container->AllocNodeIndexInPartition(node_id.partition_id);
+  std::string hostname;
+  if (!slurmx::ResolveHostnameFromIpv4(ipv4, &hostname)) {
+    response->set_ok(false);
+    response->set_reason(fmt::format(
+        "could not resolve hostname for the ip ({}) of this node", ipv4));
 
-  Resources res_total;
-  res_total.allocatable_resource =
-      request->resource_total().allocatable_resource();
+    return grpc::Status::OK;
+  }
+
+  XdNodeId node_id;
+  if (!g_meta_container->GetNodeId(hostname, &node_id)) {
+    response->set_ok(false);
+    response->set_reason(
+        fmt::format("The hostname of this node ({}) is not allowed", hostname));
+
+    return grpc::Status::OK;
+  }
+
+  if (g_node_keeper->CheckNodeIdExists(node_id)) {
+    response->set_ok(false);
+    response->set_reason("This node is maintained in XdNodeKeeper. Waiting..");
+
+    return grpc::Status::OK;
+  }
+
   std::future<RegisterNodeResult> result_future = g_node_keeper->RegisterXdNode(
-      addr_port, node_id,
-      new XdNodeStaticMeta{.node_index = node_id.node_index,
-                           .ipv4_addr = peer_slices[1],
-                           .port = request->port(),
-                           .node_name = request->node_name(),
-                           .partition_id = node_id.partition_id,
-                           .partition_name = request->partition_name(),
-                           .res = res_total},
-      [](void *data) { delete reinterpret_cast<AllocatableResource *>(data); });
+      addr_port, node_id, nullptr, [](void *data) {});
 
   RegisterNodeResult result = result_future.get();
 
-  if (result.node_id.has_value()) {
+  if (result.result) {
     response->set_ok(true);
-    response->mutable_node_id()->set_partition_id(
-        result.node_id.value().partition_id);
-    response->mutable_node_id()->set_node_index(
-        result.node_id.value().node_index);
+    response->mutable_node_id()->set_partition_id(node_id.partition_id);
+    response->mutable_node_id()->set_node_index(node_id.node_index);
   } else {
     response->set_ok(false);
     response->set_reason("CtlXd cannot connect to Xd backward");
 
-    SLURMX_TRACE("Failed to establish the backward channel to XdClient {}.",
-                 addr_port);
-
-    // Avoid memory leak.
-    g_meta_container->TryReleasePartition(node_id.partition_id);
+    SLURMX_TRACE(
+        "Failed to establish the backward channel to XdClient {}, hostname: "
+        "{}.",
+        addr_port, hostname);
   }
 
   return grpc::Status::OK;
@@ -71,17 +78,18 @@ grpc::Status SlurmCtlXdServiceImpl::AllocateInteractiveTask(
     const SlurmxGrpc::InteractiveTaskAllocRequest *request,
     SlurmxGrpc::InteractiveTaskAllocReply *response) {
   SlurmxErr err;
-  auto interactive_task = std::make_unique<InteractiveTask>();
+  auto task = std::make_unique<TaskInCtlXd>();
 
-  interactive_task->partition_name = request->partition_name();
-  interactive_task->resources.allocatable_resource =
+  task->partition_name = request->partition_name();
+  task->resources.allocatable_resource =
       request->required_resources().allocatable_resource();
-  interactive_task->time_limit = absl::Seconds(request->time_limit_sec());
-  interactive_task->type = ITask::Type::Interactive;
+  task->time_limit = absl::Seconds(request->time_limit_sec());
+  task->type = SlurmxGrpc::Interactive;
+  task->meta = InteractiveMetaInTask{};
 
   // Todo: Eliminate useless allocation here when err!=kOk.
   uint32_t task_id;
-  err = g_task_scheduler->SubmitTask(std::move(interactive_task), &task_id);
+  err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
 
   if (err == SlurmxErr::kOk) {
     response->set_ok(true);
@@ -102,30 +110,42 @@ grpc::Status SlurmCtlXdServiceImpl::SubmitBatchTask(
     SlurmxGrpc::SubmitBatchTaskReply *response) {
   SlurmxErr err;
 
-  auto task = std::make_unique<BatchTask>();
-  task->partition_name = request->partition_name();
+  auto task = std::make_unique<TaskInCtlXd>();
+  task->partition_name = request->task().partition_name();
   task->resources.allocatable_resource =
-      request->required_resources().allocatable_resource();
-  task->time_limit = absl::Seconds(request->time_limit().seconds());
+      request->task().resources().allocatable_resource();
+  task->time_limit = absl::Seconds(request->task().time_limit().seconds());
 
-  task->executive_path = request->executive_path();
-  for (auto &&arg : request->arguments()) {
-    task->arguments.push_back(arg);
-  }
-  task->output_file_pattern = request->output_file_pattern();
+  task->meta = BatchMetaInTask{};
+  auto &batch_meta = std::get<BatchMetaInTask>(task->meta);
+  batch_meta.sh_script = request->task().batch_meta().sh_script();
+  batch_meta.output_file_pattern =
+      request->task().batch_meta().output_file_pattern();
 
-  task->type = ITask::Type::Batch;
+  task->type = SlurmxGrpc::Batch;
+
+  task->node_num = request->task().node_num();
+  task->task_per_node = request->task().task_per_node();
+
+  task->uid = request->task().uid();
 
   uint32_t task_id;
   err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
   if (err == SlurmxErr::kOk) {
     response->set_ok(true);
     response->set_task_id(task_id);
+    SLURMX_DEBUG("Received an batch task request. Task id allocated: {}",
+                 task_id);
   } else {
+    std::string reason(err == SlurmxErr::kNonExistent
+                           ? "Partition doesn't exist!"
+                           : "Resource not enough!");
     response->set_ok(false);
-    response->set_reason(err == SlurmxErr::kNonExistent
-                             ? "Partition doesn't exist!"
-                             : "Resource not enough!");
+    response->set_reason(reason);
+    SLURMX_DEBUG(
+        "Received an batch task request "
+        "but the allocation failed. Reason: {}",
+        reason);
   }
 
   return grpc::Status::OK;
@@ -154,11 +174,11 @@ grpc::Status SlurmCtlXdServiceImpl::TaskStatusChange(
     grpc::ServerContext *context,
     const SlurmxGrpc::TaskStatusChangeRequest *request,
     SlurmxGrpc::TaskStatusChangeReply *response) {
-  ITask::Status status{};
+  SlurmxGrpc::TaskStatus status{};
   if (request->new_status() == SlurmxGrpc::Finished)
-    status = ITask::Status::Finished;
+    status = SlurmxGrpc::Finished;
   else if (request->new_status() == SlurmxGrpc::Failed)
-    status = ITask::Status::Failed;
+    status = SlurmxGrpc::Failed;
   else
     SLURMX_ERROR(
         "Task #{}: When TaskStatusChange RPC is called, the task should either "
@@ -168,7 +188,8 @@ grpc::Status SlurmCtlXdServiceImpl::TaskStatusChange(
   std::optional<std::string> reason;
   if (!request->reason().empty()) reason = request->reason();
 
-  g_task_scheduler->TaskStatusChange(request->task_id(), status, reason);
+  g_task_scheduler->TaskStatusChange(request->task_id(), request->node_index(),
+                                     status, reason);
 
   return grpc::Status::OK;
 }
@@ -179,37 +200,64 @@ grpc::Status SlurmCtlXdServiceImpl::TerminateTask(
     SlurmxGrpc::TerminateTaskReply *response) {
   uint32_t task_id = request->task_id();
 
-  XdNodeId xd_node_id;  // NOLINT(cppcoreguidelines-pro-type-member-init)
-  bool ok = g_task_scheduler->QueryXdNodeIdOfRunningTask(task_id, &xd_node_id);
+  bool ok = g_task_scheduler->TerminateTask(task_id);
+  // Todo: make the reason be set here!
+  response->set_ok(ok);
+  return grpc::Status::OK;
+}
 
-  if (ok) {
-    auto stub = g_node_keeper->GetXdStub(xd_node_id);
-    SlurmxErr err = stub->TerminateTask(task_id);
-    if (err == SlurmxErr::kOk)
-      response->set_ok(true);
-    else {
-      // Todo: make the reason be set here!
-      response->set_ok(false);
-    }
+grpc::Status SlurmCtlXdServiceImpl::QueryNodeInfo(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryNodeInfoRequest *request,
+    SlurmxGrpc::QueryNodeInfoReply *response) {
+  SlurmxGrpc::QueryNodeInfoReply *reply;
+
+  if (request->node_name().empty()) {
+    reply = g_meta_container->QueryAllNodeInfo();
+    response->Swap(reply);
+    delete reply;
+  } else {
+    reply = g_meta_container->QueryNodeInfo(request->node_name());
+    response->Swap(reply);
+    delete reply;
   }
 
   return grpc::Status::OK;
 }
 
-grpc::Status SlurmCtlXdServiceImpl::QueryJobsInPartition(
+grpc::Status SlurmCtlXdServiceImpl::QueryPartitionInfo(
     grpc::ServerContext *context,
-    const SlurmxGrpc::QueryJobsInPartitionRequest *request,
-    SlurmxGrpc::QueryJobsInPartitionReply *response) {
-  uint32_t partition_id;
+    const SlurmxGrpc::QueryPartitionInfoRequest *request,
+    SlurmxGrpc::QueryPartitionInfoReply *response) {
+  SlurmxGrpc::QueryPartitionInfoReply *reply;
 
-  if (!g_meta_container->GetPartitionId(request->partition(), &partition_id))
-    return grpc::Status::OK;
-  g_task_scheduler->QueryTaskBriefMetaInPartition(
-      partition_id, QueryBriefTaskMetaFieldControl{true, true, true, true},
-      response->mutable_task_metas());
+  if (request->partition_name().empty()) {
+    reply = g_meta_container->QueryAllPartitionInfo();
+    response->Swap(reply);
+    delete reply;
+  } else {
+    reply = g_meta_container->QueryPartitionInfo(request->partition_name());
+    response->Swap(reply);
+    delete reply;
+  }
 
   return grpc::Status::OK;
 }
+
+// grpc::Status SlurmCtlXdServiceImpl::QueryJobsInPartition(
+//     grpc::ServerContext *context,
+//     const SlurmxGrpc::QueryJobsInPartitionRequest *request,
+//     SlurmxGrpc::QueryJobsInPartitionReply *response) {
+//   uint32_t partition_id;
+//
+//   if (!g_meta_container->GetPartitionId(request->partition(), &partition_id))
+//     return grpc::Status::OK;
+//   g_task_scheduler->QueryTaskBriefMetaInPartition(
+//       partition_id, QueryBriefTaskMetaFieldControl{true, true, true, true},
+//       response->mutable_task_metas());
+//
+//   return grpc::Status::OK;
+// }
 
 CtlXdServer::CtlXdServer(std::string listen_address)
     : m_listen_address_(std::move(listen_address)) {
@@ -250,26 +298,18 @@ void CtlXdServer::XdNodeIsUpCb_(XdNodeId node_id, void *node_data) {
       node_id);
 
   XdNodeStub *xd_stub = g_node_keeper->GetXdStub(node_id);
-  SLURMX_ASSERT(xd_stub != nullptr,
-                "Got nullptr of XdNodeStub in NodeIsUp() callback!");
+  SLURMX_ASSERT_MSG(xd_stub != nullptr,
+                    "Got nullptr of XdNodeStub in NodeIsUp() callback!");
 
-  auto *static_meta = reinterpret_cast<XdNodeStaticMeta *>(node_data);
+  g_meta_container->NodeUp(node_id);
 
-  g_meta_container->AddNode(*static_meta);
-
-  SLURMX_INFO(
-      "Node {} registered. cpu: {}, mem: {}, mem+sw: {}", node_id,
-      static_meta->res.allocatable_resource.cpu_count,
-      util::ReadableMemory(static_meta->res.allocatable_resource.memory_bytes),
-      util::ReadableMemory(
-          static_meta->res.allocatable_resource.memory_sw_bytes));
+  SLURMX_INFO("Node {} is up.", node_id);
 
   // Delete node_data(node_res) (allocated in RegisterSlurmXd) here because it's
   // useless now. The resource information is now kept in global MetaContainer.
   // Set it to nullptr, so next delete call in clean_up_cb will not delete it
   // again.
   xd_stub->SetNodeData(nullptr);
-  delete static_meta;
 }
 
 void CtlXdServer::XdNodeIsDownCb_(XdNodeId node_id, void *) {
@@ -278,7 +318,7 @@ void CtlXdServer::XdNodeIsDownCb_(XdNodeId node_id, void *) {
       "pool.",
       node_id);
 
-  g_meta_container->DeleteNodeMeta(node_id);
+  g_meta_container->NodeDown(node_id);
 }
 
 void CtlXdServer::AddAllocDetailToIaTask(

@@ -22,4 +22,6 @@ target_link_libraries(misc_test
         PkgConfig::libuv-static
 
         Threads::Threads
+
+        yaml-cpp
         )

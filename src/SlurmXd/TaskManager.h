@@ -32,6 +32,10 @@
 
 namespace Xd {
 
+struct BatchMetaInProcessInstance {
+  std::string parsed_output_file_pattern;
+};
+
 class ProcessInstance {
  public:
   ProcessInstance(std::string exec_path, std::list<std::string> arg_list)
@@ -89,6 +93,8 @@ class ProcessInstance {
     m_clean_cb_ = std::move(cb);
   }
 
+  BatchMetaInProcessInstance batch_meta;
+
  private:
   /* ------------- Fields set by SpawnProcessInInstance_  ---------------- */
   pid_t m_pid_;
@@ -119,17 +125,23 @@ class ProcessInstance {
   std::function<void(void*)> m_clean_cb_;
 };
 
+struct BatchMetaInTaskInstance {
+  std::string parsed_sh_script_path;
+};
+
 // Todo: Task may consists of multiple subtasks
 struct TaskInstance {
-  std::unique_ptr<ITask> task;
+  SlurmxGrpc::TaskToXd task;
 
-  // fields below are some kinds of Task runtime information
+  PasswordEntry pwd_entry;
+  BatchMetaInTaskInstance batch_meta;
+  bool already_failed;
 
   // The cgroup name that restrains the TaskInstance.
   std::string cg_path;
   struct event* termination_timer;
 
-  std::unique_ptr<ProcessInstance> process;
+  std::unordered_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
 };
 
 /**
@@ -144,7 +156,7 @@ class TaskManager {
 
   ~TaskManager();
 
-  SlurmxErr ExecuteTaskAsync(std::unique_ptr<ITask> task);
+  SlurmxErr ExecuteTaskAsync(SlurmxGrpc::TaskToXd task);
 
   SlurmxErr SpawnInteractiveTaskAsync(
       uint32_t task_id, std::string executive_path,
@@ -226,7 +238,8 @@ class TaskManager {
    * @param release_resource If set to true, SlurmCtlXd will release the
    *  resource (mark the task status as REQUEUE) and requeue the task.
    */
-  void EvActivateTaskStatusChange_(uint32_t task_id, ITask::Status new_status,
+  void EvActivateTaskStatusChange_(uint32_t task_id,
+                                   SlurmxGrpc::TaskStatus new_status,
                                    std::optional<std::string> reason);
 
   template <typename Duration>
@@ -244,7 +257,23 @@ class TaskManager {
             .count()};
 
     struct event* ev = event_new(m_ev_base_, -1, 0, EvOnTimerCb_, arg);
-    SLURMX_ASSERT(ev != nullptr, "Failed to create new timer.");
+    SLURMX_ASSERT_MSG(ev != nullptr, "Failed to create new timer.");
+    evtimer_add(ev, &tv);
+
+    arg->timer_ev = ev;
+    arg->task_instance->termination_timer = ev;
+  }
+
+  template <>
+  void EvAddTerminationTimer_(TaskInstance* instance, int64_t secs) {
+    auto* arg = new EvTimerCbArg;
+    arg->task_manager = this;
+    arg->task_instance = instance;
+
+    timeval tv{static_cast<__time_t>(secs), 0};
+
+    struct event* ev = event_new(m_ev_base_, -1, 0, EvOnTimerCb_, arg);
+    SLURMX_ASSERT_MSG(ev != nullptr, "Failed to create new timer.");
     evtimer_add(ev, &tv);
 
     arg->timer_ev = ev;

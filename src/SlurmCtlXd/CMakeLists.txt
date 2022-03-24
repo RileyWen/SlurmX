@@ -27,4 +27,6 @@ target_link_libraries(slurmctlxd
         absl::flat_hash_map
 
         proto
+
+        yaml-cpp
         )

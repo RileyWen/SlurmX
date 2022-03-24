@@ -31,7 +31,7 @@ TEST(NodeSelectionAlgo, MinLoadFirst) {  // NOLINT(cert-err58-cpp)
                                .partition_id = part_id,
                                .partition_name = partition_name,
                                .res = {.allocatable_resource = node_resource}};
-  g_meta_container->AddNode(node_static);
+  g_meta_container->NodeUp(node_static);
 
   AllocatableResource allocatable_resource_r1;
   allocatable_resource_r1.cpu_count = 3;

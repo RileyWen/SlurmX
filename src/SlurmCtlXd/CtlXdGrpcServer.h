@@ -66,10 +66,18 @@ class SlurmCtlXdServiceImpl final : public SlurmxGrpc::SlurmCtlXd::Service {
                              const SlurmxGrpc::TerminateTaskRequest *request,
                              SlurmxGrpc::TerminateTaskReply *response) override;
 
-  grpc::Status QueryJobsInPartition(
+  //  grpc::Status QueryJobsInPartition(
+  //      grpc::ServerContext *context,
+  //      const SlurmxGrpc::QueryJobsInPartitionRequest *request,
+  //      SlurmxGrpc::QueryJobsInPartitionReply *response) override;
+  grpc::Status QueryNodeInfo(grpc::ServerContext *context,
+                             const SlurmxGrpc::QueryNodeInfoRequest *request,
+                             SlurmxGrpc::QueryNodeInfoReply *response) override;
+
+  grpc::Status QueryPartitionInfo(
       grpc::ServerContext *context,
-      const SlurmxGrpc::QueryJobsInPartitionRequest *request,
-      SlurmxGrpc::QueryJobsInPartitionReply *response) override;
+      const SlurmxGrpc::QueryPartitionInfoRequest *request,
+      SlurmxGrpc::QueryPartitionInfoReply *response) override;
 
  private:
   CtlXdServer *m_ctlxd_server_;

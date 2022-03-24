@@ -36,7 +36,8 @@ class INodeSelectionAlgo {
   //                The node index on which it will be run>
   // Partition information is not needed because scheduling is carried out in
   // one partition to which the task belongs.
-  using NodeSelectionResult = std::pair<std::unique_ptr<ITask>, uint32_t>;
+  using NodeSelectionResult =
+      std::pair<std::unique_ptr<TaskInCtlXd>, std::list<uint32_t>>;
 
   virtual ~INodeSelectionAlgo() = default;
 
@@ -58,20 +59,64 @@ class INodeSelectionAlgo {
   virtual void NodeSelect(
       const XdNodeMetaContainerInterface::AllPartitionsMetaMap&
           all_partitions_meta_map,
-      const absl::flat_hash_map<uint32_t, std::unique_ptr<ITask>>&
+      const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtlXd>>&
           running_tasks,
-      absl::btree_map<uint32_t, std::unique_ptr<ITask>>* pending_task_map,
+      absl::btree_map<uint32_t, std::unique_ptr<TaskInCtlXd>>* pending_task_map,
       std::list<NodeSelectionResult>* selection_result_list) = 0;
 };
 
 class MinLoadFirst : public INodeSelectionAlgo {
+  /**
+   * In this map, the time is discretized by 1s and starts from absl::Now().
+   * {x: a, y: b, z: c, ...} means that
+   * In time interval [x, y-1], the amount of available resources is a.
+   * In time interval [y, z-1], the amount of available resources is b.
+   * In time interval [z, ...], the amount of available resources is c.
+   */
+  using TimeAvailResMap = std::map<absl::Time, Resources>;
+
+  struct TimeSegment {
+    TimeSegment(absl::Time start, absl::Duration duration)
+        : start(start), duration(duration) {}
+    absl::Time start;
+    absl::Duration duration;
+
+    bool operator<(const absl::Time& rhs) const { return this->start < rhs; }
+
+    friend bool operator<(const absl::Time& lhs, const TimeSegment& rhs) {
+      return lhs < rhs.start;
+    }
+  };
+  using ValidTimeSegmentsVec = std::vector<TimeSegment>;
+
+  struct NodeSelectionInfo {
+    std::multimap<uint32_t /* # of running tasks */, uint32_t /* node index */>
+        task_num_node_id_map;
+    std::unordered_map<uint32_t /* Node Index*/, TimeAvailResMap>
+        node_time_avail_res_map;
+  };
+
+  static void CalculateNodeSelectionInfo_(
+      const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtlXd>>&
+          running_tasks,
+      absl::Time now, uint32_t partition_id,
+      const PartitionMetas& partition_metas, uint32_t node_id,
+      const XdNodeMeta& node_meta, NodeSelectionInfo* node_selection_info);
+
+  // Input should guarantee that provided nodes in `node_selection_info` has
+  // enough nodes whose resource is >= task->resource.
+  static bool CalculateRunningNodesAndStartTime_(
+      const NodeSelectionInfo& node_selection_info,
+      const PartitionMetas& partition_metas, const TaskInCtlXd* task,
+      absl::Time now, std::list<uint32_t>* node_ids, absl::Time* start_time);
+
  public:
   void NodeSelect(
       const XdNodeMetaContainerInterface::AllPartitionsMetaMap&
           all_partitions_meta_map,
-      const absl::flat_hash_map<uint32_t, std::unique_ptr<ITask>>&
+      const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtlXd>>&
           running_tasks,
-      absl::btree_map<uint32_t, std::unique_ptr<ITask>>* pending_task_map,
+      absl::btree_map<uint32_t, std::unique_ptr<TaskInCtlXd>>* pending_task_map,
       std::list<NodeSelectionResult>* selection_result_list) override;
 };
 
@@ -92,24 +137,39 @@ class TaskScheduler {
 
   void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
 
-  SlurmxErr SubmitTask(std::unique_ptr<ITask> task, uint32_t* task_id);
+  SlurmxErr SubmitTask(std::unique_ptr<TaskInCtlXd> task, uint32_t* task_id);
 
-  void TaskStatusChange(uint32_t task_id, ITask::Status new_status,
+  void TaskStatusChange(uint32_t task_id, uint32_t node_index,
+                        SlurmxGrpc::TaskStatus new_status,
                         std::optional<std::string> reason);
 
   // Temporary inconsistency may happen. If 'false' is returned, just ignore it.
-  void QueryTaskBriefMetaInPartition(
-      uint32_t partition_id,
-      const QueryBriefTaskMetaFieldControl& field_control,
-      google::protobuf::RepeatedPtrField<SlurmxGrpc::BriefTaskMeta>*
-          task_metas);
+  //  void QueryTaskBriefMetaInPartition(
+  //      uint32_t partition_id,
+  //      const QueryBriefTaskMetaFieldControl& field_control,
+  //      google::protobuf::RepeatedPtrField<SlurmxGrpc::BriefTaskMeta>*
+  //          task_metas);
 
-  bool QueryXdNodeIdOfRunningTask(uint32_t task_id, XdNodeId* node_id);
+  bool QueryXdNodeIdOfRunningTask(uint32_t task_id,
+                                  std::list<XdNodeId>* node_ids) {
+    LockGuard running_guard(m_running_task_map_mtx_);
+    return QueryXdNodeIdOfRunningTaskNoLock_(task_id, node_ids);
+  }
+
+  bool TerminateTask(uint32_t task_id) {
+    LockGuard running_guard(m_running_task_map_mtx_);
+    return TerminateTaskNoLock_(task_id);
+  }
 
  private:
   void ScheduleThread_();
 
   void CleanEndedTaskThread_();
+
+  bool QueryXdNodeIdOfRunningTaskNoLock_(uint32_t task_id,
+                                         std::list<XdNodeId>* node_ids);
+
+  bool TerminateTaskNoLock_(uint32_t task_id);
 
   std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
 
@@ -118,15 +178,15 @@ class TaskScheduler {
 
   // Ordered by task id. Those who comes earlier are in the head,
   // Because they have smaller task id.
-  absl::btree_map<uint32_t /*Task Id*/, std::unique_ptr<ITask>>
+  absl::btree_map<uint32_t /*Task Id*/, std::unique_ptr<TaskInCtlXd>>
       m_pending_task_map_ GUARDED_BY(m_pending_task_map_mtx_);
   Mutex m_pending_task_map_mtx_;
 
-  absl::flat_hash_map<uint32_t, std::unique_ptr<ITask>> m_running_task_map_
-      GUARDED_BY(m_running_task_map_mtx_);
+  absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtlXd>>
+      m_running_task_map_ GUARDED_BY(m_running_task_map_mtx_);
   Mutex m_running_task_map_mtx_;
 
-  absl::flat_hash_map<uint32_t, std::unique_ptr<ITask>> m_ended_task_map_
+  absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtlXd>> m_ended_task_map_
       GUARDED_BY(m_ended_task_map_mtx_);
   Mutex m_ended_task_map_mtx_;
 

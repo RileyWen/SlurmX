@@ -4,7 +4,6 @@ package SlurmxGrpc;
 option go_package = "/protos";
 
 import "PublicDefs.proto";
-import "google/protobuf/duration.proto";
 
 message Negotiation {
   uint32 version = 1;
@@ -110,11 +109,6 @@ message SlurmXdRegisterRequest {
   Negotiation header = 1;
 
   uint32 port = 2;
-  string node_name = 3;
-  string partition_name = 4;
-
-  Resources resource_total = 5;
-  uint64 time_limit_for_task_in_sec = 6;
 
   /* Todo: Add fields describing what tasks the SlurmXd is still running and the current usage of this node in case that
       from CtlXd's view, this node is down due to network problem and however this node is still running.
@@ -134,8 +128,9 @@ message SlurmXdRegisterResult {
 
 message TaskStatusChangeRequest {
   uint32 task_id = 1;
-  TaskStatus new_status = 2;
-  string reason = 3;
+  uint32 node_index = 2;
+  TaskStatus new_status = 3;
+  string reason = 4;
 }
 
 message TaskStatusChangeReply {
@@ -143,16 +138,7 @@ message TaskStatusChangeReply {
 }
 
 message SubmitBatchTaskRequest {
-  /* --------- Fields that are shared between all types of tasks ----------------- */
-  string executive_path = 1;
-  repeated string arguments = 2;
-
-  google.protobuf.Duration time_limit = 3;
-  string partition_name = 4;
-  Resources required_resources = 5;
-
-  /* -------------------- Fields that are batch task only ------------------------ */
-  string output_file_pattern = 6;
+  TaskToCtlXd task = 1;
 }
 
 message SubmitBatchTaskReply {
@@ -164,11 +150,7 @@ message SubmitBatchTaskReply {
 }
 
 message ExecuteTaskRequest {
-  Task task = 1;
-  oneof additional_meta {
-    BatchTaskAdditionalMeta batch_meta = 2;
-    InteractiveTaskAdditionalMeta interactive_meta = 3;
-  }
+  TaskToXd task = 1;
 }
 
 message ExecuteTaskReply {
@@ -190,8 +172,25 @@ message QueryJobsInPartitionRequest {
 }
 
 message QueryJobsInPartitionReply {
-  repeated BriefTaskMeta task_metas = 1;
+  repeated TaskToCtlXd task_metas = 1;
 }
+
+message QueryNodeInfoRequest {
+  string node_name = 1;
+}
+
+message QueryNodeInfoReply {
+  repeated NodeInfo node_info_list = 1;
+}
+
+message QueryPartitionInfoRequest {
+  string partition_name = 1;
+}
+
+message QueryPartitionInfoReply {
+  repeated PartitionInfo partition_info = 1;
+}
+
 
 // Todo: Divide service into two parts: one for SlurmXd and one for SrunX
 //  We need to distinguish the message sender
@@ -217,6 +216,9 @@ service SlurmCtlXd {
 
   /* RPCs called from SqueueX */
   rpc QueryJobsInPartition(QueryJobsInPartitionRequest) returns (QueryJobsInPartitionReply);
+
+  rpc QueryNodeInfo(QueryNodeInfoRequest) returns (QueryNodeInfoReply);
+  rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
 }
 
 service SlurmXd {

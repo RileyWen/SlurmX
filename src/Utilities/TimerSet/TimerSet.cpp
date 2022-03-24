@@ -4,18 +4,19 @@ namespace slurmx {
 
 TimerSet::TimerSet() {
   m_timer_events_base_ = event_base_new();
-  SLURMX_ASSERT(m_timer_events_base_ != nullptr,
-                "Timer event base initialization failed!");
+  SLURMX_ASSERT_MSG(m_timer_events_base_ != nullptr,
+                    "Timer event base initialization failed!");
 
   m_event_new_timer_ = event_new(m_timer_events_base_, -1, EV_READ | EV_PERSIST,
                                  OnNewTimer_, this);
-  SLURMX_ASSERT(m_event_new_timer_ != nullptr,
-                "Failed to create new timer event!");
+  SLURMX_ASSERT_MSG(m_event_new_timer_ != nullptr,
+                    "Failed to create new timer event!");
   event_add(m_event_new_timer_, nullptr);
 
   m_event_stop_ = event_new(m_timer_events_base_, -1, EV_READ | EV_PERSIST,
                             OnStop_, m_timer_events_base_);
-  SLURMX_ASSERT(m_event_stop_ != nullptr, "Failed to create new timer event!");
+  SLURMX_ASSERT_MSG(m_event_stop_ != nullptr,
+                    "Failed to create new timer event!");
   event_add(m_event_stop_, nullptr);
 
   m_timer_thread_ =
@@ -38,7 +39,7 @@ void TimerSet::OnNewTimer_(int, short, void* arg) {
   while (this_->m_new_timer_queue_.try_dequeue(meta)) {
     struct event* ev =
         event_new(this_->m_timer_events_base_, -1, 0, Ontimer_, meta);
-    SLURMX_ASSERT(ev != nullptr, "Failed to create new timer.");
+    SLURMX_ASSERT_MSG(ev != nullptr, "Failed to create new timer.");
 
     evtimer_add(ev, &meta->tv);
     meta->ev = ev;

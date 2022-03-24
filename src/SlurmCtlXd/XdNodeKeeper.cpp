@@ -19,7 +19,7 @@ XdNodeStub::~XdNodeStub() {
   if (m_clean_up_cb_) m_clean_up_cb_(m_data_);
 }
 
-SlurmxErr XdNodeStub::ExecuteTask(const ITask *task) {
+SlurmxErr XdNodeStub::ExecuteTask(const TaskInCtlXd *task) {
   using SlurmxGrpc::ExecuteTaskReply;
   using SlurmxGrpc::ExecuteTaskRequest;
 
@@ -35,8 +35,6 @@ SlurmxErr XdNodeStub::ExecuteTask(const ITask *task) {
       google::protobuf::util::TimeUtil::MillisecondsToDuration(
           ToInt64Milliseconds(task->time_limit)));
 
-  mutable_task->set_partition_name(task->partition_name);
-
   // Set resources
   auto *mutable_allocatable_resource =
       mutable_task->mutable_resources()->mutable_allocatable_resource();
@@ -48,35 +46,32 @@ SlurmxErr XdNodeStub::ExecuteTask(const ITask *task) {
       task->resources.allocatable_resource.memory_sw_bytes);
 
   // Set type
-  if (task->type == ITask::Type::Interactive)
-    mutable_task->set_type(SlurmxGrpc::Interactive);
-  else if (task->type == ITask::Type::Batch)
-    mutable_task->set_type(SlurmxGrpc::Batch);
-  else
-    SLURMX_ASSERT(false, "Unknown task type.");
+  mutable_task->set_type(task->type);
 
   mutable_task->set_task_id(task->task_id);
   mutable_task->set_partition_id(task->partition_id);
 
-  // `status` is not set because it is only used in CtlXd.
-  mutable_task->set_node_index(task->node_index);
+  mutable_task->set_node_num(task->node_num);
+  mutable_task->set_task_per_node(task->task_per_node);
 
-  // `start_time` is not set because it is only used in CtlXd.
+  mutable_task->set_uid(task->uid);
 
-  if (task->type == ITask::Type::Interactive) {
-    auto *ia_task = dynamic_cast<const InteractiveTask *>(task);
-    auto *mutable_meta = request.mutable_interactive_meta();
-    mutable_meta->set_resource_uuid(ia_task->resource_uuid.data,
-                                    ia_task->resource_uuid.size());
-  } else if (task->type == ITask::Type::Batch) {
-    auto *batch_task = dynamic_cast<const BatchTask *>(task);
-    auto *mutable_meta = request.mutable_batch_meta();
-    mutable_meta->set_executive_path(batch_task->executive_path);
-    mutable_meta->set_output_file_pattern(batch_task->output_file_pattern);
+  mutable_task->mutable_start_time()->set_seconds(
+      ToUnixSeconds(task->start_time));
+  mutable_task->mutable_time_limit()->set_seconds(
+      ToInt64Seconds(task->time_limit));
 
-    auto *mutable_args = mutable_meta->mutable_arguments();
-    for (const auto &arg : batch_task->arguments)
-      mutable_args->Add(std::string(arg));
+  if (task->type == SlurmxGrpc::Interactive) {
+    auto *mutable_meta = request.mutable_task()->mutable_interactive_meta();
+
+    auto &meta_in_ctlxd = std::get<InteractiveMetaInTask>(task->meta);
+    mutable_meta->set_resource_uuid(meta_in_ctlxd.resource_uuid.data,
+                                    meta_in_ctlxd.resource_uuid.size());
+  } else if (task->type == SlurmxGrpc::Batch) {
+    auto &meta_in_ctlxd = std::get<BatchMetaInTask>(task->meta);
+    auto *mutable_meta = request.mutable_task()->mutable_batch_meta();
+    mutable_meta->set_output_file_pattern(meta_in_ctlxd.output_file_pattern);
+    mutable_meta->set_sh_script(meta_in_ctlxd.sh_script);
   }
 
   status = m_stub_->ExecuteTask(&context, request, &reply);
@@ -168,7 +163,7 @@ std::future<RegisterNodeResult> XdNodeKeeper::RegisterXdNode(
   cq_tag_data->xd->m_stub_ =
       SlurmxGrpc::SlurmXd::NewStub(cq_tag_data->xd->m_channel_);
 
-  cq_tag_data->xd->m_maximum_retry_times_ = 4;
+  cq_tag_data->xd->m_maximum_retry_times_ = 2;
 
   CqTag *tag;
   {
@@ -238,7 +233,9 @@ void XdNodeKeeper::StateMonitorThreadFunc_() {
             SLURMX_TRACE("Set future to false");
             auto *tag_data =
                 reinterpret_cast<InitializingXdTagData *>(tag->data);
-            tag_data->register_result.set_value({std::nullopt});
+            tag_data->register_result.set_value(RegisterNodeResult{
+                false, fmt::format("Cannot connect to node {}",
+                                   tag_data->xd->m_node_id_)});
             delete tag_data;
           } else if (tag->type == CqTag::kEstablishedXd) {
             if (m_node_is_down_cb_)
@@ -269,7 +266,7 @@ void XdNodeKeeper::StateMonitorThreadFunc_() {
          * allocated tag. */
         util::lock_guard lock(m_cq_mtx_);
         if (!m_cq_closed_) {
-          SLURMX_TRACE("Registering next tag: {}", tag->type);
+          // SLURMX_TRACE("Registering next tag: {}", tag->type);
 
           // When cq is closed, do not register any more callbacks on it.
           xd->m_channel_->NotifyOnStateChange(
@@ -332,7 +329,7 @@ XdNodeKeeper::CqTag *XdNodeKeeper::InitXdStateMachine_(
         m_node_is_up_cb_(raw_xd->m_node_id_, raw_xd->m_data_);
 
       // Set future of RegisterNodeResult and free tag_data
-      tag_data->register_result.set_value({raw_xd->m_node_id_});
+      tag_data->register_result.set_value(RegisterNodeResult{true});
       delete tag_data;
 
       // Switch to EstablishedXd state machine
@@ -551,13 +548,19 @@ uint32_t XdNodeKeeper::AvailableNodeCount() {
   return m_alive_xd_bitset_.count();
 }
 
-XdNodeStub *XdNodeKeeper::GetXdStub(XdNodeId node_id) {
+XdNodeStub *XdNodeKeeper::GetXdStub(const XdNodeId &node_id) {
   util::lock_guard lock(m_node_mtx_);
   auto iter = m_node_id_slot_offset_map_.find(node_id);
   if (iter != m_node_id_slot_offset_map_.end())
     return m_node_vec_[iter->second].get();
   else
     return nullptr;
+}
+
+bool XdNodeKeeper::CheckNodeIdExists(const XdNodeId &node_id) {
+  util::lock_guard lock(m_node_mtx_);
+  size_t cnt = m_node_id_slot_offset_map_.count(node_id);
+  return cnt > 0;
 }
 
 bool XdNodeKeeper::XdNodeValid(uint32_t index) {
