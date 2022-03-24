@@ -41,6 +41,16 @@ class XdNodeMetaContainerInterface {
 
   virtual bool CheckNodeAllowed(const std::string& hostname) = 0;
 
+  virtual SlurmxGrpc::QueryNodeInfoReply* QueryAllNodeInfo() = 0;
+
+  virtual SlurmxGrpc::QueryNodeInfoReply* QueryNodeInfo(
+      const std::string& node_name) = 0;
+
+  virtual SlurmxGrpc::QueryPartitionInfoReply* QueryAllPartitionInfo() = 0;
+
+  virtual SlurmxGrpc::QueryPartitionInfoReply* QueryPartitionInfo(
+      const std::string& partition_name) = 0;
+
   virtual bool GetNodeId(const std::string& hostname, XdNodeId* node_id) = 0;
 
   /**
@@ -78,6 +88,16 @@ class XdNodeMetaContainerSimpleImpl final
   ~XdNodeMetaContainerSimpleImpl() override = default;
 
   void InitFromConfig(const Config& config) override;
+
+  SlurmxGrpc::QueryNodeInfoReply* QueryAllNodeInfo() override;
+
+  SlurmxGrpc::QueryNodeInfoReply* QueryNodeInfo(
+      const std::string& node_name) override;
+
+  SlurmxGrpc::QueryPartitionInfoReply* QueryAllPartitionInfo() override;
+
+  SlurmxGrpc::QueryPartitionInfoReply* QueryPartitionInfo(
+      const std::string& partition_name) override;
 
   bool GetNodeId(const std::string& hostname, XdNodeId* node_id) override;
 

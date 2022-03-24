@@ -93,3 +93,24 @@ message BatchTaskAdditionalMeta {
 message InteractiveTaskAdditionalMeta{
   bytes resource_uuid = 1;
 }
+
+message PartitionInfo {
+  enum PartitionState {
+    UP = 0;
+    DOWN = 1;
+  }
+
+  string hostlist = 1;
+  PartitionState state = 2;
+  string name = 3;
+}
+
+message NodeInfo {
+  enum NodeState {
+    IDLE = 0;
+    DOWN = 1;
+  }
+
+  string hostname = 1;
+  NodeState state = 2;
+}

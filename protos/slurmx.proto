@@ -175,6 +175,23 @@ message QueryJobsInPartitionReply {
   repeated TaskToCtlXd task_metas = 1;
 }
 
+message QueryNodeInfoRequest {
+  string node_name = 1;
+}
+
+message QueryNodeInfoReply {
+  repeated NodeInfo node_info_list = 1;
+}
+
+message QueryPartitionInfoRequest {
+  string partition_name = 1;
+}
+
+message QueryPartitionInfoReply {
+  repeated PartitionInfo partition_info = 1;
+}
+
+
 // Todo: Divide service into two parts: one for SlurmXd and one for SrunX
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -199,6 +216,9 @@ service SlurmCtlXd {
 
   /* RPCs called from SqueueX */
   rpc QueryJobsInPartition(QueryJobsInPartitionRequest) returns (QueryJobsInPartitionReply);
+
+  rpc QueryNodeInfo(QueryNodeInfoRequest) returns (QueryNodeInfoReply);
+  rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
 }
 
 service SlurmXd {

@@ -206,6 +206,44 @@ grpc::Status SlurmCtlXdServiceImpl::TerminateTask(
   return grpc::Status::OK;
 }
 
+grpc::Status SlurmCtlXdServiceImpl::QueryNodeInfo(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryNodeInfoRequest *request,
+    SlurmxGrpc::QueryNodeInfoReply *response) {
+  SlurmxGrpc::QueryNodeInfoReply *reply;
+
+  if (request->node_name().empty()) {
+    reply = g_meta_container->QueryAllNodeInfo();
+    response->Swap(reply);
+    delete reply;
+  } else {
+    reply = g_meta_container->QueryNodeInfo(request->node_name());
+    response->Swap(reply);
+    delete reply;
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status SlurmCtlXdServiceImpl::QueryPartitionInfo(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryPartitionInfoRequest *request,
+    SlurmxGrpc::QueryPartitionInfoReply *response) {
+  SlurmxGrpc::QueryPartitionInfoReply *reply;
+
+  if (request->partition_name().empty()) {
+    reply = g_meta_container->QueryAllPartitionInfo();
+    response->Swap(reply);
+    delete reply;
+  } else {
+    reply = g_meta_container->QueryPartitionInfo(request->partition_name());
+    response->Swap(reply);
+    delete reply;
+  }
+
+  return grpc::Status::OK;
+}
+
 // grpc::Status SlurmCtlXdServiceImpl::QueryJobsInPartition(
 //     grpc::ServerContext *context,
 //     const SlurmxGrpc::QueryJobsInPartitionRequest *request,

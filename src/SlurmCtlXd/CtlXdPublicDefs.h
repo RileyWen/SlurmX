@@ -55,6 +55,8 @@ struct XdNodeStaticMeta {
 struct XdNodeMeta {
   XdNodeStaticMeta static_meta;
 
+  bool alive{false};
+
   // total = avail + in-use
   Resources res_total;  // A copy of res in XdNodeStaticMeta,
   // just for convenience.
@@ -82,6 +84,9 @@ struct PartitionGlobalMeta {
   Resources m_resource_total_inc_dead_;
 
   std::string name;
+  std::string nodelist_str;
+  uint32_t node_cnt;
+  uint32_t alive_node_cnt;
 };
 
 struct PartitionMetas {
@@ -142,6 +147,7 @@ struct Config {
   };
 
   struct Partition {
+    std::string nodelist_str;
     std::unordered_set<std::string> nodes;
     std::unordered_set<std::string> AllowAccounts;
   };

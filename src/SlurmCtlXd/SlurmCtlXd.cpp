@@ -1,3 +1,4 @@
+#include <absl/strings/ascii.h>
 #include <absl/strings/str_split.h>
 #include <event2/thread.h>
 #include <spdlog/async.h>
@@ -252,10 +253,11 @@ int main(int argc, char** argv) {
           } else
             std::exit(1);
 
+          part.nodelist_str = nodes;
           std::vector<absl::string_view> split = absl::StrSplit(nodes, ',');
 
           for (auto&& node : split) {
-            std::string node_s{node};
+            std::string node_s{absl::StripAsciiWhitespace(node)};
 
             auto node_it = g_config.Nodes.find(node_s);
             if (node_it != g_config.Nodes.end()) {

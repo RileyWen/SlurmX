@@ -12,9 +12,11 @@ void XdNodeMetaContainerSimpleImpl::NodeUp(const XdNodeId& node_id) {
 
   SLURMX_ASSERT(part_meta.xd_node_meta_map.count(node_id.node_index) > 0);
   auto& node_meta = part_meta.xd_node_meta_map.at(node_id.node_index);
+  node_meta.alive = true;
 
   part_meta.partition_global_meta.m_resource_total_ += node_meta.res_total;
   part_meta.partition_global_meta.m_resource_avail_ += node_meta.res_total;
+  part_meta.partition_global_meta.alive_node_cnt++;
 }
 
 void XdNodeMetaContainerSimpleImpl::NodeDown(XdNodeId node_id) {
@@ -40,10 +42,13 @@ void XdNodeMetaContainerSimpleImpl::NodeDown(XdNodeId node_id) {
 
   PartitionGlobalMeta& part_meta =
       part_metas_iter->second.partition_global_meta;
-  const XdNodeMeta& node_meta = xd_node_meta_iter->second;
+  XdNodeMeta& node_meta = xd_node_meta_iter->second;
+  node_meta.alive = false;
+
   part_meta.m_resource_avail_ -= node_meta.res_avail;
   part_meta.m_resource_total_ -= node_meta.res_total;
   part_meta.m_resource_in_use_ -= node_meta.res_in_use;
+  part_meta.alive_node_cnt++;
 }
 
 XdNodeMetaContainerInterface::PartitionMetasPtr
@@ -210,14 +215,18 @@ void XdNodeMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
 
     part_meta.partition_global_meta.name = part_name;
     part_meta.partition_global_meta.m_resource_total_inc_dead_ = part_res;
+    part_meta.partition_global_meta.node_cnt = node_index;
 
-    SLURMX_DEBUG("partition [{}]'s Global resource now: cpu: {}, mem: {})",
-                 part_name,
-                 part_meta.partition_global_meta.m_resource_total_inc_dead_
-                     .allocatable_resource.cpu_count,
-                 util::ReadableMemory(
-                     part_meta.partition_global_meta.m_resource_total_inc_dead_
-                         .allocatable_resource.memory_bytes));
+    SLURMX_DEBUG(
+        "partition [{}]'s Global resource now: cpu: {}, mem: {}). It has {} "
+        "nodes.",
+        part_name,
+        part_meta.partition_global_meta.m_resource_total_inc_dead_
+            .allocatable_resource.cpu_count,
+        util::ReadableMemory(
+            part_meta.partition_global_meta.m_resource_total_inc_dead_
+                .allocatable_resource.memory_bytes),
+        node_index);
     part_seq++;
   }
 }
@@ -247,6 +256,106 @@ bool XdNodeMetaContainerSimpleImpl::GetNodeId(const std::string& hostname,
   node_id->node_index = node_index;
 
   return true;
+}
+
+SlurmxGrpc::QueryNodeInfoReply*
+XdNodeMetaContainerSimpleImpl::QueryAllNodeInfo() {
+  LockGuard guard(mtx_);
+
+  auto* reply = new SlurmxGrpc::QueryNodeInfoReply;
+  auto* list = reply->mutable_node_info_list();
+
+  for (auto&& [part_name, part_meta] : partition_metas_map_) {
+    for (auto&& [node_name, node_meta] : part_meta.xd_node_meta_map) {
+      auto* node_info = list->Add();
+      node_info->set_hostname(node_meta.static_meta.hostname);
+      if (node_meta.alive)
+        node_info->set_state(SlurmxGrpc::NodeInfo_NodeState_IDLE);
+      else
+        node_info->set_state(SlurmxGrpc::NodeInfo_NodeState_DOWN);
+    }
+  }
+
+  return reply;
+}
+
+SlurmxGrpc::QueryNodeInfoReply* XdNodeMetaContainerSimpleImpl::QueryNodeInfo(
+    const std::string& node_name) {
+  LockGuard guard(mtx_);
+
+  auto* reply = new SlurmxGrpc::QueryNodeInfoReply;
+  auto* list = reply->mutable_node_info_list();
+
+  auto it1 = node_hostname_part_id_map_.find(node_name);
+  if (it1 == node_hostname_part_id_map_.end()) {
+    return reply;
+  }
+
+  uint32_t part_id = it1->second;
+  auto key = std::make_pair(part_id, node_name);
+  auto it2 = part_id_host_index_map_.find(key);
+  if (it2 == part_id_host_index_map_.end()) {
+    return reply;
+  }
+  uint32_t node_index = it2->second;
+
+  auto& node_meta = partition_metas_map_[part_id].xd_node_meta_map[node_index];
+  auto* node_info = list->Add();
+  node_info->set_hostname(node_meta.static_meta.hostname);
+  if (node_meta.alive)
+    node_info->set_state(SlurmxGrpc::NodeInfo_NodeState_IDLE);
+  else
+    node_info->set_state(SlurmxGrpc::NodeInfo_NodeState_DOWN);
+
+  return reply;
+}
+
+SlurmxGrpc::QueryPartitionInfoReply*
+XdNodeMetaContainerSimpleImpl::QueryAllPartitionInfo() {
+  LockGuard guard(mtx_);
+
+  auto* reply = new SlurmxGrpc::QueryPartitionInfoReply;
+  auto* list = reply->mutable_partition_info();
+
+  for (auto&& [part_name, part_meta] : partition_metas_map_) {
+    auto* part_info = list->Add();
+    part_info->set_name(part_meta.partition_global_meta.name);
+
+    if (part_meta.partition_global_meta.alive_node_cnt > 0)
+      part_info->set_state(SlurmxGrpc::PartitionInfo_PartitionState_UP);
+    else
+      part_info->set_state(SlurmxGrpc::PartitionInfo_PartitionState_DOWN);
+
+    part_info->set_hostlist(part_meta.partition_global_meta.nodelist_str);
+  }
+
+  return reply;
+}
+
+SlurmxGrpc::QueryPartitionInfoReply*
+XdNodeMetaContainerSimpleImpl::QueryPartitionInfo(
+    const std::string& partition_name) {
+  LockGuard guard(mtx_);
+
+  auto* reply = new SlurmxGrpc::QueryPartitionInfoReply;
+  auto* list = reply->mutable_partition_info();
+
+  auto it = partition_name_id_map_.find(partition_name);
+  if (it == partition_name_id_map_.end()) return reply;
+
+  auto& part_meta = partition_metas_map_.at(it->second);
+
+  auto* part_info = list->Add();
+  part_info->set_name(part_meta.partition_global_meta.name);
+
+  if (part_meta.partition_global_meta.alive_node_cnt > 0)
+    part_info->set_state(SlurmxGrpc::PartitionInfo_PartitionState_UP);
+  else
+    part_info->set_state(SlurmxGrpc::PartitionInfo_PartitionState_DOWN);
+
+  part_info->set_hostlist(part_meta.partition_global_meta.nodelist_str);
+
+  return reply;
 }
 
 }  // namespace CtlXd
