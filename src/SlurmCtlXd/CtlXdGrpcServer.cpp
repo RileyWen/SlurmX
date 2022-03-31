@@ -10,7 +10,7 @@
 #include "XdNodeKeeper.h"
 #include "XdNodeMetaContainer.h"
 #include "slurmx/Network.h"
-#include "slurmx/String.h"
+#include "slurmx/StringParse.h"
 
 namespace CtlXd {
 
@@ -128,6 +128,7 @@ grpc::Status SlurmCtlXdServiceImpl::SubmitBatchTask(
   task->task_per_node = request->task().task_per_node();
 
   task->uid = request->task().uid();
+  task->env = request->task().env();
 
   uint32_t task_id;
   err = g_task_scheduler->SubmitTask(std::move(task), &task_id);

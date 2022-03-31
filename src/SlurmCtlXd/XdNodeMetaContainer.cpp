@@ -1,6 +1,6 @@
 #include "XdNodeMetaContainer.h"
 
-#include "slurmx/String.h"
+#include "slurmx/StringParse.h"
 
 namespace CtlXd {
 
