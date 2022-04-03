@@ -1,4 +1,4 @@
-#include "slurmx/StringParse.h"
+#include "slurmx/String.h"
 
 
 namespace util {

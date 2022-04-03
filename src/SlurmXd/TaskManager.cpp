@@ -371,6 +371,7 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
   savedPrivilege saved_priv;
   saved_priv.uid = getuid();
   saved_priv.gid = getgid();
+  saved_priv.cwd = get_current_dir_name();
 
   int rc = setegid(instance->pwd_entry.Gid());
   if (rc == -1) {
@@ -380,6 +381,11 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
   rc = seteuid(instance->pwd_entry.Uid());
   if (rc == -1) {
     SLURMX_ERROR("error: seteuid. {}\n", strerror(errno));
+    return SlurmxErr::kSystemErr;
+  }
+  rc = chdir(instance->task.cwd().c_str());
+  if (rc == -1) {
+    SLURMX_ERROR("error: setcwd. {}\n", strerror(errno));
     return SlurmxErr::kSystemErr;
   }
 
@@ -392,6 +398,7 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
 
     setegid(saved_priv.gid);
     seteuid(saved_priv.uid);
+    chdir(saved_priv.cwd.c_str());
 
     FileOutputStream ostream(fd);
     CanStartMessage msg;

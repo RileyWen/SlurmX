@@ -5,7 +5,7 @@
 
 #include "CtlXdGrpcServer.h"
 #include "XdNodeKeeper.h"
-#include "slurmx/StringParse.h"
+#include "slurmx/String.h"
 
 namespace CtlXd {
 

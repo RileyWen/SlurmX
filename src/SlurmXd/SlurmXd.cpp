@@ -14,7 +14,7 @@
 #include "CtlXdClient.h"
 #include "XdServer.h"
 #include "slurmx/PublicHeader.h"
-#include "slurmx/StringParse.h"
+#include "slurmx/String.h"
 
 struct Node {
   uint32_t cpu;

@@ -56,6 +56,7 @@ SlurmxErr XdNodeStub::ExecuteTask(const TaskInCtlXd *task) {
 
   mutable_task->set_uid(task->uid);
   mutable_task->set_env(task->env);
+  mutable_task->set_cwd(task->cwd);
 
   mutable_task->mutable_start_time()->set_seconds(
       ToUnixSeconds(task->start_time));

@@ -20,7 +20,7 @@
 #include "XdNodeKeeper.h"
 #include "XdNodeMetaContainer.h"
 #include "slurmx/PublicHeader.h"
-#include "slurmx/StringParse.h"
+#include "slurmx/String.h"
 
 void InitializeCtlXdGlobalVariables() {
   using namespace CtlXd;
