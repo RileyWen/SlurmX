@@ -14,6 +14,7 @@
 #include "CtlXdClient.h"
 #include "XdServer.h"
 #include "slurmx/PublicHeader.h"
+#include "slurmx/String.h"
 
 struct Node {
   uint32_t cpu;
@@ -239,11 +240,14 @@ int main(int argc, char** argv) {
              ++it) {
           auto node = it->as<YAML::Node>();
           auto node_ptr = std::make_shared<Node>();
-          std::string name;
+          std::list<std::string> name_list;
 
           if (node["name"]) {
-            name.append(node["name"].Scalar());
-            SLURMX_TRACE("new node parsed: {}", node["name"].Scalar());
+            if(!util::ParseHostList(node["name"].Scalar(),&name_list)){
+              SLURMX_ERROR("Illegal node name string format.");
+              std::exit(1);
+            }
+            SLURMX_TRACE("node name list parsed: {}", fmt::join(name_list,", "));
           } else
             std::exit(1);
 
@@ -273,7 +277,8 @@ int main(int argc, char** argv) {
           } else
             std::exit(1);
 
-          g_config.Nodes[name] = node_ptr;
+          for(auto && name : name_list)
+            g_config.Nodes[name] = node_ptr;
         }
       }
 
@@ -295,9 +300,13 @@ int main(int argc, char** argv) {
           } else
             std::exit(1);
 
-          std::vector<absl::string_view> split = absl::StrSplit(nodes, ',');
+          std::list<std::string> name_list;
+          if(!util::ParseHostList(nodes, &name_list)){
+            SLURMX_ERROR("Illegal node name string format.");
+            std::exit(1);
+          }
 
-          for (auto&& node : split) {
+          for (auto&& node : name_list) {
             std::string node_s{node};
 
             auto node_it = g_config.Nodes.find(node_s);

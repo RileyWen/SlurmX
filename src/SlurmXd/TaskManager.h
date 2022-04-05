@@ -189,6 +189,12 @@ class TaskManager {
     int value;
   };
 
+  struct savedPrivilege {
+    uid_t uid;
+    gid_t gid;
+    std::string cwd;
+  };
+
   struct EvQueueGrpcInteractiveTask {
     std::promise<SlurmxErr> err_promise;
     uint32_t task_id;
@@ -264,7 +270,7 @@ class TaskManager {
     arg->task_instance->termination_timer = ev;
   }
 
-  template <>
+//  template <>
   void EvAddTerminationTimer_(TaskInstance* instance, int64_t secs) {
     auto* arg = new EvTimerCbArg;
     arg->task_manager = this;

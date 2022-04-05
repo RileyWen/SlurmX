@@ -1,5 +1,5 @@
 #include "TaskManager.h"
-
+#include <absl/strings/str_split.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/stat.h>
@@ -367,12 +367,38 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     return SlurmxErr::kSystemErr;
   }
 
+  // save the current uid/gid
+  savedPrivilege saved_priv;
+  saved_priv.uid = getuid();
+  saved_priv.gid = getgid();
+  saved_priv.cwd = get_current_dir_name();
+
+  int rc = setegid(instance->pwd_entry.Gid());
+  if (rc == -1) {
+    SLURMX_ERROR("error: setegid. {}\n", strerror(errno));
+    return SlurmxErr::kSystemErr;
+  }
+  rc = seteuid(instance->pwd_entry.Uid());
+  if (rc == -1) {
+    SLURMX_ERROR("error: seteuid. {}\n", strerror(errno));
+    return SlurmxErr::kSystemErr;
+  }
+  rc = chdir(instance->task.cwd().c_str());
+  if (rc == -1) {
+    SLURMX_ERROR("error: setcwd. {}\n", strerror(errno));
+    return SlurmxErr::kSystemErr;
+  }
+
   pid_t child_pid = fork();
   if (child_pid > 0) {  // Parent proc
     close(socket_pair[1]);
     int fd = socket_pair[0];
     bool ok;
     SlurmxErr err;
+
+    setegid(saved_priv.gid);
+    seteuid(saved_priv.uid);
+    chdir(saved_priv.cwd.c_str());
 
     FileOutputStream ostream(fd);
     CanStartMessage msg;
@@ -455,8 +481,17 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!msg.ok()) std::abort();
 
+    setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Gid());
+    setregid(instance->pwd_entry.Uid(), instance->pwd_entry.Gid());
     // Set pgid to the pid of task root process.
     setpgid(0, 0);
+
+    std::vector<std::string> env_vec = absl::StrSplit(instance->task.env(), "||");
+    for(auto str: env_vec){
+        if(putenv(str.data())){
+          SLURMX_ERROR("set environ {} failed!", str);
+        }
+    }
 
     // Prepare the command line arguments.
     std::vector<const char*> argv;

@@ -116,6 +116,8 @@ struct TaskInCtlXd {
   uint32_t task_per_node{0};
 
   uid_t uid;
+  std::string env;
+  std::string cwd;
 
   /* ------- Fields that won't change after this task is accepted. -------- */
   uint32_t task_id;

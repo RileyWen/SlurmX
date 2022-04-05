@@ -41,6 +41,7 @@ class PasswordEntry {
   const std::string& Shell() const { return m_pw_shell_; }
 
   gid_t Gid() const { return m_pw_gid_; }
+  uid_t Uid() const { return m_pw_uid_; }
 
  private:
   bool m_valid_{false};
