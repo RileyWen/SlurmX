@@ -89,7 +89,7 @@ grpc::Status SlurmCtlXdServiceImpl::AllocateInteractiveTask(
 
   // Todo: Eliminate useless allocation here when err!=kOk.
   uint32_t task_id;
-  err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
+  err = g_task_scheduler->SubmitTask(std::move(task), false, &task_id);
 
   if (err == SlurmxErr::kOk) {
     response->set_ok(true);
@@ -128,11 +128,15 @@ grpc::Status SlurmCtlXdServiceImpl::SubmitBatchTask(
   task->task_per_node = request->task().task_per_node();
 
   task->uid = request->task().uid();
+  task->name = request->task().name();
+  task->cmd_line = request->task().cmd_line();
   task->env = request->task().env();
   task->cwd = request->task().cwd();
 
+  task->task_to_ctlxd = request->task();
+
   uint32_t task_id;
-  err = g_task_scheduler->SubmitTask(std::move(task), &task_id);
+  err = g_task_scheduler->SubmitTask(std::move(task), false, &task_id);
   if (err == SlurmxErr::kOk) {
     response->set_ok(true);
     response->set_task_id(task_id);

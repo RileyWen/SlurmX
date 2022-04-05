@@ -111,6 +111,8 @@ void CtlXdClient::AsyncSendThread_() {
       case SlurmxGrpc::Completing:
         request.set_new_status(SlurmxGrpc::TaskStatus::Completing);
         break;
+      default:
+        break;
     }
     if (status_change.reason.has_value())
       request.set_reason(status_change.reason.value());

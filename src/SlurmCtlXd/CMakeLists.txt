@@ -29,4 +29,5 @@ target_link_libraries(slurmctlxd
         proto
 
         yaml-cpp
+        mariadbclient
         )

@@ -4,6 +4,8 @@ add_executable(misc_test
         ${MISC_TEST_SRC}
         )
 
+target_include_directories(misc_test PRIVATE ${CMAKE_SOURCE_DIR}/src/SlurmCtlXd)
+
 target_link_libraries(misc_test
         GTest::gtest
         GTest::gmock
@@ -22,6 +24,8 @@ target_link_libraries(misc_test
         PkgConfig::libuv-static
 
         Threads::Threads
+
+        mariadbclient
 
         yaml-cpp
         )

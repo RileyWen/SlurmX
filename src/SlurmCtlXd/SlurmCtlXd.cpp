@@ -16,6 +16,7 @@
 #include <unordered_set>
 
 #include "CtlXdGrpcServer.h"
+#include "DbClient.h"
 #include "TaskScheduler.h"
 #include "XdNodeKeeper.h"
 #include "XdNodeMetaContainer.h"
@@ -74,6 +75,17 @@ void InitializeCtlXdGlobalVariables() {
 
   g_config.Hostname.assign(hostname);
   SLURMX_INFO("Hostname of slurmctlxd: {}", g_config.Hostname);
+
+  g_db_client = std::make_unique<MariadbClient>();
+  if (!g_db_client->Init()) {
+    SLURMX_ERROR("Error: Db client init");
+    std::exit(1);
+  }
+
+  if (!g_db_client->Connect(g_config.DbUser, g_config.DbPassword)) {
+    SLURMX_ERROR("Error: Db client connect");
+    std::exit(1);
+  }
 
   g_meta_container = std::make_unique<XdNodeMetaContainerSimpleImpl>();
   g_meta_container->InitFromConfig(g_config);
@@ -184,6 +196,16 @@ int main(int argc, char** argv) {
             config["SlurmCtlXdLogFile"].as<std::string>();
       else
         g_config.SlurmCtlXdLogFile = "/tmp/slurmctlxd.log";
+
+      if (config["DbUser"])
+        g_config.DbUser = config["DbUser"].as<std::string>();
+      else
+        std::exit(1);
+
+      if (config["DbPassword"])
+        g_config.DbPassword = config["DbPassword"].as<std::string>();
+      else
+        std::exit(1);
 
       if (config["SlurmCtlXdForeground"]) {
         auto val = config["SlurmCtlXdForeground"].as<std::string>();

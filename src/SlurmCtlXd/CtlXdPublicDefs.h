@@ -115,13 +115,21 @@ struct TaskInCtlXd {
   uint32_t node_num{0};
   uint32_t task_per_node{0};
 
-  uid_t uid;
+  std::string account;
+  std::string name;
   std::string env;
+  std::string cmd_line;
   std::string cwd;
+
+  uid_t uid;
+  gid_t gid;
+
+  SlurmxGrpc::TaskToCtlXd task_to_ctlxd;
 
   /* ------- Fields that won't change after this task is accepted. -------- */
   uint32_t task_id;
   uint32_t partition_id;
+  uint64_t job_db_inx;
 
   /* ----- Fields that may change at run time. ----------- */
   SlurmxGrpc::TaskStatus status;
@@ -163,6 +171,9 @@ struct Config {
   std::string Hostname;
   std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
   std::unordered_map<std::string, Partition> Partitions;
+
+  std::string DbUser;
+  std::string DbPassword;
 };
 
 }  // namespace CtlXd
