@@ -30,16 +30,16 @@ bool ParseNodeList(const std::string &node_str,
     size_t len = node_num.size();
     for (size_t i = 0; i < len; i++) {
       if (std::regex_match(node_num[i], std::regex(R"(^\d+$)"))) {
-        if (!ParseNodeList(head_str, nodelist, node_num[i] + end_ + end_str))
-          nodelist->push_back(head_str + node_num[i] + end_ + end_str);
+        if (!ParseNodeList(head_str, nodelist, fmt::format("{}{}{}",node_num[i] , end_ , end_str)))
+          nodelist->push_back(fmt::format("{}{}{}{}",head_str , node_num[i] , end_ , end_str));
       } else if (std::regex_match(node_num[i], std::regex(R"(^\d+-\d+$)"))) {
         std::vector<std::string> loc_index;
         boost::split(loc_index, node_num[i], boost::is_any_of("-"));
         for (size_t j = std::stoi(loc_index[0]); j <= std::stoi(loc_index[1]);
              j++) {
           if (!ParseNodeList(head_str, nodelist,
-                             std::to_string(j) + end_ + end_str)) {
-            nodelist->push_back(head_str + std::to_string(j) + end_ + end_str);
+                             fmt::format("{}{}{}",j , end_ , end_str))) {
+            nodelist->push_back(fmt::format("{}{}{}{}",head_str , j , end_ , end_str));
           }
         }
       } else {
@@ -55,14 +55,12 @@ bool ParseHostList(const std::string &host_str,
                    std::list<std::string> *hostlist) {
   std::regex regex(R"(.*\[(.*)\]$)");
   if (!std::regex_match(host_str, regex)) {
-    return false;
-  }
-
-  std::string end_str = "";
-  if (ParseNodeList(host_str, hostlist, end_str)) {
+    hostlist->emplace_back(host_str);
     return true;
   }
-  return false;
+
+  std::string end_str;
+  return ParseNodeList(host_str, hostlist, end_str);
 }
 
 }

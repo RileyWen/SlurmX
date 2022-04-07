@@ -223,10 +223,15 @@ int main(int argc, char** argv) {
           std::list<std::string> name_list;
 
           if (node["name"]) {
-            if(!util::ParseHostList(node["name"].Scalar(),&name_list)){
-              SLURMX_ERROR("Illegal node name string format.");
-              std::exit(1);
+            std::list<std::string> str_list = absl::StrSplit(node["name"].Scalar(), ',');
+            for (auto&& str : str_list) {
+              std::string str_s{absl::StripAsciiWhitespace(str)};
+              if(!util::ParseHostList(str_s,&name_list)){
+                SLURMX_ERROR("Illegal node name string format.");
+                std::exit(1);
+              }
             }
+
             SLURMX_INFO("node name list parsed: {}", fmt::join(name_list,", "));
           } else
             std::exit(1);
@@ -280,16 +285,20 @@ int main(int argc, char** argv) {
             std::exit(1);
 
           part.nodelist_str = nodes;
+          std::vector<absl::string_view> split = absl::StrSplit(nodes, ',');
           std::list<std::string> name_list;
-          if(!util::ParseHostList(part.nodelist_str, &name_list)){
-            SLURMX_ERROR("Illegal node name string format.");
-            std::exit(1);
+
+          for (auto&& str : split) {
+            std::string str_s{absl::StripAsciiWhitespace(str)};
+            if(!util::ParseHostList(str_s, &name_list)){
+              SLURMX_ERROR("Illegal node name string format.");
+              std::exit(1);
+            }
           }
 
           for (auto&& node : name_list) {
-            std::string node_s{absl::StripAsciiWhitespace(node)};
 
-            auto node_it = g_config.Nodes.find(node_s);
+            auto node_it = g_config.Nodes.find(node);
             if (node_it != g_config.Nodes.end()) {
               node_it->second->partition_name = name;
               part.nodes.emplace(node_it->first);
