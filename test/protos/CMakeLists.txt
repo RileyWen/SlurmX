@@ -1,6 +1,4 @@
-file(GLOB_RECURSE PROTO_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/*.proto)
-
-add_library(test_proto ${PROTO_SRCS})
+add_library(test_proto math.proto greeter.proto)
 target_link_libraries(test_proto
         protobuf::libprotobuf
         gRPC::grpc

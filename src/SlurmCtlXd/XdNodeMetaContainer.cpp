@@ -173,6 +173,8 @@ void XdNodeMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
   uint32_t part_seq = 0;
 
   for (auto&& [part_name, partition] : config.Partitions) {
+    SLURMX_TRACE("Parsing partition {}", part_name);
+
     Resources part_res;
 
     partition_name_id_map_[part_name] = part_seq;
@@ -180,6 +182,8 @@ void XdNodeMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
     uint32_t node_index = 0;
 
     for (auto&& node_name : partition.nodes) {
+      SLURMX_TRACE("Parsing node {}", node_name);
+
       auto& node_meta = part_meta.xd_node_meta_map[node_index];
 
       auto& static_meta = node_meta.static_meta;

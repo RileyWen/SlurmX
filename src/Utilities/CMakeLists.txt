@@ -1,5 +1,5 @@
-SUBDIRLIST(SUBDIRS ${CMAKE_CURRENT_SOURCE_DIR})
-
-FOREACH(SUBDIR ${SUBDIRS})
-    add_subdirectory(${SUBDIR})
-ENDFOREACH()
+add_subdirectory(AnonymousPipe)
+add_subdirectory(cgroup)
+add_subdirectory(FileLogger)
+add_subdirectory(PublicHeader)
+add_subdirectory(TimerSet)

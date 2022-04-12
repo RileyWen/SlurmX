@@ -14,7 +14,7 @@ namespace CtlXd {
 
 class MariadbClient {
  public:
-  MariadbClient() noexcept = default;
+  MariadbClient() = default;
 
   ~MariadbClient();
 

@@ -1,6 +1,5 @@
 #include "slurmx/String.h"
 
-
 namespace util {
 
 std::string ReadableMemory(uint64_t memory_bytes) {
@@ -63,5 +62,71 @@ bool ParseHostList(const std::string &host_str,
   return ParseNodeList(host_str, hostlist, end_str);
 }
 
+std::string HostNameListToStr(const std::list<std::string> &hostlist) {
+  std::map<std::string, std::list<int>> host_map;
+  std::string host_name_str;
+
+  for (const auto &host : hostlist) {
+    if (host.empty()) continue;
+    std::regex regex(R"(\d+$)");
+    std::smatch match;
+    if (std::regex_search(host, match, regex)) {
+      std::string num_str = match[0],
+                  head_str = host.substr(0, match.position(0));
+      auto iter = host_map.find(head_str);
+      if (iter == host_map.end()) {
+        std::list<int> list;
+        host_map[head_str] = list;
+      }
+      host_map[head_str].push_back(stoi(num_str));
+    } else {
+      host_name_str += host;
+      host_name_str += ",";
+    }
+  }
+
+  for (auto &&iter : host_map) {
+    if (iter.second.size() == 1) {
+      host_name_str += iter.first;
+      host_name_str += std::to_string(iter.second.front());
+      host_name_str += ",";
+      continue;
+    }
+    host_name_str += iter.first;
+    host_name_str += "[";
+    iter.second.sort();
+    iter.second.unique();
+    int first = -1, last = -1;
+    for (const auto &num : iter.second) {
+      if (first < 0) {  // init the head
+        last = first = num;
+        continue;
+      }
+      if (num == last + 1) {  // update the tail
+        last++;
+      } else {
+        if (first == last) {
+          host_name_str += std::to_string(first);
+        } else {
+          host_name_str += std::to_string(first);
+          host_name_str += "-";
+          host_name_str += std::to_string(last);
+        }
+        host_name_str += ",";
+        first = last = num;
+      }
+    }
+    if (first == last) {
+      host_name_str += std::to_string(first);
+    } else {
+      host_name_str += std::to_string(first);
+      host_name_str += "-";
+      host_name_str += std::to_string(last);
+    }
+    host_name_str += "],";
+  }
+  host_name_str.pop_back();
+  return host_name_str;
 }
 
+}  // namespace util

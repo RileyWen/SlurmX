@@ -1,7 +1,6 @@
-file(GLOB_RECURSE TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp ${CMAKE_CURRENT_SOURCE_DIR}/*.h)
-
-SUBDIRLIST(SUBDIRS ${CMAKE_CURRENT_SOURCE_DIR})
-
-FOREACH (SUBDIR ${SUBDIRS})
-    add_subdirectory(${SUBDIR})
-ENDFOREACH ()
+add_subdirectory(SlurmCtlXd)
+add_subdirectory(SlurmXd)
+add_subdirectory(SharedTestImpl)
+add_subdirectory(Utilities)
+add_subdirectory(Misc)
+add_subdirectory(protos)

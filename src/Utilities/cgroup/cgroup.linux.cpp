@@ -292,6 +292,7 @@ bool CgroupManager::Release(const std::string &cgroup_path) {
   auto it = m_cgroup_ref_count_map_.find(cgroup_path);
   if (it == m_cgroup_ref_count_map_.end()) {
     SLURMX_WARN("Destroying an unknown cgroup.");
+    return false;
   }
 
   size_t *ref_cnt = &it->second.second;

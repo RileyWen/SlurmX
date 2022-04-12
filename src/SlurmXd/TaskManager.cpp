@@ -1,4 +1,5 @@
 #include "TaskManager.h"
+
 #include <absl/strings/str_split.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
@@ -383,9 +384,10 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     SLURMX_ERROR("error: seteuid. {}\n", strerror(errno));
     return SlurmxErr::kSystemErr;
   }
-  rc = chdir(instance->task.cwd().c_str());
+  const std::string& cwd = instance->task.cwd();
+  rc = chdir(cwd.c_str());
   if (rc == -1) {
-    SLURMX_ERROR("error: setcwd. {}\n", strerror(errno));
+    SLURMX_ERROR("error: chdir to {}. {}\n", cwd.c_str(), strerror(errno));
     return SlurmxErr::kSystemErr;
   }
 
@@ -486,11 +488,12 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     // Set pgid to the pid of task root process.
     setpgid(0, 0);
 
-    std::vector<std::string> env_vec = absl::StrSplit(instance->task.env(), "||");
-    for(auto str: env_vec){
-        if(putenv(str.data())){
-          SLURMX_ERROR("set environ {} failed!", str);
-        }
+    std::vector<std::string> env_vec =
+        absl::StrSplit(instance->task.env(), "||");
+    for (auto str : env_vec) {
+      if (putenv(str.data())) {
+        SLURMX_ERROR("set environ {} failed!", str);
+      }
     }
 
     // Prepare the command line arguments.
@@ -608,6 +611,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
       chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
 
+      SlurmxErr err = SlurmxErr::kOk;
       for (int i = 0; i < instance->task.task_per_node(); ++i) {
         auto process = std::make_unique<ProcessInstance>(
             sh_path, std::list<std::string>());
@@ -633,15 +637,16 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         process->SetUserDataAndCleanCb(file_logger, std::move(clean_cb));
         process->SetOutputCb(std::move(output_cb));
 
-        SlurmxErr err;
         err = this_->SpawnProcessInInstance_(instance, std::move(process));
-        if (err != SlurmxErr::kOk) {
-          this_->EvActivateTaskStatusChange_(
-              instance->task.task_id(), SlurmxGrpc::TaskStatus::Failed,
-              fmt::format(
-                  "Cannot spawn a new process inside the instance of task #{}",
-                  instance->task.task_id()));
-        }
+        if (err != SlurmxErr::kOk) break;
+      }
+
+      if (err != SlurmxErr::kOk) {
+        this_->EvActivateTaskStatusChange_(
+            instance->task.task_id(), SlurmxGrpc::TaskStatus::Failed,
+            fmt::format(
+                "Cannot spawn a new process inside the instance of task #{}",
+                instance->task.task_id()));
       }
     }
 

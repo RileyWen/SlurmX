@@ -73,15 +73,19 @@ void TaskScheduler::ScheduleThread_() {
 
         task->status = SlurmxGrpc::TaskStatus::Running;
         task->node_indexes = std::move(it.second);
+        task->nodes_alloc = task->node_indexes.size();
 
         for (uint32_t node_index : task->node_indexes) {
+          XdNodeMeta node_meta =
+              all_part_metas->at(partition_id).xd_node_meta_map.at(node_index);
+
           XdNodeId node_id{partition_id, node_index};
           g_meta_container->MallocResourceFromNode(node_id, task->task_id,
                                                    task->resources);
 
+          task->nodes.emplace_back(node_meta.static_meta.hostname);
+
           if (task->type == SlurmxGrpc::Interactive) {
-            XdNodeMeta node_meta = all_part_metas->at(partition_id)
-                                       .xd_node_meta_map.at(node_index);
             InteractiveTaskAllocationDetail detail{
                 .node_index = node_index,
                 .ipv4_addr = node_meta.static_meta.hostname,
@@ -103,8 +107,11 @@ void TaskScheduler::ScheduleThread_() {
           m_task_indexes_mtx_.Unlock();
 
           uint64_t timestamp = ToUnixSeconds(absl::Now());
-          g_db_client->UpdateJobRecordField(task->job_db_inx, "time_start",
-                                            std::to_string(timestamp));
+          std::string hostlist = util::HostNameListToStr(task->nodes);
+          g_db_client->UpdateJobRecordFields(
+              task->job_db_inx, {"time_start", "nodes_alloc", "nodelist"},
+              {std::to_string(timestamp), std::to_string(task->nodes_alloc),
+               hostlist});
 
           XdNodeStub* node_stub = g_node_keeper->GetXdStub(node_id);
           node_stub->ExecuteTask(task_ptr);

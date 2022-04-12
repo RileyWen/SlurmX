@@ -135,7 +135,10 @@ struct TaskInCtlXd {
   SlurmxGrpc::TaskStatus status;
   bool is_completing{false};
 
+  uint32_t nodes_alloc;
+  std::list<std::string> nodes;
   std::list<uint32_t> node_indexes;
+
   std::unordered_set<uint32_t> end_node_set;
 
   // If this task is PENDING, start_time is either not set (default constructed)

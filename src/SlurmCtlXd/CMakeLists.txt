@@ -1,8 +1,17 @@
-file(GLOB_RECURSE SLURMCTLXD_SRC
-        ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/*.h)
-
-add_executable(slurmctlxd ${SLURMCTLXD_SRC})
+add_executable(slurmctlxd
+        CtlXdPublicDefs.h
+        CtlXdGrpcServer.h
+        CtlXdGrpcServer.cpp
+        DbClient.h
+        DbClient.cpp
+        TaskScheduler.h
+        TaskScheduler.cpp
+        XdNodeKeeper.h
+        XdNodeKeeper.cpp
+        XdNodeMetaContainer.h
+        XdNodeMetaContainer.cpp
+        SlurmCtlXd.cpp
+        )
 
 target_link_libraries(slurmctlxd
         spdlog::spdlog

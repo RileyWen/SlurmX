@@ -61,7 +61,8 @@ bool MariadbClient::Connect(const std::string& username,
           "timelimit       int unsigned    default 0 not null,"
           "time_submit     bigint unsigned default 0 not null,"
           "work_dir        text                      not null default '',"
-          "submit_line     text"
+          "submit_line     text,"
+          "task_to_ctlxd   blob                      not null"
           ");")) {
     PrintError_("Cannot check the existence of job_table");
     return false;
@@ -246,9 +247,11 @@ bool MariadbClient::InsertJob(
     uint32_t state, uint32_t timelimit, const std::string& work_dir,
     const SlurmxGrpc::TaskToCtlXd& task_to_ctlxd) {
   size_t blob_size = task_to_ctlxd.ByteSizeLong();
-  char blob[1024];
-  char query[2048];
-  task_to_ctlxd.SerializeToArray(blob, 1024);
+  constexpr size_t blob_max_size = 8192;
+
+  static char blob[blob_max_size];
+  static char query[blob_max_size * 2];
+  task_to_ctlxd.SerializeToArray(blob, blob_max_size);
 
   std::string query_head = fmt::format(
       "INSERT INTO job_table("

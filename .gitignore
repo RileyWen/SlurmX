@@ -16,6 +16,8 @@ dependencies/.extracted
 
 .idea
 
+.idea/misc.xml
+
 # Deployment stuff. Containing some personal info.
 .idea/deployment.xml
 .idea/other.xml

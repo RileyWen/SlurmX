@@ -1,5 +1,3 @@
-SUBDIRLIST(SUBDIRS ${CMAKE_CURRENT_SOURCE_DIR})
-
-FOREACH(SUBDIR ${SUBDIRS})
-    add_subdirectory(${SUBDIR})
-ENDFOREACH()
+add_subdirectory(SlurmCtlXd)
+add_subdirectory(SlurmXd)
+add_subdirectory(Utilities)
