@@ -1,18 +1,28 @@
-file(GLOB_RECURSE SLURMCTLXD_TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
-
 # Source files of SlurmCtlXd without 'main' symbol
-file(GLOB SLURMCTLXD_SRC
-        ${CMAKE_SOURCE_DIR}/src/SlurmCtlXd/*.cpp
-        ${CMAKE_SOURCE_DIR}/src/SlurmCtlXd/*.h)
-set(SLURMCTLXD_SRC_NO_MAIN ${SLURMCTLXD_SRC})
-list(FILTER SLURMCTLXD_SRC_NO_MAIN EXCLUDE REGEX "SlurmCtlXd\\.cpp")
+list(APPEND SLURMCTLXD_SRC_NO_MAIN
+        ${PROJECT_SOURCE_DIR}/src/SlurmCtlXd/CtlXdPublicDefs.h
+        ${PROJECT_SOURCE_DIR}/src/SlurmCtlXd/CtlXdGrpcServer.h
+        ${PROJECT_SOURCE_DIR}/src/SlurmCtlXd/CtlXdGrpcServer.cpp
+        ${PROJECT_SOURCE_DIR}/src/SlurmCtlXd/DbClient.h
+        ${PROJECT_SOURCE_DIR}/src/SlurmCtlXd/DbClient.cpp
+        ${PROJECT_SOURCE_DIR}/src/SlurmCtlXd/TaskScheduler.h
+        ${PROJECT_SOURCE_DIR}/src/SlurmCtlXd/TaskScheduler.cpp
+        ${PROJECT_SOURCE_DIR}/src/SlurmCtlXd/XdNodeKeeper.h
+        ${PROJECT_SOURCE_DIR}/src/SlurmCtlXd/XdNodeKeeper.cpp
+        ${PROJECT_SOURCE_DIR}/src/SlurmCtlXd/XdNodeMetaContainer.h
+        ${PROJECT_SOURCE_DIR}/src/SlurmCtlXd/XdNodeMetaContainer.cpp)
 
 # Source files of SlurmXd without 'main' symbol
-file(GLOB SLURMXD_SRC
-        ${CMAKE_SOURCE_DIR}/src/SlurmXd/*.cpp
-        ${CMAKE_SOURCE_DIR}/src/SlurmXd/*.h)
-set(SLURMXD_SRC_NO_MAIN ${SLURMXD_SRC})
-list(FILTER SLURMXD_SRC_NO_MAIN EXCLUDE REGEX "SlurmXd\\.cpp")
+list(APPEND SLURMXD_SRC_NO_MAIN
+        ${PROJECT_SOURCE_DIR}/src/SlurmXd/CtlXdClient.h
+        ${PROJECT_SOURCE_DIR}/src/SlurmXd/CtlXdClient.cpp
+        ${PROJECT_SOURCE_DIR}/src/SlurmXd/ResourceAllocators.h
+        ${PROJECT_SOURCE_DIR}/src/SlurmXd/ResourceAllocators.cpp
+        ${PROJECT_SOURCE_DIR}/src/SlurmXd/TaskManager.h
+        ${PROJECT_SOURCE_DIR}/src/SlurmXd/TaskManager.cpp
+        ${PROJECT_SOURCE_DIR}/src/SlurmXd/XdServer.h
+        ${PROJECT_SOURCE_DIR}/src/SlurmXd/XdServer.cpp
+        ${PROJECT_SOURCE_DIR}/src/SlurmXd/XdPublicDefs.h)
 
 add_executable(slurmctlxd_test
         ${SLURMCTLXD_SRC_NO_MAIN}

@@ -55,7 +55,7 @@ class ProcessInstance {
             "user_data in ProcessInstance is set, but clean_cb is not set!");
     }
 
-    bufferevent_free(m_ev_buf_event_);
+    if (m_ev_buf_event_) bufferevent_free(m_ev_buf_event_);
   }
 
   [[nodiscard]] const std::string& GetExecPath() const {
@@ -270,7 +270,7 @@ class TaskManager {
     arg->task_instance->termination_timer = ev;
   }
 
-//  template <>
+  //  template <>
   void EvAddTerminationTimer_(TaskInstance* instance, int64_t secs) {
     auto* arg = new EvTimerCbArg;
     arg->task_manager = this;

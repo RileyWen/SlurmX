@@ -10,7 +10,33 @@
 namespace CtlXd {
 
 TaskScheduler::TaskScheduler(std::unique_ptr<INodeSelectionAlgo> algo)
-    : m_next_task_id_(0), m_node_selection_algo_(std::move(algo)) {
+    : m_node_selection_algo_(std::move(algo)) {
+  uint64_t max_id;
+  if (!g_db_client->GetMaxExistingJobId(&max_id)) {
+    SLURMX_ERROR("GetMaxExistingJobId failed.");
+    std::exit(1);
+  }
+  SLURMX_TRACE("During recovery set next task id to {}", max_id + 1);
+  m_next_task_id_ = max_id + 1;
+
+  std::list<TaskInCtlXd> task_list;
+  if (!g_db_client->FetchJobRecordsWithStates(
+          &task_list, {SlurmxGrpc::Pending, SlurmxGrpc::Running})) {
+    SLURMX_ERROR("FetchJobRecordsWithStates failed.");
+    std::exit(1);
+  }
+
+  for (auto& task : task_list) {
+    std::string field_name = "state";
+    if (!g_db_client->UpdateJobRecordField(
+            task.job_db_inx, field_name, std::to_string(SlurmxGrpc::Failed))) {
+      SLURMX_ERROR("FetchJobRecordsWithStates failed.");
+      std::exit(1);
+    }
+    SLURMX_TRACE("During recovery set the status of task #{} to FAILED",
+                 task.task_id);
+  }
+
   m_schedule_thread_ = std::thread([this] { ScheduleThread_(); });
 
   m_clean_ended_thread_ = std::thread([this] { CleanEndedTaskThread_(); });
@@ -47,15 +73,19 @@ void TaskScheduler::ScheduleThread_() {
 
         task->status = SlurmxGrpc::TaskStatus::Running;
         task->node_indexes = std::move(it.second);
+        task->nodes_alloc = task->node_indexes.size();
 
         for (uint32_t node_index : task->node_indexes) {
+          XdNodeMeta node_meta =
+              all_part_metas->at(partition_id).xd_node_meta_map.at(node_index);
+
           XdNodeId node_id{partition_id, node_index};
           g_meta_container->MallocResourceFromNode(node_id, task->task_id,
                                                    task->resources);
 
+          task->nodes.emplace_back(node_meta.static_meta.hostname);
+
           if (task->type == SlurmxGrpc::Interactive) {
-            XdNodeMeta node_meta = all_part_metas->at(partition_id)
-                                       .xd_node_meta_map.at(node_index);
             InteractiveTaskAllocationDetail detail{
                 .node_index = node_index,
                 .ipv4_addr = node_meta.static_meta.hostname,
@@ -75,6 +105,13 @@ void TaskScheduler::ScheduleThread_() {
           m_task_indexes_mtx_.Lock();
           m_node_to_tasks_map_[node_id.node_index].emplace(task->task_id);
           m_task_indexes_mtx_.Unlock();
+
+          uint64_t timestamp = ToUnixSeconds(absl::Now());
+          std::string hostlist = util::HostNameListToStr(task->nodes);
+          g_db_client->UpdateJobRecordFields(
+              task->job_db_inx, {"time_start", "nodes_alloc", "nodelist"},
+              {std::to_string(timestamp), std::to_string(task->nodes_alloc),
+               hostlist});
 
           XdNodeStub* node_stub = g_node_keeper->GetXdStub(node_id);
           node_stub->ExecuteTask(task_ptr);
@@ -126,7 +163,7 @@ void TaskScheduler::SetNodeSelectionAlgo(
 }
 
 SlurmxErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtlXd> task,
-                                    uint32_t* task_id) {
+                                    bool resubmit, uint32_t* task_id) {
   uint32_t partition_id;
   if (!g_meta_container->GetPartitionId(task->partition_name, &partition_id))
     return SlurmxErr::kNonExistent;
@@ -158,11 +195,34 @@ SlurmxErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtlXd> task,
   }
 
   // Add the task to the pending task queue.
-  task->task_id = m_next_task_id_++;
   task->partition_id = partition_id;
   task->status = SlurmxGrpc::Pending;
 
+  // If resubmit == true, task id has been allocated before.
+  if (!resubmit) task->task_id = m_next_task_id_++;
   *task_id = task->task_id;
+
+  std::string empty_string;
+  uint32_t zero = 0;
+
+  std::reference_wrapper<std::string> script{empty_string};
+  if (task->type == SlurmxGrpc::Batch)
+    script = std::get<BatchMetaInTask>(task->meta).sh_script;
+
+  if (!resubmit) {  // If task isn't re-submitted, it needs inserting into job
+                    // table.
+    uint64_t timestamp = ToUnixSeconds(absl::Now());
+    if (!g_db_client->InsertJob(
+            &task->job_db_inx, timestamp, task->account,
+            task->resources.allocatable_resource.cpu_count,
+            task->resources.allocatable_resource.memory_bytes, task->name,
+            task->env, task->task_id, task->uid, task->gid, empty_string,
+            task->node_num, empty_string, task->partition_name, zero, timestamp,
+            script, task->status, ToInt64Seconds(task->time_limit), task->cwd,
+            task->task_to_ctlxd)) {
+      return SlurmxErr::kSystemErr;
+    }
+  }
 
   m_task_indexes_mtx_.Lock();
   m_partition_to_tasks_map_[task->partition_id].emplace(task->task_id);
@@ -206,6 +266,8 @@ void TaskScheduler::TaskStatusChange(uint32_t task_id, uint32_t node_index,
       task->status = SlurmxGrpc::Failed;
       TerminateTaskNoLock_(task_id);
     }
+    g_db_client->UpdateJobRecordField(task->job_db_inx, "state",
+                                      std::to_string(SlurmxGrpc::Completing));
   } else {
     task->end_node_set.emplace(node_index);
     if (new_status == SlurmxGrpc::Failed &&
@@ -220,6 +282,11 @@ void TaskScheduler::TaskStatusChange(uint32_t task_id, uint32_t node_index,
   m_node_to_tasks_map_[node_index].erase(task_id);
 
   if (task->end_node_set.size() == task->node_num) {
+    uint64_t timestamp = ToUnixSeconds(absl::Now());
+    g_db_client->UpdateJobRecordFields(
+        task->job_db_inx, {"time_end", "state"},
+        {std::to_string(timestamp), std::to_string(task->status)});
+
     LockGuard ended_guard(m_ended_task_map_mtx_);
     m_ended_task_map_.emplace(task_id, std::move(iter->second));
     m_running_task_map_.erase(iter);
@@ -702,11 +769,13 @@ void MinLoadFirst::NodeSelect(
   // Calculate NodeSelectionInfo for all partitions
   for (auto& [partition_id, partition_metas] : all_partitions_meta_map) {
     for (auto& [node_index, node_meta] : partition_metas.xd_node_meta_map) {
-      NodeSelectionInfo& node_info_in_a_partition =
-          part_id_node_info_map[partition_id];
-      CalculateNodeSelectionInfo_(running_tasks, now, partition_id,
-                                  partition_metas, node_index, node_meta,
-                                  &node_info_in_a_partition);
+      if (node_meta.alive) {
+        NodeSelectionInfo& node_info_in_a_partition =
+            part_id_node_info_map[partition_id];
+        CalculateNodeSelectionInfo_(running_tasks, now, partition_id,
+                                    partition_metas, node_index, node_meta,
+                                    &node_info_in_a_partition);
+      }
     }
   }
 

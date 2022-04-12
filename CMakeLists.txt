@@ -87,10 +87,7 @@ add_subdirectory(src)
 add_subdirectory(test)
 
 # Generate proto files
-set(PROTO_SRC_DIR protos)
-file(GLOB_RECURSE PROTO_SRCS ${PROTO_SRC_DIR}/*.proto)
-
-add_library(proto ${PROTO_SRCS})
+add_library(proto protos/PublicDefs.proto protos/slurmx.proto protos/XdSubprocess.proto)
 target_link_libraries(proto
         protobuf::libprotobuf
         gRPC::grpc

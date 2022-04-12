@@ -13,6 +13,7 @@
 #include <tuple>
 
 #include "CtlXdPublicDefs.h"
+#include "DbClient.h"
 #include "XdNodeMetaContainer.h"
 #include "protos/slurmx.pb.h"
 #include "slurmx/Lock.h"
@@ -137,7 +138,8 @@ class TaskScheduler {
 
   void SetNodeSelectionAlgo(std::unique_ptr<INodeSelectionAlgo> algo);
 
-  SlurmxErr SubmitTask(std::unique_ptr<TaskInCtlXd> task, uint32_t* task_id);
+  SlurmxErr SubmitTask(std::unique_ptr<TaskInCtlXd> task, bool resubmit,
+                       uint32_t* task_id);
 
   void TaskStatusChange(uint32_t task_id, uint32_t node_index,
                         SlurmxGrpc::TaskStatus new_status,

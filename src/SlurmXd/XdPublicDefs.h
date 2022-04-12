@@ -2,6 +2,8 @@
 
 #include <pwd.h>
 
+#include <optional>
+
 #include "slurmx/PublicHeader.h"
 
 namespace Xd {

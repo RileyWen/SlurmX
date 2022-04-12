@@ -9,4 +9,6 @@ namespace slurmx {
 
 bool ResolveHostnameFromIpv4(const std::string& addr, std::string* hostname);
 
-}
+bool ResolveHostnameFromIpv6(const std::string& addr, std::string* hostname);
+
+}  // namespace slurmx

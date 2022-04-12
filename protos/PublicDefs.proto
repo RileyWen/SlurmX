@@ -52,6 +52,8 @@ message TaskToCtlXd {
 
   uint32 task_id = 6;
 
+  string name = 7;
+
   uint32 node_num = 8;
   uint32 task_per_node = 9;
 
@@ -60,9 +62,9 @@ message TaskToCtlXd {
     InteractiveTaskAdditionalMeta interactive_meta = 11;
   }
 
-  string env = 12;
-
-  string cwd = 13;
+  string cmd_line = 12;
+  string cwd = 13; // Current working directory
+  string env = 14;
 }
 
 message TaskToXd {
@@ -89,7 +91,6 @@ message TaskToXd {
   }
 
   string env = 12;
-
   string cwd = 13;
 }
 

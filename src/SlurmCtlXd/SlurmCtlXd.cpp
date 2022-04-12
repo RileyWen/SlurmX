@@ -16,6 +16,7 @@
 #include <unordered_set>
 
 #include "CtlXdGrpcServer.h"
+#include "DbClient.h"
 #include "TaskScheduler.h"
 #include "XdNodeKeeper.h"
 #include "XdNodeMetaContainer.h"
@@ -74,6 +75,17 @@ void InitializeCtlXdGlobalVariables() {
 
   g_config.Hostname.assign(hostname);
   SLURMX_INFO("Hostname of slurmctlxd: {}", g_config.Hostname);
+
+  g_db_client = std::make_unique<MariadbClient>();
+  if (!g_db_client->Init()) {
+    SLURMX_ERROR("Error: Db client init");
+    std::exit(1);
+  }
+
+  if (!g_db_client->Connect(g_config.DbUser, g_config.DbPassword)) {
+    SLURMX_ERROR("Error: Db client connect");
+    std::exit(1);
+  }
 
   g_meta_container = std::make_unique<XdNodeMetaContainerSimpleImpl>();
   g_meta_container->InitFromConfig(g_config);
@@ -185,6 +197,16 @@ int main(int argc, char** argv) {
       else
         g_config.SlurmCtlXdLogFile = "/tmp/slurmctlxd.log";
 
+      if (config["DbUser"])
+        g_config.DbUser = config["DbUser"].as<std::string>();
+      else
+        std::exit(1);
+
+      if (config["DbPassword"])
+        g_config.DbPassword = config["DbPassword"].as<std::string>();
+      else
+        std::exit(1);
+
       if (config["SlurmCtlXdForeground"]) {
         auto val = config["SlurmCtlXdForeground"].as<std::string>();
         if (val == "true")
@@ -201,11 +223,18 @@ int main(int argc, char** argv) {
           std::list<std::string> name_list;
 
           if (node["name"]) {
-            if(!util::ParseHostList(node["name"].Scalar(),&name_list)){
-              SLURMX_ERROR("Illegal node name string format.");
-              std::exit(1);
+            std::list<std::string> str_list =
+                absl::StrSplit(node["name"].Scalar(), ',');
+            for (auto&& str : str_list) {
+              std::string str_s{absl::StripAsciiWhitespace(str)};
+              if (!util::ParseHostList(str_s, &name_list)) {
+                SLURMX_ERROR("Illegal node name string format.");
+                std::exit(1);
+              }
             }
-            SLURMX_INFO("node name list parsed: {}", fmt::join(name_list,", "));
+
+            SLURMX_TRACE("node name list parsed: {}",
+                         fmt::join(name_list, ", "));
           } else
             std::exit(1);
 
@@ -258,16 +287,20 @@ int main(int argc, char** argv) {
             std::exit(1);
 
           part.nodelist_str = nodes;
+          std::vector<absl::string_view> split = absl::StrSplit(nodes, ',');
           std::list<std::string> name_list;
-          if(!util::ParseHostList(part.nodelist_str, &name_list)){
-            SLURMX_ERROR("Illegal node name string format.");
-            std::exit(1);
+
+          for (auto&& str : split) {
+            std::string str_s{absl::StripAsciiWhitespace(str)};
+            if(!util::ParseHostList(str_s, &name_list)){
+              SLURMX_ERROR("Illegal node name string format.");
+              std::exit(1);
+            }
           }
 
           for (auto&& node : name_list) {
-            std::string node_s{absl::StripAsciiWhitespace(node)};
 
-            auto node_it = g_config.Nodes.find(node_s);
+            auto node_it = g_config.Nodes.find(node);
             if (node_it != g_config.Nodes.end()) {
               node_it->second->partition_name = name;
               part.nodes.emplace(node_it->first);

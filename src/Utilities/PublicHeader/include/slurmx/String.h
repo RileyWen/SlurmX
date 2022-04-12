@@ -9,8 +9,11 @@
 
 namespace util {
 
-std::string ReadableMemory(uint64_t memory_bytes) ;
+std::string ReadableMemory(uint64_t memory_bytes);
 
-bool ParseHostList(const std::string &host_str, std::list<std::string> *hostlist);
+bool ParseHostList(const std::string &host_str,
+                   std::list<std::string> *hostlist);
+
+std::string HostNameListToStr(const std::list<std::string> &hostlist);
 
 }  // namespace slurmx

@@ -1,8 +1,13 @@
-file(GLOB_RECURSE MISC_TEST_SRC ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
-
 add_executable(misc_test
-        ${MISC_TEST_SRC}
+        grpc_example_test.cpp
+        libevent_example_test.cpp
+        libuv_test.cpp
+        mariadb_connector_c_test.cpp
+        Misc_test.cpp
+        yaml_cpp_test.cpp
         )
+
+target_include_directories(misc_test PRIVATE ${CMAKE_SOURCE_DIR}/src/SlurmCtlXd)
 
 target_link_libraries(misc_test
         GTest::gtest
@@ -22,6 +27,8 @@ target_link_libraries(misc_test
         PkgConfig::libuv-static
 
         Threads::Threads
+
+        mariadbclient
 
         yaml-cpp
         )
