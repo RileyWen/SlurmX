@@ -274,6 +274,13 @@ XdNodeMetaContainerSimpleImpl::QueryAllNodeInfo() {
     for (auto&& [node_name, node_meta] : part_meta.xd_node_meta_map) {
       auto* node_info = list->Add();
       node_info->set_hostname(node_meta.static_meta.hostname);
+      node_info->set_cpus(node_meta.res_total.allocatable_resource.cpu_count);
+      node_info->set_alloc_cpus(node_meta.res_in_use.allocatable_resource.cpu_count);
+      node_info->set_real_memory(node_meta.res_total.allocatable_resource.memory_bytes);
+      node_info->set_alloc_mem(node_meta.res_in_use.allocatable_resource.memory_bytes);
+      node_info->set_free_mem(node_meta.res_avail.allocatable_resource.memory_bytes);
+      node_info->set_partition_name(node_meta.static_meta.partition_name);
+      node_info->set_running_task_num(node_meta.running_task_resource_map.size());
       if (node_meta.alive)
         node_info->set_state(SlurmxGrpc::NodeInfo_NodeState_IDLE);
       else
@@ -325,6 +332,12 @@ XdNodeMetaContainerSimpleImpl::QueryAllPartitionInfo() {
   for (auto&& [part_name, part_meta] : partition_metas_map_) {
     auto* part_info = list->Add();
     part_info->set_name(part_meta.partition_global_meta.name);
+    part_info->set_total_nodes(part_meta.partition_global_meta.node_cnt);
+    part_info->set_alive_nodes(part_meta.partition_global_meta.alive_node_cnt);
+    part_info->set_total_cpus(part_meta.partition_global_meta.m_resource_total_.allocatable_resource.cpu_count);
+    part_info->set_avail_cpus(part_meta.partition_global_meta.m_resource_avail_.allocatable_resource.cpu_count);
+    part_info->set_total_mem(part_meta.partition_global_meta.m_resource_total_.allocatable_resource.memory_bytes);
+    part_info->set_avail_mem(part_meta.partition_global_meta.m_resource_avail_.allocatable_resource.memory_bytes);
 
     if (part_meta.partition_global_meta.alive_node_cnt > 0)
       part_info->set_state(SlurmxGrpc::PartitionInfo_PartitionState_UP);
@@ -352,6 +365,12 @@ XdNodeMetaContainerSimpleImpl::QueryPartitionInfo(
 
   auto* part_info = list->Add();
   part_info->set_name(part_meta.partition_global_meta.name);
+  part_info->set_total_nodes(part_meta.partition_global_meta.node_cnt);
+  part_info->set_alive_nodes(part_meta.partition_global_meta.alive_node_cnt);
+  part_info->set_total_cpus(part_meta.partition_global_meta.m_resource_total_.allocatable_resource.cpu_count);
+  part_info->set_avail_cpus(part_meta.partition_global_meta.m_resource_avail_.allocatable_resource.cpu_count);
+  part_info->set_total_mem(part_meta.partition_global_meta.m_resource_total_.allocatable_resource.memory_bytes);
+  part_info->set_avail_mem(part_meta.partition_global_meta.m_resource_avail_.allocatable_resource.memory_bytes);
 
   if (part_meta.partition_global_meta.alive_node_cnt > 0)
     part_info->set_state(SlurmxGrpc::PartitionInfo_PartitionState_UP);
