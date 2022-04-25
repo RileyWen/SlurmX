@@ -220,6 +220,7 @@ void XdNodeMetaContainerSimpleImpl::InitFromConfig(const Config& config) {
     part_meta.partition_global_meta.name = part_name;
     part_meta.partition_global_meta.m_resource_total_inc_dead_ = part_res;
     part_meta.partition_global_meta.node_cnt = node_index;
+    part_meta.partition_global_meta.nodelist_str = partition.nodelist_str;
 
     SLURMX_DEBUG(
         "partition [{}]'s Global resource now: cpu: {}, mem: {}). It has {} "

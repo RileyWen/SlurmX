@@ -114,10 +114,17 @@ void StartServer() {
 
   SLURMX_INFO("Found this machine {} in Nodes", g_config.Hostname);
 
-  AllocatableResource resource_in_cmd;
-  resource_in_cmd.cpu_count = node_it->second->cpu;
-  resource_in_cmd.memory_bytes = node_it->second->memory_bytes;
-  resource_in_cmd.memory_sw_bytes = node_it->second->memory_bytes;
+  // Create log and sh directory recursively.
+  try {
+    std::filesystem::create_directories("/tmp/slurmxd/scripts");
+
+    std::filesystem::path log_path{g_config.SlurmXdLogFile};
+    auto log_dir = log_path.parent_path();
+    if (!log_dir.empty()) std::filesystem::create_directories(log_dir);
+  } catch (const std::exception& e) {
+    SLURMX_ERROR("Invalid SlurmXdLogFile path {}: {}", g_config.SlurmXdLogFile,
+                 e.what());
+  }
 
   GlobalVariableInit();
 
@@ -233,7 +240,7 @@ int main(int argc, char** argv) {
       if (config["SlurmXdLogFile"])
         g_config.SlurmXdLogFile = config["SlurmXdLogFile"].as<std::string>();
       else
-        g_config.SlurmXdLogFile = "/tmp/slurmxd.log";
+        g_config.SlurmXdLogFile = "/tmp/slurmxd/slurmxd.log";
 
       if (config["Nodes"]) {
         for (auto it = config["Nodes"].begin(); it != config["Nodes"].end();

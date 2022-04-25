@@ -66,6 +66,8 @@ std::string HostNameListToStr(const std::list<std::string> &hostlist) {
   std::map<std::string, std::list<int>> host_map;
   std::string host_name_str;
 
+  if (hostlist.empty()) return host_name_str;
+
   for (const auto &host : hostlist) {
     if (host.empty()) continue;
     std::regex regex(R"(\d+$)");

@@ -250,20 +250,20 @@ grpc::Status SlurmCtlXdServiceImpl::QueryPartitionInfo(
   return grpc::Status::OK;
 }
 
-// grpc::Status SlurmCtlXdServiceImpl::QueryJobsInPartition(
-//     grpc::ServerContext *context,
-//     const SlurmxGrpc::QueryJobsInPartitionRequest *request,
-//     SlurmxGrpc::QueryJobsInPartitionReply *response) {
-//   uint32_t partition_id;
-//
-//   if (!g_meta_container->GetPartitionId(request->partition(), &partition_id))
-//     return grpc::Status::OK;
-//   g_task_scheduler->QueryTaskBriefMetaInPartition(
-//       partition_id, QueryBriefTaskMetaFieldControl{true, true, true, true},
-//       response->mutable_task_metas());
-//
-//   return grpc::Status::OK;
-// }
+grpc::Status SlurmCtlXdServiceImpl::QueryJobsInPartition(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryJobsInPartitionRequest *request,
+    SlurmxGrpc::QueryJobsInPartitionReply *response) {
+  uint32_t partition_id;
+
+  if (!g_meta_container->GetPartitionId(request->partition(), &partition_id))
+    return grpc::Status::OK;
+  g_task_scheduler->QueryTaskBriefMetaInPartition(
+      partition_id, QueryBriefTaskMetaFieldControl{true, true, true, true},
+      response);
+
+  return grpc::Status::OK;
+}
 
 CtlXdServer::CtlXdServer(std::string listen_address)
     : m_listen_address_(std::move(listen_address)) {

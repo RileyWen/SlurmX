@@ -173,6 +173,9 @@ message QueryJobsInPartitionRequest {
 
 message QueryJobsInPartitionReply {
   repeated TaskToCtlXd task_metas = 1;
+  repeated TaskStatus task_status = 2;
+  repeated string allocated_nodes = 3;
+  repeated uint32 task_ids = 4;
 }
 
 message QueryNodeInfoRequest {

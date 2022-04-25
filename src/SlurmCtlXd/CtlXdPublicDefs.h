@@ -138,6 +138,7 @@ struct TaskInCtlXd {
   uint32_t nodes_alloc;
   std::list<std::string> nodes;
   std::list<uint32_t> node_indexes;
+  std::string allocated_nodes_regex;
 
   std::unordered_set<uint32_t> end_node_set;
 
