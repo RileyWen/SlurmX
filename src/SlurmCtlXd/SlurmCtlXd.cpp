@@ -91,6 +91,14 @@ void InitializeCtlXdGlobalVariables() {
   g_meta_container->InitFromConfig(g_config);
 
   g_node_keeper = std::make_unique<XdNodeKeeper>();
+  std::list<XdNodeAddrAndId> addr_and_id_list;
+  for (auto& kv : g_config.Nodes) {
+    XdNodeAddrAndId addr_and_id;
+    addr_and_id.node_addr = kv.first;
+    SLURMX_ASSERT(g_meta_container->GetNodeId(kv.first, &addr_and_id.node_id));
+    addr_and_id_list.emplace_back(std::move(addr_and_id));
+  }
+  g_node_keeper->RegisterXdNodes(std::move(addr_and_id_list));
 
   g_task_scheduler =
       std::make_unique<TaskScheduler>(std::make_unique<MinLoadFirst>());

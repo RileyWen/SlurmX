@@ -22,9 +22,9 @@ namespace CtlXd {
 
 class XdNodeKeeper;
 
-struct RegisterNodeResult {
-  bool result{false};
-  std::string reason;
+struct XdNodeAddrAndId {
+  std::string node_addr;
+  XdNodeId node_id;
 };
 
 /**
@@ -32,7 +32,7 @@ struct RegisterNodeResult {
  */
 class XdNodeStub {
  public:
-  XdNodeStub();
+  explicit XdNodeStub(XdNodeKeeper *node_keeper);
 
   ~XdNodeStub();
 
@@ -40,13 +40,9 @@ class XdNodeStub {
 
   SlurmxErr TerminateTask(uint32_t task_id);
 
-  void *GetNodeData() { return m_data_; };
-
-  void SetNodeData(void *data) { m_data_ = data; }
-
-  bool Invalid() const { return m_invalid_; }
-
  private:
+  XdNodeKeeper *m_node_keeper_;
+
   uint32_t m_slot_offset_;
 
   grpc_connectivity_state m_prev_channel_state_;
@@ -60,13 +56,11 @@ class XdNodeStub {
   uint32_t m_maximum_retry_times_;
   uint32_t m_failure_retry_times_;
 
-  XdNodeId m_node_id_;
-
-  void *m_data_;
+  XdNodeAddrAndId m_addr_and_id_;
 
   // void* parameter is m_data_. Used to free m_data_ when XdNodeStub is being
   // destructed.
-  std::function<void(void *)> m_clean_up_cb_;
+  std::function<void(XdNodeStub *)> m_clean_up_cb_;
 
   friend class XdNodeKeeper;
 };
@@ -77,20 +71,7 @@ class XdNodeKeeper {
 
   ~XdNodeKeeper();
 
-  /**
-   * Request to register a new Xd node. Thread-safe.
-   * @param node_addr The address passed to grpc::CreateChannel().
-   * @param data The user-specified data pointer which will be passed as a
-   * parameter from all callbacks.
-   * @param clean_up_cb Called when the underlying Xd node structure is
-   * destroyed. The parameter `void *` will be `node_data`.
-   * @return A future of RegisterNodeResult. When the backward connection to the
-   * new Xd node succeeds or fails, the future is set, in which the node index
-   * option is set (succeed) or is null (fail).
-   */
-  std::future<RegisterNodeResult> RegisterXdNode(
-      const std::string &node_addr, XdNodeId node_id, void *data,
-      std::function<void(void *)> clean_up_cb);
+  void RegisterXdNodes(std::list<XdNodeAddrAndId> node_addr_id_list);
 
   uint32_t AvailableNodeCount();
 
@@ -110,18 +91,17 @@ class XdNodeKeeper {
 
   bool CheckNodeIdExists(const XdNodeId &node_id);
 
-  void SetNodeIsUpCb(std::function<void(XdNodeId, void *)> cb);
+  void SetNodeIsUpCb(std::function<void(XdNodeId)> cb);
 
-  void SetNodeIsDownCb(std::function<void(XdNodeId, void *)> cb);
+  void SetNodeIsDownCb(std::function<void(XdNodeId)> cb);
 
-  void SetNodeIsTempDownCb(std::function<void(XdNodeId, void *)> cb);
+  void SetNodeIsTempDownCb(std::function<void(XdNodeId)> cb);
 
-  void SetNodeRecFromTempFailureCb(std::function<void(XdNodeId, void *)> cb);
+  void SetNodeRecFromTempFailureCb(std::function<void(XdNodeId)> cb);
 
  private:
   struct InitializingXdTagData {
     std::unique_ptr<XdNodeStub> xd;
-    std::promise<RegisterNodeResult> register_result;
   };
 
   struct CqTag {
@@ -130,6 +110,10 @@ class XdNodeKeeper {
     void *data;
   };
 
+  static void PutBackNodeIntoUnavailList_(XdNodeStub *stub);
+
+  void ConnectXdNode_(XdNodeAddrAndId addr_info);
+
   CqTag *InitXdStateMachine_(InitializingXdTagData *tag_data,
                              grpc_connectivity_state new_state);
   CqTag *EstablishedXdStateMachine_(XdNodeStub *xd,
@@ -137,13 +121,15 @@ class XdNodeKeeper {
 
   void StateMonitorThreadFunc_();
 
-  std::function<void(XdNodeId, void *)> m_node_is_up_cb_;
-  std::function<void(XdNodeId, void *)> m_node_is_temp_down_cb_;
-  std::function<void(XdNodeId, void *)> m_node_rec_from_temp_failure_cb_;
+  void PeriodConnectNodeThreadFunc_();
+
+  std::function<void(XdNodeId)> m_node_is_up_cb_;
+  std::function<void(XdNodeId)> m_node_is_temp_down_cb_;
+  std::function<void(XdNodeId)> m_node_rec_from_temp_failure_cb_;
 
   // Guarantee that the Xd node will not be freed before this callback is
   // called.
-  std::function<void(XdNodeId, void *)> m_node_is_down_cb_;
+  std::function<void(XdNodeId)> m_node_is_down_cb_;
 
   util::mutex m_tag_pool_mtx_;
 
@@ -168,6 +154,9 @@ class XdNodeKeeper {
   std::unordered_map<XdNodeId, uint32_t, XdNodeId::Hash>
       m_node_id_slot_offset_map_;
 
+  util::mutex m_unavail_node_list_mtx_;
+  std::list<XdNodeAddrAndId> m_unavail_node_list_;
+
   // Protect m_alive_xd_bitset_
   util::rw_mutex m_alive_xd_rw_mtx_;
 
@@ -180,8 +169,10 @@ class XdNodeKeeper {
   bool m_cq_closed_;
 
   std::thread m_cq_thread_;
+
+  std::thread m_period_connect_thread_;
 };
 
-inline std::unique_ptr<XdNodeKeeper> g_node_keeper;
-
 }  // namespace CtlXd
+
+inline std::unique_ptr<CtlXd::XdNodeKeeper> g_node_keeper;

@@ -31,17 +31,17 @@ class CtlXdClient {
 
   ~CtlXdClient();
 
+  void SetNodeId(XdNodeId node_id) { m_node_id_ = node_id; }
+
   /***
-   * Connect the CtlXdClient to SlurmCtlXd.
+   * InitChannelAndStub the CtlXdClient to SlurmCtlXd.
    * @param server_address The "[Address]:[Port]" of SlurmCtlXd.
    * @return
    * If SlurmCtlXd is successfully connected, kOk is returned. <br>
    * If SlurmCtlXd cannot be connected within 3s, kConnectionTimeout is
    * returned.
    */
-  SlurmxErr Connect(const std::string& server_address);
-
-  SlurmxErr RegisterOnCtlXd(uint32_t my_port);
+  void InitChannelAndStub(const std::string& server_address);
 
   void TaskStatusChangeAsync(TaskStatusChange&& task_status_change);
 
@@ -52,7 +52,7 @@ class CtlXdClient {
 
   absl::Mutex m_task_status_change_mtx_;
 
-  std::queue<TaskStatusChange> m_task_status_change_queue_
+  std::list<TaskStatusChange> m_task_status_change_list_
       GUARDED_BY(m_task_status_change_mtx_);
 
   std::thread m_async_send_thread_;

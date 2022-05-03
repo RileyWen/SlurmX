@@ -100,28 +100,40 @@ void TaskScheduler::ScheduleThread_() {
                                                    std::move(detail));
           }
 
-          const auto* task_ptr = task.get();
-
           m_task_indexes_mtx_.Lock();
           m_node_to_tasks_map_[node_id.node_index].emplace(task->task_id);
           m_task_indexes_mtx_.Unlock();
-
-          XdNodeStub* node_stub = g_node_keeper->GetXdStub(node_id);
-          node_stub->ExecuteTask(task_ptr);
         }
 
         task->allocated_nodes_regex = util::HostNameListToStr(task->nodes);
 
-        uint64_t timestamp = ToUnixSeconds(absl::Now());
-        g_db_client->UpdateJobRecordFields(
-            task->job_db_inx,
-            {"time_start", "nodes_alloc", "nodelist", "state"},
-            {std::to_string(timestamp), std::to_string(task->nodes_alloc),
-             task->allocated_nodes_regex, std::to_string(SlurmxGrpc::Running)});
+        auto* task_ptr = task.get();
+        auto job_db_inx = task->job_db_inx;
+        auto nodes_alloc = task->nodes_alloc;
+        auto allocated_nodes_regex = task->allocated_nodes_regex;
 
+        // For the task whose --node > 1, only execute the command at the first
+        // allocated node.
+        XdNodeId first_node_id{partition_id, task->node_indexes.front()};
+
+        // IMPORTANT: task must be put into running_task_map before any
+        //  time-consuming operation, otherwise TaskStatusChange RPC will come
+        //  earlier before task is put into running_task_map.
         m_running_task_map_mtx_.Lock();
         m_running_task_map_.emplace(task->task_id, std::move(task));
         m_running_task_map_mtx_.Unlock();
+
+        // RPC is time-consuming.
+        XdNodeStub* node_stub = g_node_keeper->GetXdStub(first_node_id);
+        node_stub->ExecuteTask(task_ptr);
+
+        // Todo: Updating database is a extremely time-consuming operation.
+        //  Consider an async way.
+        uint64_t timestamp = ToUnixSeconds(absl::Now());
+        g_db_client->UpdateJobRecordFields(
+            job_db_inx, {"time_start", "nodes_alloc", "nodelist", "state"},
+            {std::to_string(timestamp), std::to_string(nodes_alloc),
+             allocated_nodes_regex, std::to_string(SlurmxGrpc::Running)});
       }
       // all_part_metas is unlocked here.
     } else {
@@ -173,10 +185,21 @@ SlurmxErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtlXd> task,
 
   // Check whether the selected partition is able to run this task.
   auto metas_ptr = g_meta_container->GetPartitionMetasPtr(partition_id);
+  if (task->node_num > metas_ptr->partition_global_meta.alive_node_cnt) {
+    SLURMX_TRACE(
+        "Task #{}'s node-num {} is greater than the number of "
+        "alive nodes {} in its partition. Reject it.",
+        task->task_id, task->node_num,
+        metas_ptr->partition_global_meta.alive_node_cnt);
+    return SlurmxErr::kInvalidNodeNum;
+  }
+
   if (!(task->resources <=
         metas_ptr->partition_global_meta.m_resource_total_)) {
     SLURMX_TRACE(
-        "Resource not enough. Partition total: cpu {}, mem: {}, mem+sw: {}",
+        "Resource not enough for task #{}. "
+        "Partition total: cpu {}, mem: {}, mem+sw: {}",
+        task->task_id,
         metas_ptr->partition_global_meta.m_resource_total_.allocatable_resource
             .cpu_count,
         util::ReadableMemory(metas_ptr->partition_global_meta.m_resource_total_

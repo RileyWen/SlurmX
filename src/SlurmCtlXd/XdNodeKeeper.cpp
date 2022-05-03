@@ -10,13 +10,13 @@ namespace CtlXd {
 using grpc::ClientContext;
 using grpc::Status;
 
-XdNodeStub::XdNodeStub()
-    : m_failure_retry_times_(0), m_invalid_(true), m_data_(nullptr) {
+XdNodeStub::XdNodeStub(XdNodeKeeper *node_keeper)
+    : m_node_keeper_(node_keeper), m_failure_retry_times_(0), m_invalid_(true) {
   // The most part of jobs are done in XdNodeKeeper::RegisterNewXdNode().
 }
 
 XdNodeStub::~XdNodeStub() {
-  if (m_clean_up_cb_) m_clean_up_cb_(m_data_);
+  if (m_clean_up_cb_) m_clean_up_cb_(this);
 }
 
 SlurmxErr XdNodeStub::ExecuteTask(const TaskInCtlXd *task) {
@@ -79,7 +79,7 @@ SlurmxErr XdNodeStub::ExecuteTask(const TaskInCtlXd *task) {
   status = m_stub_->ExecuteTask(&context, request, &reply);
   if (!status.ok()) {
     SLURMX_DEBUG("Execute RPC for Node {} returned with status not ok: {}",
-                 m_node_id_, status.error_message());
+                 m_addr_and_id_.node_id, status.error_message());
     return SlurmxErr::kRpcFailure;
   }
 
@@ -101,7 +101,7 @@ SlurmxErr XdNodeStub::TerminateTask(uint32_t task_id) {
   if (!status.ok()) {
     SLURMX_DEBUG(
         "TerminateTask RPC for Node {} returned with status not ok: {}",
-        m_node_id_, status.error_message());
+        m_addr_and_id_.node_id, status.error_message());
     return SlurmxErr::kRpcFailure;
   }
 
@@ -113,6 +113,8 @@ SlurmxErr XdNodeStub::TerminateTask(uint32_t task_id) {
 
 XdNodeKeeper::XdNodeKeeper() : m_cq_closed_(false), m_tag_pool_(32, 0) {
   m_cq_thread_ = std::thread(&XdNodeKeeper::StateMonitorThreadFunc_, this);
+  m_period_connect_thread_ =
+      std::thread(&XdNodeKeeper::PeriodConnectNodeThreadFunc_, this);
 }
 
 XdNodeKeeper::~XdNodeKeeper() {
@@ -124,64 +126,19 @@ XdNodeKeeper::~XdNodeKeeper() {
   m_cq_mtx_.Unlock();
 
   m_cq_thread_.join();
+  m_period_connect_thread_.join();
 
   // Dependency order: rpc_cq -> channel_state_cq -> tag pool.
   // Tag pool's destructor will free all trailing tags in cq.
 }
 
-std::future<RegisterNodeResult> XdNodeKeeper::RegisterXdNode(
-    const std::string &node_addr, XdNodeId node_id, void *data,
-    std::function<void(void *)> clean_up_cb) {
-  using namespace std::chrono_literals;
+void XdNodeKeeper::RegisterXdNodes(
+    std::list<XdNodeAddrAndId> node_addr_id_list) {
+  util::lock_guard guard(m_unavail_node_list_mtx_);
 
-  auto *cq_tag_data = new InitializingXdTagData{};
-  cq_tag_data->xd = std::make_unique<XdNodeStub>();
-
-  // InitializingXd: BEGIN -> IDLE
-
-  cq_tag_data->xd->m_node_id_ = node_id;
-  cq_tag_data->xd->m_data_ = data;
-  cq_tag_data->xd->m_clean_up_cb_ = std::move(clean_up_cb);
-
-  /* Todo: Adjust the value here.
-   * In default case, TRANSIENT_FAILURE -> TRANSIENT_FAILURE will use the
-   * connection-backoff algorithm. We might need to adjust these values.
-   * https://grpc.github.io/grpc/cpp/md_doc_connection-backoff.html
-   */
-  grpc::ChannelArguments channel_args;
-  //  channel_args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, 100 /*ms*/);
-  //  channel_args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, 1 /*s*/ * 1000
-  //  /*ms*/); channel_args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS, 2 /*s*/ *
-  //  1000 /*ms*/);
-  //  channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIME_MS, 5 /*s*/ * 1000 /*ms*/);
-  //  channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 10 /*s*/ * 1000
-  //  /*ms*/); channel_args.SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1
-  //  /*true*/);
-
-  cq_tag_data->xd->m_channel_ = grpc::CreateCustomChannel(
-      node_addr, grpc::InsecureChannelCredentials(), channel_args);
-  cq_tag_data->xd->m_prev_channel_state_ =
-      cq_tag_data->xd->m_channel_->GetState(true);
-  cq_tag_data->xd->m_stub_ =
-      SlurmxGrpc::SlurmXd::NewStub(cq_tag_data->xd->m_channel_);
-
-  cq_tag_data->xd->m_maximum_retry_times_ = 2;
-
-  CqTag *tag;
-  {
-    util::lock_guard lock(m_tag_pool_mtx_);
-    tag = m_tag_pool_.construct(CqTag{CqTag::kInitializingXd, cq_tag_data});
-  }
-
-  // future must be retrieved here previous to NotifyOnStateChange!
-  // Otherwise, data may be freed previous to get_future().
-  auto result_future = cq_tag_data->register_result.get_future();
-
-  cq_tag_data->xd->m_channel_->NotifyOnStateChange(
-      cq_tag_data->xd->m_prev_channel_state_,
-      std::chrono::system_clock::now() + 2s, &m_cq_, tag);
-
-  return result_future;
+  m_unavail_node_list_.splice(m_unavail_node_list_.end(),
+                              std::move(node_addr_id_list));
+  SLURMX_TRACE("Trying register all nodes...");
 }
 
 void XdNodeKeeper::StateMonitorThreadFunc_() {
@@ -231,17 +188,15 @@ void XdNodeKeeper::StateMonitorThreadFunc_() {
         } else {
           // END state of both state machine. Free the Xd client.
           if (tag->type == CqTag::kInitializingXd) {
-            // Set future of RegisterNodeResult and free tag_data
-            SLURMX_TRACE("Set future to false");
+            // free tag_data
             auto *tag_data =
                 reinterpret_cast<InitializingXdTagData *>(tag->data);
-            tag_data->register_result.set_value(RegisterNodeResult{
-                false, fmt::format("Cannot connect to node {}",
-                                   tag_data->xd->m_node_id_)});
+            SLURMX_TRACE("Failed connect to {}. Re-connect it later..",
+                         tag_data->xd->m_addr_and_id_.node_addr);
             delete tag_data;
           } else if (tag->type == CqTag::kEstablishedXd) {
             if (m_node_is_down_cb_)
-              m_node_is_down_cb_(xd->m_node_id_, xd->m_data_);
+              m_node_is_down_cb_(xd->m_addr_and_id_.node_id);
 
             util::lock_guard node_lock(m_node_mtx_);
             util::write_lock_guard xd_lock(m_alive_xd_rw_mtx_);
@@ -249,7 +204,7 @@ void XdNodeKeeper::StateMonitorThreadFunc_() {
             m_empty_slot_bitset_[xd->m_slot_offset_] = true;
             m_alive_xd_bitset_[xd->m_slot_offset_] = false;
 
-            m_node_id_slot_offset_map_.erase(xd->m_node_id_);
+            m_node_id_slot_offset_map_.erase(xd->m_addr_and_id_.node_id);
 
             m_node_vec_[xd->m_slot_offset_].reset();
           } else {
@@ -285,7 +240,7 @@ void XdNodeKeeper::StateMonitorThreadFunc_() {
 
 XdNodeKeeper::CqTag *XdNodeKeeper::InitXdStateMachine_(
     InitializingXdTagData *tag_data, grpc_connectivity_state new_state) {
-  SLURMX_TRACE("Enter InitXdStateMachine_");
+  // SLURMX_TRACE("Enter InitXdStateMachine_");
 
   std::optional<CqTag::Type> next_tag_type;
   XdNodeStub *raw_xd = tag_data->xd.get();
@@ -321,17 +276,15 @@ XdNodeKeeper::CqTag *XdNodeKeeper::InitXdStateMachine_(
           m_alive_xd_bitset_[pos] = true;
         }
 
-        m_node_id_slot_offset_map_.emplace(raw_xd->m_node_id_,
+        m_node_id_slot_offset_map_.emplace(raw_xd->m_addr_and_id_.node_id,
                                            raw_xd->m_slot_offset_);
 
         raw_xd->m_failure_retry_times_ = 0;
         raw_xd->m_invalid_ = false;
       }
-      if (m_node_is_up_cb_)
-        m_node_is_up_cb_(raw_xd->m_node_id_, raw_xd->m_data_);
+      if (m_node_is_up_cb_) m_node_is_up_cb_(raw_xd->m_addr_and_id_.node_id);
 
-      // Set future of RegisterNodeResult and free tag_data
-      tag_data->register_result.set_value(RegisterNodeResult{true});
+      // free tag_data
       delete tag_data;
 
       // Switch to EstablishedXd state machine
@@ -344,13 +297,13 @@ XdNodeKeeper::CqTag *XdNodeKeeper::InitXdStateMachine_(
         raw_xd->m_failure_retry_times_++;
         next_tag_type = CqTag::kInitializingXd;
 
-        SLURMX_TRACE(
-            "CONNECTING/TRANSIENT_FAILURE -> TRANSIENT_FAILURE -> CONNECTING");
+        // SLURMX_TRACE(
+        // "CONNECTING/TRANSIENT_FAILURE -> TRANSIENT_FAILURE -> CONNECTING");
         // prev                            current              next
         // CONNECTING/TRANSIENT_FAILURE -> TRANSIENT_FAILURE -> CONNECTING
       } else {
         next_tag_type = std::nullopt;
-        SLURMX_TRACE("TRANSIENT_FAILURE -> TRANSIENT_FAILURE -> END");
+        // SLURMX_TRACE("TRANSIENT_FAILURE -> TRANSIENT_FAILURE -> END");
         // prev must be TRANSIENT_FAILURE.
         // when prev is CONNECTING, retry_times = 0
         // prev          current              next
@@ -376,7 +329,7 @@ XdNodeKeeper::CqTag *XdNodeKeeper::InitXdStateMachine_(
       } else {
         // prev    now
         // IDLE -> CONNECTING
-        SLURMX_TRACE("IDLE -> CONNECTING");
+        // SLURMX_TRACE("IDLE -> CONNECTING");
         next_tag_type = CqTag::kInitializingXd;
       }
       break;
@@ -393,7 +346,7 @@ XdNodeKeeper::CqTag *XdNodeKeeper::InitXdStateMachine_(
       break;
   }
 
-  SLURMX_TRACE("Exit InitXdStateMachine_");
+  // SLURMX_TRACE("Exit InitXdStateMachine_");
   if (next_tag_type.has_value()) {
     if (next_tag_type.value() == CqTag::kInitializingXd) {
       util::lock_guard lock(m_tag_pool_mtx_);
@@ -447,7 +400,7 @@ XdNodeKeeper::CqTag *XdNodeKeeper::EstablishedXdStateMachine_(
         m_alive_xd_bitset_[xd->m_slot_offset_] = false;
       }
       if (m_node_is_temp_down_cb_)
-        m_node_is_temp_down_cb_(xd->m_node_id_, xd->m_data_);
+        m_node_is_temp_down_cb_(xd->m_addr_and_id_.node_id);
 
       next_tag_type = CqTag::kEstablishedXd;
       break;
@@ -471,7 +424,7 @@ XdNodeKeeper::CqTag *XdNodeKeeper::EstablishedXdStateMachine_(
         }
 
         if (m_node_rec_from_temp_failure_cb_)
-          m_node_rec_from_temp_failure_cb_(xd->m_node_id_, xd->m_data_);
+          m_node_rec_from_temp_failure_cb_(xd->m_addr_and_id_.node_id);
 
         next_tag_type = CqTag::kEstablishedXd;
       }
@@ -490,7 +443,7 @@ XdNodeKeeper::CqTag *XdNodeKeeper::EstablishedXdStateMachine_(
           m_alive_xd_bitset_[xd->m_slot_offset_] = false;
         }
         if (m_node_is_temp_down_cb_)
-          m_node_is_temp_down_cb_(xd->m_node_id_, xd->m_data_);
+          m_node_is_temp_down_cb_(xd->m_addr_and_id_.node_id);
 
         next_tag_type = CqTag::kEstablishedXd;
       } else if (xd->m_prev_channel_state_ == GRPC_CHANNEL_CONNECTING) {
@@ -571,22 +524,94 @@ bool XdNodeKeeper::XdNodeValid(uint32_t index) {
   return m_alive_xd_bitset_.test(index);
 }
 
-void XdNodeKeeper::SetNodeIsUpCb(std::function<void(XdNodeId, void *)> cb) {
+void XdNodeKeeper::SetNodeIsUpCb(std::function<void(XdNodeId)> cb) {
   m_node_is_up_cb_ = std::move(cb);
 }
 
-void XdNodeKeeper::SetNodeIsDownCb(std::function<void(XdNodeId, void *)> cb) {
+void XdNodeKeeper::SetNodeIsDownCb(std::function<void(XdNodeId)> cb) {
   m_node_is_down_cb_ = std::move(cb);
 }
 
-void XdNodeKeeper::SetNodeIsTempDownCb(
-    std::function<void(XdNodeId, void *)> cb) {
+void XdNodeKeeper::SetNodeIsTempDownCb(std::function<void(XdNodeId)> cb) {
   m_node_is_temp_down_cb_ = std::move(cb);
 }
 
 void XdNodeKeeper::SetNodeRecFromTempFailureCb(
-    std::function<void(XdNodeId, void *)> cb) {
+    std::function<void(XdNodeId)> cb) {
   m_node_rec_from_temp_failure_cb_ = std::move(cb);
+}
+
+void XdNodeKeeper::ConnectXdNode_(XdNodeAddrAndId addr_info) {
+  using namespace std::chrono_literals;
+
+  auto *cq_tag_data = new InitializingXdTagData{};
+  cq_tag_data->xd = std::make_unique<XdNodeStub>(this);
+
+  // InitializingXd: BEGIN -> IDLE
+
+  /* Todo: Adjust the value here.
+   * In default case, TRANSIENT_FAILURE -> TRANSIENT_FAILURE will use the
+   * connection-backoff algorithm. We might need to adjust these values.
+   * https://grpc.github.io/grpc/cpp/md_doc_connection-backoff.html
+   */
+  grpc::ChannelArguments channel_args;
+  //  channel_args.SetInt(GRPC_ARG_INITIAL_RECONNECT_BACKOFF_MS, 100 /*ms*/);
+  //  channel_args.SetInt(GRPC_ARG_MIN_RECONNECT_BACKOFF_MS, 1 /*s*/ * 1000
+  //  /*ms*/); channel_args.SetInt(GRPC_ARG_MAX_RECONNECT_BACKOFF_MS, 2 /*s*/ *
+  //  1000 /*ms*/);
+  //  channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIME_MS, 5 /*s*/ * 1000 /*ms*/);
+  //  channel_args.SetInt(GRPC_ARG_KEEPALIVE_TIMEOUT_MS, 10 /*s*/ * 1000
+  //  /*ms*/); channel_args.SetInt(GRPC_ARG_KEEPALIVE_PERMIT_WITHOUT_CALLS, 1
+  //  /*true*/);
+
+  std::string addr_port =
+      fmt::format("{}:{}", addr_info.node_addr, kXdDefaultPort);
+  cq_tag_data->xd->m_channel_ = grpc::CreateCustomChannel(
+      addr_port, grpc::InsecureChannelCredentials(), channel_args);
+  cq_tag_data->xd->m_prev_channel_state_ =
+      cq_tag_data->xd->m_channel_->GetState(true);
+  cq_tag_data->xd->m_stub_ =
+      SlurmxGrpc::SlurmXd::NewStub(cq_tag_data->xd->m_channel_);
+
+  cq_tag_data->xd->m_addr_and_id_ = std::move(addr_info);
+  cq_tag_data->xd->m_clean_up_cb_ = PutBackNodeIntoUnavailList_;
+
+  cq_tag_data->xd->m_maximum_retry_times_ = 2;
+
+  CqTag *tag;
+  {
+    util::lock_guard lock(m_tag_pool_mtx_);
+    tag = m_tag_pool_.construct(CqTag{CqTag::kInitializingXd, cq_tag_data});
+  }
+
+  cq_tag_data->xd->m_channel_->NotifyOnStateChange(
+      cq_tag_data->xd->m_prev_channel_state_,
+      std::chrono::system_clock::now() + 2s, &m_cq_, tag);
+}
+
+void XdNodeKeeper::PutBackNodeIntoUnavailList_(XdNodeStub *stub) {
+  XdNodeKeeper *node_keeper = stub->m_node_keeper_;
+  util::lock_guard guard(node_keeper->m_unavail_node_list_mtx_);
+
+  node_keeper->m_unavail_node_list_.emplace_back(
+      std::move(stub->m_addr_and_id_));
+}
+
+void XdNodeKeeper::PeriodConnectNodeThreadFunc_() {
+  while (true) {
+    if (m_cq_closed_) break;
+
+    {
+      util::lock_guard guard(m_unavail_node_list_mtx_);
+      while (!m_unavail_node_list_.empty()) {
+        auto &addr_id = m_unavail_node_list_.front();
+        ConnectXdNode_(std::move(addr_id));
+        m_unavail_node_list_.pop_front();
+      }
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  }
 }
 
 }  // namespace CtlXd

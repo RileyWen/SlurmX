@@ -200,7 +200,6 @@ message QueryPartitionInfoReply {
 //  and have some kind of authentication
 service SlurmCtlXd {
   /* RPCs called from SlurmXd*/
-  rpc RegisterSlurmXd(SlurmXdRegisterRequest) returns (SlurmXdRegisterResult);
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
 
 

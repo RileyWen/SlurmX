@@ -130,11 +130,32 @@ void StartServer() {
 
   SlurmxErr err;
 
-  err = g_ctlxd_client->Connect(g_config.ControlMachine);
-  if (err == SlurmxErr::kConnectionTimeout) {
-    SLURMX_ERROR("Cannot connect to SlurmCtlXd.");
+  uint32_t part_id = 0, node_index = 0;
+  const std::string& part_name = node_it->second->partition_name;
+  auto part_it = g_config.Partitions.find(part_name);
+  if (part_it == g_config.Partitions.end()) {
+    SLURMX_ERROR(
+        "This machine {} belongs to {} partition, but the partition "
+        "doesn't exist.",
+        g_config.Hostname, part_name);
     std::exit(1);
   }
+  part_id = std::distance(g_config.Partitions.begin(), part_it);
+
+  auto node_it_in_part = part_it->second.nodes.find(g_config.Hostname);
+  if (node_it_in_part == part_it->second.nodes.end()) {
+    SLURMX_ERROR(
+        "This machine {} can't be found in "
+        "g_config.Partition[\"{}\"].nodes . Exit.",
+        g_config.Hostname, part_name);
+    std::exit(1);
+  }
+  node_index = std::distance(part_it->second.nodes.begin(), node_it_in_part);
+  XdNodeId node_id{part_id, node_index};
+  SLURMX_TRACE("NodeId of this machine: {}", node_id);
+
+  g_ctlxd_client->SetNodeId(node_id);
+  g_ctlxd_client->InitChannelAndStub(g_config.ControlMachine);
 
   // Todo: Set FD_CLOEXEC on stdin, stdout, stderr
 
@@ -144,14 +165,6 @@ void StartServer() {
   std::smatch port_group;
   if (!std::regex_match(g_config.SlurmXdListen, port_group, addr_port_re)) {
     SLURMX_ERROR("Illegal CtlXd address format.");
-    std::exit(1);
-  }
-
-  err = g_ctlxd_client->RegisterOnCtlXd(std::stoul(port_group[1]));
-  if (err != SlurmxErr::kOk) {
-    SLURMX_ERROR("Exit due to registration error... Shutting down server...");
-    g_server->Shutdown();
-    g_server->Wait();
     std::exit(1);
   }
 

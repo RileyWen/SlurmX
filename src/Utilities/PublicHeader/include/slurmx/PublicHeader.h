@@ -51,6 +51,7 @@ enum class SlurmxErr : uint16_t {
   kGenericFailure,
   kNoResource,
   kNonExistent,
+  kInvalidNodeNum,
   kSystemErr,  // represent the error which sets errno
   kExistingTask,
   kInvalidParam,
