@@ -91,6 +91,14 @@ void InitializeCtlXdGlobalVariables() {
   g_meta_container->InitFromConfig(g_config);
 
   g_node_keeper = std::make_unique<XdNodeKeeper>();
+  std::list<XdNodeAddrAndId> addr_and_id_list;
+  for (auto& kv : g_config.Nodes) {
+    XdNodeAddrAndId addr_and_id;
+    addr_and_id.node_addr = kv.first;
+    SLURMX_ASSERT(g_meta_container->GetNodeId(kv.first, &addr_and_id.node_id));
+    addr_and_id_list.emplace_back(std::move(addr_and_id));
+  }
+  g_node_keeper->RegisterXdNodes(std::move(addr_and_id_list));
 
   g_task_scheduler =
       std::make_unique<TaskScheduler>(std::make_unique<MinLoadFirst>());
@@ -102,6 +110,16 @@ void DestroyCtlXdGlobalVariables() {
 }
 
 int StartServer() {
+  // Create log directory recursively.
+  try {
+    std::filesystem::path log_path{g_config.SlurmCtlXdLogFile};
+    auto log_dir = log_path.parent_path();
+    if (!log_dir.empty()) std::filesystem::create_directories(log_dir);
+  } catch (const std::exception& e) {
+    SLURMX_ERROR("Invalid SlurmXdLogFile path {}: {}",
+                 g_config.SlurmCtlXdLogFile, e.what());
+  }
+
   InitializeCtlXdGlobalVariables();
 
   std::string server_address{fmt::format("{}:{}", g_config.SlurmCtlXdListenAddr,
@@ -195,7 +213,7 @@ int main(int argc, char** argv) {
         g_config.SlurmCtlXdLogFile =
             config["SlurmCtlXdLogFile"].as<std::string>();
       else
-        g_config.SlurmCtlXdLogFile = "/tmp/slurmctlxd.log";
+        g_config.SlurmCtlXdLogFile = "/tmp/slurmctlxd/slurmctlxd.log";
 
       if (config["DbUser"])
         g_config.DbUser = config["DbUser"].as<std::string>();
@@ -263,8 +281,7 @@ int main(int argc, char** argv) {
             node_ptr->memory_bytes = memory_bytes;
           } else
             std::exit(1);
-          for(auto && name : name_list)
-            g_config.Nodes[name] = node_ptr;
+          for (auto&& name : name_list) g_config.Nodes[name] = node_ptr;
         }
       }
 
@@ -292,14 +309,13 @@ int main(int argc, char** argv) {
 
           for (auto&& str : split) {
             std::string str_s{absl::StripAsciiWhitespace(str)};
-            if(!util::ParseHostList(str_s, &name_list)){
+            if (!util::ParseHostList(str_s, &name_list)) {
               SLURMX_ERROR("Illegal node name string format.");
               std::exit(1);
             }
           }
 
           for (auto&& node : name_list) {
-
             auto node_it = g_config.Nodes.find(node);
             if (node_it != g_config.Nodes.end()) {
               node_it->second->partition_name = name;

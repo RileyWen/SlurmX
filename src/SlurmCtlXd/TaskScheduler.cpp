@@ -100,25 +100,40 @@ void TaskScheduler::ScheduleThread_() {
                                                    std::move(detail));
           }
 
-          const auto* task_ptr = task.get();
-
           m_task_indexes_mtx_.Lock();
           m_node_to_tasks_map_[node_id.node_index].emplace(task->task_id);
           m_task_indexes_mtx_.Unlock();
-
-          uint64_t timestamp = ToUnixSeconds(absl::Now());
-          std::string hostlist = util::HostNameListToStr(task->nodes);
-          g_db_client->UpdateJobRecordFields(
-              task->job_db_inx, {"time_start", "nodes_alloc", "nodelist"},
-              {std::to_string(timestamp), std::to_string(task->nodes_alloc),
-               hostlist});
-
-          XdNodeStub* node_stub = g_node_keeper->GetXdStub(node_id);
-          node_stub->ExecuteTask(task_ptr);
         }
+
+        task->allocated_nodes_regex = util::HostNameListToStr(task->nodes);
+
+        auto* task_ptr = task.get();
+        auto job_db_inx = task->job_db_inx;
+        auto nodes_alloc = task->nodes_alloc;
+        auto allocated_nodes_regex = task->allocated_nodes_regex;
+
+        // For the task whose --node > 1, only execute the command at the first
+        // allocated node.
+        XdNodeId first_node_id{partition_id, task->node_indexes.front()};
+
+        // IMPORTANT: task must be put into running_task_map before any
+        //  time-consuming operation, otherwise TaskStatusChange RPC will come
+        //  earlier before task is put into running_task_map.
         m_running_task_map_mtx_.Lock();
         m_running_task_map_.emplace(task->task_id, std::move(task));
         m_running_task_map_mtx_.Unlock();
+
+        // RPC is time-consuming.
+        XdNodeStub* node_stub = g_node_keeper->GetXdStub(first_node_id);
+        node_stub->ExecuteTask(task_ptr);
+
+        // Todo: Updating database is a extremely time-consuming operation.
+        //  Consider an async way.
+        uint64_t timestamp = ToUnixSeconds(absl::Now());
+        g_db_client->UpdateJobRecordFields(
+            job_db_inx, {"time_start", "nodes_alloc", "nodelist", "state"},
+            {std::to_string(timestamp), std::to_string(nodes_alloc),
+             allocated_nodes_regex, std::to_string(SlurmxGrpc::Running)});
       }
       // all_part_metas is unlocked here.
     } else {
@@ -170,10 +185,21 @@ SlurmxErr TaskScheduler::SubmitTask(std::unique_ptr<TaskInCtlXd> task,
 
   // Check whether the selected partition is able to run this task.
   auto metas_ptr = g_meta_container->GetPartitionMetasPtr(partition_id);
+  if (task->node_num > metas_ptr->partition_global_meta.alive_node_cnt) {
+    SLURMX_TRACE(
+        "Task #{}'s node-num {} is greater than the number of "
+        "alive nodes {} in its partition. Reject it.",
+        task->task_id, task->node_num,
+        metas_ptr->partition_global_meta.alive_node_cnt);
+    return SlurmxErr::kInvalidNodeNum;
+  }
+
   if (!(task->resources <=
         metas_ptr->partition_global_meta.m_resource_total_)) {
     SLURMX_TRACE(
-        "Resource not enough. Partition total: cpu {}, mem: {}, mem+sw: {}",
+        "Resource not enough for task #{}. "
+        "Partition total: cpu {}, mem: {}, mem+sw: {}",
+        task->task_id,
         metas_ptr->partition_global_meta.m_resource_total_.allocatable_resource
             .cpu_count,
         util::ReadableMemory(metas_ptr->partition_global_meta.m_resource_total_
@@ -328,102 +354,63 @@ bool TaskScheduler::TerminateTaskNoLock_(uint32_t task_id) {
   return ok;
 }
 
-// void TaskScheduler::QueryTaskBriefMetaInPartition(
-//     uint32_t partition_id, const QueryBriefTaskMetaFieldControl&
-//     field_control,
-//     google::protobuf::RepeatedPtrField<SlurmxGrpc::BriefTaskMeta>*
-//     task_metas) {
-//   static auto fn_fill_brief_meta =
-//       [](ITask* task, const QueryBriefTaskMetaFieldControl& field_control,
-//          SlurmxGrpc::BriefTaskMeta* task_meta) {
-//         task_meta->set_task_id(task->task_id);
-//         if (field_control.type) {
-//           switch (task->type) {
-//             case ITask::Type::Interactive:
-//               task_meta->set_type(SlurmxGrpc::Interactive);
-//               break;
-//             case ITask::Type::Batch:
-//               task_meta->set_type(SlurmxGrpc::Batch);
-//               break;
-//           }
-//         }
-//         if (field_control.status) {
-//           switch (task->status) {
-//             case ITask::Status::Pending:
-//               task_meta->set_status(SlurmxGrpc::Pending);
-//               break;
-//             case ITask::Status::Running:
-//               task_meta->set_status(SlurmxGrpc::Running);
-//               break;
-//             case ITask::Status::Completing:
-//               task_meta->set_status(SlurmxGrpc::Completing);
-//               break;
-//             case ITask::Status::Finished:
-//               task_meta->set_status(SlurmxGrpc::Finished);
-//               break;
-//             case ITask::Status::Failed:
-//               task_meta->set_status(SlurmxGrpc::Failed);
-//               break;
-//           }
-//         }
-//         if (field_control.start_time) {
-//           auto* timestamp = task_meta->mutable_estimated_start_time();
-//           timeval tv = ToTimeval(task->start_time);
-//           timestamp->set_seconds(tv.tv_sec);
-//           timestamp->set_nanos(tv.tv_usec * 1000);
-//         }
-//         if (field_control.node_index) {
-//           task_meta->set_node_index(task->node_index);
-//         }
-//       };
-//
-//   std::list<uint32_t> tasks_in_partition;
-//
-//   m_task_indexes_mtx_.Lock();
-//   for (uint32_t task_id : m_partition_to_tasks_map_[partition_id])
-//     tasks_in_partition.emplace_back(task_id);
-//   m_task_indexes_mtx_.Unlock();
-//
-//   {
-//     LockGuard pending_guard(m_pending_task_map_mtx_);
-//     for (auto iter = tasks_in_partition.begin();
-//          iter != tasks_in_partition.end();) {
-//       auto map_iter = m_pending_task_map_.find(*iter);
-//       if (map_iter != m_pending_task_map_.end()) {
-//         fn_fill_brief_meta(map_iter->second.get(), field_control,
-//                            task_metas->Add());
-//         iter = tasks_in_partition.erase(iter);
-//       } else
-//         std::advance(iter, 1);
-//     }
-//   }
-//   {
-//     LockGuard running_guard(m_running_task_map_mtx_);
-//     for (auto iter = tasks_in_partition.begin();
-//          iter != tasks_in_partition.end();) {
-//       auto map_iter = m_running_task_map_.find(*iter);
-//       if (map_iter != m_running_task_map_.end()) {
-//         fn_fill_brief_meta(map_iter->second.get(), field_control,
-//                            task_metas->Add());
-//         iter = tasks_in_partition.erase(iter);
-//       } else
-//         std::advance(iter, 1);
-//     }
-//   }
-//   {
-//     LockGuard ended_guard(m_ended_task_map_mtx_);
-//     for (auto iter = tasks_in_partition.begin();
-//          iter != tasks_in_partition.end();) {
-//       auto map_iter = m_ended_task_map_.find(*iter);
-//       if (map_iter != m_ended_task_map_.end()) {
-//         fn_fill_brief_meta(map_iter->second.get(), field_control,
-//                            task_metas->Add());
-//         iter = tasks_in_partition.erase(iter);
-//       } else
-//         std::advance(iter, 1);
-//     }
-//   }
-// }
+void TaskScheduler::QueryTaskBriefMetaInPartition(
+    uint32_t partition_id, const QueryBriefTaskMetaFieldControl& field_control,
+    SlurmxGrpc::QueryJobsInPartitionReply* response) {
+  auto* task_list = response->mutable_task_metas();
+  auto* state_list = response->mutable_task_status();
+  auto* allocated_node_list = response->mutable_allocated_nodes();
+  auto* id_list = response->mutable_task_ids();
+
+  {
+    LockGuard pending_guard(m_pending_task_map_mtx_);
+    for (auto& [task_id, task] : m_pending_task_map_) {
+      auto* task_it = task_list->Add();
+      task_it->CopyFrom(task->task_to_ctlxd);
+
+      auto* state_it = state_list->Add();
+      *state_it = task->status;
+
+      auto* node_list_it = allocated_node_list->Add();
+      *node_list_it = task->allocated_nodes_regex;
+
+      auto* id_it = id_list->Add();
+      *id_it = task->task_id;
+    }
+  }
+  {
+    LockGuard running_guard(m_running_task_map_mtx_);
+    for (auto& [task_id, task] : m_running_task_map_) {
+      auto* task_it = task_list->Add();
+      task_it->CopyFrom(task->task_to_ctlxd);
+
+      auto* state_it = state_list->Add();
+      *state_it = task->status;
+
+      auto* node_list_it = allocated_node_list->Add();
+      *node_list_it = task->allocated_nodes_regex;
+
+      auto* id_it = id_list->Add();
+      *id_it = task->task_id;
+    }
+  }
+  {
+    LockGuard ended_guard(m_ended_task_map_mtx_);
+    for (auto& [task_id, task] : m_ended_task_map_) {
+      auto* task_it = task_list->Add();
+      task_it->CopyFrom(task->task_to_ctlxd);
+
+      auto* state_it = state_list->Add();
+      *state_it = task->status;
+
+      auto* node_list_it = allocated_node_list->Add();
+      *node_list_it = task->allocated_nodes_regex;
+
+      auto* id_it = id_list->Add();
+      *id_it = task->task_id;
+    }
+  }
+}
 
 void MinLoadFirst::CalculateNodeSelectionInfo_(
     const absl::flat_hash_map<uint32_t, std::unique_ptr<TaskInCtlXd>>&
@@ -455,7 +442,7 @@ void MinLoadFirst::CalculateNodeSelectionInfo_(
       std::string str;
       str.append(fmt::format("Node ({}, {}): ", partition_id, node_id));
       for (auto [end_time, task_id] : end_time_task_id_vec) {
-        str.append(fmt::format("Task #{} ends after {}s", task_id,
+        str.append(fmt::format("Task #{} ends after {}s ", task_id,
                                absl::ToInt64Seconds(end_time - now)));
       }
       SLURMX_TRACE("{}", str);

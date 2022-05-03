@@ -146,11 +146,10 @@ class TaskScheduler {
                         std::optional<std::string> reason);
 
   // Temporary inconsistency may happen. If 'false' is returned, just ignore it.
-  //  void QueryTaskBriefMetaInPartition(
-  //      uint32_t partition_id,
-  //      const QueryBriefTaskMetaFieldControl& field_control,
-  //      google::protobuf::RepeatedPtrField<SlurmxGrpc::BriefTaskMeta>*
-  //          task_metas);
+  void QueryTaskBriefMetaInPartition(
+      uint32_t partition_id,
+      const QueryBriefTaskMetaFieldControl& field_control,
+      SlurmxGrpc::QueryJobsInPartitionReply* response);
 
   bool QueryXdNodeIdOfRunningTask(uint32_t task_id,
                                   std::list<XdNodeId>* node_ids) {

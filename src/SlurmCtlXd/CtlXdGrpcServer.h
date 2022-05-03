@@ -37,11 +37,6 @@ class SlurmCtlXdServiceImpl final : public SlurmxGrpc::SlurmCtlXd::Service {
   explicit SlurmCtlXdServiceImpl(CtlXdServer *server)
       : m_ctlxd_server_(server) {}
 
-  grpc::Status RegisterSlurmXd(
-      grpc::ServerContext *context,
-      const SlurmxGrpc::SlurmXdRegisterRequest *request,
-      SlurmxGrpc::SlurmXdRegisterResult *response) override;
-
   grpc::Status AllocateInteractiveTask(
       grpc::ServerContext *context,
       const SlurmxGrpc::InteractiveTaskAllocRequest *request,
@@ -66,10 +61,11 @@ class SlurmCtlXdServiceImpl final : public SlurmxGrpc::SlurmCtlXd::Service {
                              const SlurmxGrpc::TerminateTaskRequest *request,
                              SlurmxGrpc::TerminateTaskReply *response) override;
 
-  //  grpc::Status QueryJobsInPartition(
-  //      grpc::ServerContext *context,
-  //      const SlurmxGrpc::QueryJobsInPartitionRequest *request,
-  //      SlurmxGrpc::QueryJobsInPartitionReply *response) override;
+  grpc::Status QueryJobsInPartition(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::QueryJobsInPartitionRequest *request,
+      SlurmxGrpc::QueryJobsInPartitionReply *response) override;
+
   grpc::Status QueryNodeInfo(grpc::ServerContext *context,
                              const SlurmxGrpc::QueryNodeInfoRequest *request,
                              SlurmxGrpc::QueryNodeInfoReply *response) override;
@@ -109,8 +105,8 @@ class CtlXdServer {
   using Mutex = util::mutex;
   using LockGuard = util::AbslMutexLockGuard;
 
-  void XdNodeIsUpCb_(XdNodeId node_id, void *node_data);
-  void XdNodeIsDownCb_(XdNodeId node_id, void *);
+  void XdNodeIsUpCb_(XdNodeId node_id);
+  void XdNodeIsDownCb_(XdNodeId node_id);
 
   const std::string m_listen_address_;
 

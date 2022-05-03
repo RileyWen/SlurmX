@@ -374,22 +374,22 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
   saved_priv.gid = getgid();
   saved_priv.cwd = get_current_dir_name();
 
-  int rc = setegid(instance->pwd_entry.Gid());
-  if (rc == -1) {
-    SLURMX_ERROR("error: setegid. {}\n", strerror(errno));
-    return SlurmxErr::kSystemErr;
-  }
-  rc = seteuid(instance->pwd_entry.Uid());
-  if (rc == -1) {
-    SLURMX_ERROR("error: seteuid. {}\n", strerror(errno));
-    return SlurmxErr::kSystemErr;
-  }
-  const std::string& cwd = instance->task.cwd();
-  rc = chdir(cwd.c_str());
-  if (rc == -1) {
-    SLURMX_ERROR("error: chdir to {}. {}\n", cwd.c_str(), strerror(errno));
-    return SlurmxErr::kSystemErr;
-  }
+  // int rc = setegid(instance->pwd_entry.Gid());
+  // if (rc == -1) {
+  //   SLURMX_ERROR("error: setegid. {}\n", strerror(errno));
+  //   return SlurmxErr::kSystemErr;
+  // }
+  // rc = seteuid(instance->pwd_entry.Uid());
+  // if (rc == -1) {
+  //   SLURMX_ERROR("error: seteuid. {}\n", strerror(errno));
+  //   return SlurmxErr::kSystemErr;
+  // }
+  // const std::string& cwd = instance->task.cwd();
+  // rc = chdir(cwd.c_str());
+  // if (rc == -1) {
+  //   SLURMX_ERROR("error: chdir to {}. {}\n", cwd.c_str(), strerror(errno));
+  //   return SlurmxErr::kSystemErr;
+  // }
 
   pid_t child_pid = fork();
   if (child_pid > 0) {  // Parent proc
@@ -398,8 +398,8 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     bool ok;
     SlurmxErr err;
 
-    setegid(saved_priv.gid);
-    seteuid(saved_priv.uid);
+    // setegid(saved_priv.gid);
+    // seteuid(saved_priv.uid);
     chdir(saved_priv.cwd.c_str());
 
     FileOutputStream ostream(fd);
@@ -474,6 +474,11 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     }
     return err;
   } else {  // Child proc
+    // SLURMX_TRACE("Set reuid to {}, regid to {}", instance->pwd_entry.Uid(),
+    //              instance->pwd_entry.Gid());
+    // setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Gid());
+    // setregid(instance->pwd_entry.Uid(), instance->pwd_entry.Gid());
+
     close(socket_pair[0]);
     int fd = socket_pair[1];
 
@@ -483,8 +488,6 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!msg.ok()) std::abort();
 
-    setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Gid());
-    setregid(instance->pwd_entry.Uid(), instance->pwd_entry.Gid());
     // Set pgid to the pid of task root process.
     setpgid(0, 0);
 
@@ -592,8 +595,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
     // If this is a batch task, run it now.
     if (instance->task.type() == SlurmxGrpc::Batch) {
-      instance->batch_meta.parsed_sh_script_path =
-          fmt::format("/tmp/slurmx-{}.sh", instance->task.task_id());
+      instance->batch_meta.parsed_sh_script_path = fmt::format(
+          "/tmp/slurmxd/scripts/slurmx-{}.sh", instance->task.task_id());
       auto& sh_path = instance->batch_meta.parsed_sh_script_path;
 
       FILE* fptr = fopen(sh_path.c_str(), "w");
@@ -617,10 +620,12 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
             sh_path, std::list<std::string>());
 
         process->batch_meta.parsed_output_file_pattern =
-            fmt::format("{}SlurmX-{}-{}-{}.out",
+            fmt::format("{}/{}-{}-{}.out", instance->task.cwd(),
                         instance->task.batch_meta().output_file_pattern(),
-                        instance->task.task_id(),
                         g_ctlxd_client->GetNodeId().node_index, i);
+        boost::replace_all(process->batch_meta.parsed_output_file_pattern, "%A",
+                           std::to_string(instance->task.task_id()));
+
         auto* file_logger = new slurmx::FileLogger(
             fmt::format("{}-{}", instance->task.task_id(), i),
             process->batch_meta.parsed_output_file_pattern);
