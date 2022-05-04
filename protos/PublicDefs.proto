@@ -115,8 +115,12 @@ message PartitionInfo {
   uint32 alive_nodes = 5;
   uint32 total_cpus = 6;
   uint32 avail_cpus = 7;
-  uint32 total_mem = 8;
-  uint32 avail_mem = 9;
+  uint32 alloc_cpus = 8;
+  uint32 free_cpus = 9;
+  uint32 total_mem = 10;
+  uint32 avail_mem = 11;
+  uint32 alloc_mem = 12;
+  uint32 free_mem = 13;
 }
 
 message NodeInfo {
@@ -129,9 +133,10 @@ message NodeInfo {
   NodeState state = 2;
   uint32 cpus = 3;
   uint32 alloc_cpus = 4;
-  uint32 real_memory = 5;
-  uint32 alloc_mem = 6;
-  uint32 free_mem = 7;
-  string partition_name = 8;
-  uint32 running_task_num = 9;
+  uint32 free_cpus = 5;
+  uint32 real_memory = 6;
+  uint32 alloc_mem = 7;
+  uint32 free_mem = 8;
+  string partition_name = 9;
+  uint32 running_task_num = 10;
 }

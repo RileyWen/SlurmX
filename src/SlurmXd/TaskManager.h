@@ -10,6 +10,7 @@
 #include <spdlog/spdlog.h>
 #include <sys/eventfd.h>
 #include <sys/wait.h>
+#include <grp.h>
 
 #include <any>
 #include <atomic>
