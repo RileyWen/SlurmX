@@ -479,8 +479,8 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
   } else {  // Child proc
     // SLURMX_TRACE("Set reuid to {}, regid to {}", instance->pwd_entry.Uid(),
     //              instance->pwd_entry.Gid());
-    // setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Gid());
-    // setregid(instance->pwd_entry.Uid(), instance->pwd_entry.Gid());
+    // setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid());
+    // setregid(instance->pwd_entry.Gid(), instance->pwd_entry.Gid());
 
     close(socket_pair[0]);
     int fd = socket_pair[1];
