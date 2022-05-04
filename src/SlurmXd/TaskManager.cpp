@@ -379,6 +379,8 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
   //   SLURMX_ERROR("error: setegid. {}\n", strerror(errno));
   //   return SlurmxErr::kSystemErr;
   // }
+//  __gid_t gid_a[1]={instance->pwd_entry.Gid()};
+//  setgroups(1, gid_a);
   // rc = seteuid(instance->pwd_entry.Uid());
   // if (rc == -1) {
   //   SLURMX_ERROR("error: seteuid. {}\n", strerror(errno));
@@ -400,6 +402,7 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
 
     // setegid(saved_priv.gid);
     // seteuid(saved_priv.uid);
+//    setgroups(0, nullptr);
     chdir(saved_priv.cwd.c_str());
 
     FileOutputStream ostream(fd);
