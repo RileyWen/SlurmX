@@ -376,20 +376,20 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
 
   int rc = setegid(instance->pwd_entry.Gid());
   if (rc == -1) {
-    SLURMX_ERROR("error: setegid. {}\n", strerror(errno));
+    SLURMX_ERROR("error: setegid. {}", strerror(errno));
     return SlurmxErr::kSystemErr;
   }
   __gid_t gid_a[1] = {instance->pwd_entry.Gid()};
   setgroups(1, gid_a);
   rc = seteuid(instance->pwd_entry.Uid());
   if (rc == -1) {
-    SLURMX_ERROR("error: seteuid. {}\n", strerror(errno));
+    SLURMX_ERROR("error: seteuid. {}", strerror(errno));
     return SlurmxErr::kSystemErr;
   }
   const std::string& cwd = instance->task.cwd();
   rc = chdir(cwd.c_str());
   if (rc == -1) {
-    SLURMX_ERROR("error: chdir to {}. {}\n", cwd.c_str(), strerror(errno));
+    SLURMX_ERROR("error: chdir to {}. {}", cwd.c_str(), strerror(errno));
     return SlurmxErr::kSystemErr;
   }
 
