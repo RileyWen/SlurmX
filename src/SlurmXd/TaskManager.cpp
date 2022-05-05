@@ -374,24 +374,24 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
   saved_priv.gid = getgid();
   saved_priv.cwd = get_current_dir_name();
 
-  // int rc = setegid(instance->pwd_entry.Gid());
-  // if (rc == -1) {
-  //   SLURMX_ERROR("error: setegid. {}\n", strerror(errno));
-  //   return SlurmxErr::kSystemErr;
-  // }
-//  __gid_t gid_a[1]={instance->pwd_entry.Gid()};
-//  setgroups(1, gid_a);
-  // rc = seteuid(instance->pwd_entry.Uid());
-  // if (rc == -1) {
-  //   SLURMX_ERROR("error: seteuid. {}\n", strerror(errno));
-  //   return SlurmxErr::kSystemErr;
-  // }
-  // const std::string& cwd = instance->task.cwd();
-  // rc = chdir(cwd.c_str());
-  // if (rc == -1) {
-  //   SLURMX_ERROR("error: chdir to {}. {}\n", cwd.c_str(), strerror(errno));
-  //   return SlurmxErr::kSystemErr;
-  // }
+  int rc = setegid(instance->pwd_entry.Gid());
+  if (rc == -1) {
+    SLURMX_ERROR("error: setegid. {}\n", strerror(errno));
+    return SlurmxErr::kSystemErr;
+  }
+  __gid_t gid_a[1] = {instance->pwd_entry.Gid()};
+  setgroups(1, gid_a);
+  rc = seteuid(instance->pwd_entry.Uid());
+  if (rc == -1) {
+    SLURMX_ERROR("error: seteuid. {}\n", strerror(errno));
+    return SlurmxErr::kSystemErr;
+  }
+  const std::string& cwd = instance->task.cwd();
+  rc = chdir(cwd.c_str());
+  if (rc == -1) {
+    SLURMX_ERROR("error: chdir to {}. {}\n", cwd.c_str(), strerror(errno));
+    return SlurmxErr::kSystemErr;
+  }
 
   pid_t child_pid = fork();
   if (child_pid > 0) {  // Parent proc
@@ -400,9 +400,9 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     bool ok;
     SlurmxErr err;
 
-    // setegid(saved_priv.gid);
-    // seteuid(saved_priv.uid);
-//    setgroups(0, nullptr);
+    setegid(saved_priv.gid);
+    seteuid(saved_priv.uid);
+    setgroups(0, nullptr);
     chdir(saved_priv.cwd.c_str());
 
     FileOutputStream ostream(fd);
@@ -479,8 +479,8 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
   } else {  // Child proc
     // SLURMX_TRACE("Set reuid to {}, regid to {}", instance->pwd_entry.Uid(),
     //              instance->pwd_entry.Gid());
-    // setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid());
-    // setregid(instance->pwd_entry.Gid(), instance->pwd_entry.Gid());
+    setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid());
+    setregid(instance->pwd_entry.Gid(), instance->pwd_entry.Gid());
 
     close(socket_pair[0]);
     int fd = socket_pair[1];

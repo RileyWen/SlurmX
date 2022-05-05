@@ -331,8 +331,7 @@ SlurmxGrpc::QueryNodeInfoReply* XdNodeMetaContainerSimpleImpl::QueryNodeInfo(
   node_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
   node_info->set_free_mem(alloc_res_avail.memory_bytes);
   node_info->set_partition_name(node_meta.static_meta.partition_name);
-  node_info->set_running_task_num(
-      node_meta.running_task_resource_map.size());
+  node_info->set_running_task_num(node_meta.running_task_resource_map.size());
   if (node_meta.alive)
     node_info->set_state(SlurmxGrpc::NodeInfo_NodeState_IDLE);
   else
@@ -350,10 +349,15 @@ XdNodeMetaContainerSimpleImpl::QueryAllPartitionInfo() {
 
   for (auto&& [part_name, part_meta] : partition_metas_map_) {
     auto* part_info = list->Add();
-    auto& alloc_res_total = part_meta.partition_global_meta.m_resource_total_inc_dead_.allocatable_resource;
-    auto& alloc_res_avail = part_meta.partition_global_meta.m_resource_total_.allocatable_resource;
-    auto& alloc_res_in_use = part_meta.partition_global_meta.m_resource_in_use_.allocatable_resource;
-    auto& alloc_res_free = part_meta.partition_global_meta.m_resource_avail_.allocatable_resource;
+    auto& alloc_res_total =
+        part_meta.partition_global_meta.m_resource_total_inc_dead_
+            .allocatable_resource;
+    auto& alloc_res_avail =
+        part_meta.partition_global_meta.m_resource_total_.allocatable_resource;
+    auto& alloc_res_in_use =
+        part_meta.partition_global_meta.m_resource_in_use_.allocatable_resource;
+    auto& alloc_res_free =
+        part_meta.partition_global_meta.m_resource_avail_.allocatable_resource;
     part_info->set_name(part_meta.partition_global_meta.name);
     part_info->set_total_nodes(part_meta.partition_global_meta.node_cnt);
     part_info->set_alive_nodes(part_meta.partition_global_meta.alive_node_cnt);
@@ -391,10 +395,14 @@ XdNodeMetaContainerSimpleImpl::QueryPartitionInfo(
   auto& part_meta = partition_metas_map_.at(it->second);
 
   auto* part_info = list->Add();
-  auto& alloc_res_total = part_meta.partition_global_meta.m_resource_total_inc_dead_.allocatable_resource;
-  auto& alloc_res_avail = part_meta.partition_global_meta.m_resource_total_.allocatable_resource;
-  auto& alloc_res_in_use = part_meta.partition_global_meta.m_resource_in_use_.allocatable_resource;
-  auto& alloc_res_free = part_meta.partition_global_meta.m_resource_avail_.allocatable_resource;
+  auto& alloc_res_total = part_meta.partition_global_meta
+                              .m_resource_total_inc_dead_.allocatable_resource;
+  auto& alloc_res_avail =
+      part_meta.partition_global_meta.m_resource_total_.allocatable_resource;
+  auto& alloc_res_in_use =
+      part_meta.partition_global_meta.m_resource_in_use_.allocatable_resource;
+  auto& alloc_res_free =
+      part_meta.partition_global_meta.m_resource_avail_.allocatable_resource;
   part_info->set_name(part_meta.partition_global_meta.name);
   part_info->set_total_nodes(part_meta.partition_global_meta.node_cnt);
   part_info->set_alive_nodes(part_meta.partition_global_meta.alive_node_cnt);

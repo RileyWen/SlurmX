@@ -39,7 +39,7 @@ bool ParseNodeList(const std::string &node_str,
         size_t len = loc_index[0].length();
         for (size_t j = std::stoi(loc_index[0]); j <= std::stoi(loc_index[1]);
              j++) {
-          std::string s_num = fmt::format("{:0>{}}",std::to_string(j),len);
+          std::string s_num = fmt::format("{:0>{}}", std::to_string(j), len);
           if (!ParseNodeList(head_str, nodelist,
                              fmt::format("{}{}{}", s_num, end_, end_str))) {
             nodelist->push_back(
