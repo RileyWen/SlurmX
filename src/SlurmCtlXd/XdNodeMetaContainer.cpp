@@ -281,7 +281,7 @@ XdNodeMetaContainerSimpleImpl::QueryAllNodeInfo() {
       node_info->set_cpus(alloc_res_total.cpu_count);
       node_info->set_alloc_cpus(alloc_res_in_use.cpu_count);
       node_info->set_free_cpus(alloc_res_avail.cpu_count);
-      node_info->set_real_memory(alloc_res_total.memory_bytes);
+      node_info->set_real_mem(alloc_res_total.memory_bytes);
       node_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
       node_info->set_free_mem(alloc_res_avail.memory_bytes);
       node_info->set_partition_name(node_meta.static_meta.partition_name);
@@ -327,7 +327,7 @@ SlurmxGrpc::QueryNodeInfoReply* XdNodeMetaContainerSimpleImpl::QueryNodeInfo(
   node_info->set_cpus(alloc_res_total.cpu_count);
   node_info->set_alloc_cpus(alloc_res_in_use.cpu_count);
   node_info->set_free_cpus(alloc_res_avail.cpu_count);
-  node_info->set_real_memory(alloc_res_total.memory_bytes);
+  node_info->set_real_mem(alloc_res_total.memory_bytes);
   node_info->set_alloc_mem(alloc_res_in_use.memory_bytes);
   node_info->set_free_mem(alloc_res_avail.memory_bytes);
   node_info->set_partition_name(node_meta.static_meta.partition_name);
