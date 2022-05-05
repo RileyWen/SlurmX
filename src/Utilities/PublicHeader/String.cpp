@@ -29,16 +29,21 @@ bool ParseNodeList(const std::string &node_str,
     size_t len = node_num.size();
     for (size_t i = 0; i < len; i++) {
       if (std::regex_match(node_num[i], std::regex(R"(^\d+$)"))) {
-        if (!ParseNodeList(head_str, nodelist, fmt::format("{}{}{}",node_num[i] , end_ , end_str)))
-          nodelist->push_back(fmt::format("{}{}{}{}",head_str , node_num[i] , end_ , end_str));
+        if (!ParseNodeList(head_str, nodelist,
+                           fmt::format("{}{}{}", node_num[i], end_, end_str)))
+          nodelist->push_back(
+              fmt::format("{}{}{}{}", head_str, node_num[i], end_, end_str));
       } else if (std::regex_match(node_num[i], std::regex(R"(^\d+-\d+$)"))) {
         std::vector<std::string> loc_index;
         boost::split(loc_index, node_num[i], boost::is_any_of("-"));
+        size_t len = loc_index[0].length();
         for (size_t j = std::stoi(loc_index[0]); j <= std::stoi(loc_index[1]);
              j++) {
+          std::string s_num = fmt::format("{:0>{}}", std::to_string(j), len);
           if (!ParseNodeList(head_str, nodelist,
-                             fmt::format("{}{}{}",j , end_ , end_str))) {
-            nodelist->push_back(fmt::format("{}{}{}{}",head_str , j , end_ , end_str));
+                             fmt::format("{}{}{}", s_num, end_, end_str))) {
+            nodelist->push_back(
+                fmt::format("{}{}{}{}", head_str, s_num, end_, end_str));
           }
         }
       } else {
@@ -63,7 +68,7 @@ bool ParseHostList(const std::string &host_str,
 }
 
 std::string HostNameListToStr(const std::list<std::string> &hostlist) {
-  std::map<std::string, std::list<int>> host_map;
+  std::map<std::string, std::list<std::string>> host_map;
   std::string host_name_str;
 
   if (hostlist.empty()) return host_name_str;
@@ -77,10 +82,10 @@ std::string HostNameListToStr(const std::list<std::string> &hostlist) {
                   head_str = host.substr(0, match.position(0));
       auto iter = host_map.find(head_str);
       if (iter == host_map.end()) {
-        std::list<int> list;
+        std::list<std::string> list;
         host_map[head_str] = list;
       }
-      host_map[head_str].push_back(stoi(num_str));
+      host_map[head_str].push_back(num_str);
     } else {
       host_name_str += host;
       host_name_str += ",";
@@ -90,7 +95,7 @@ std::string HostNameListToStr(const std::list<std::string> &hostlist) {
   for (auto &&iter : host_map) {
     if (iter.second.size() == 1) {
       host_name_str += iter.first;
-      host_name_str += std::to_string(iter.second.front());
+      host_name_str += iter.second.front();
       host_name_str += ",";
       continue;
     }
@@ -98,32 +103,37 @@ std::string HostNameListToStr(const std::list<std::string> &hostlist) {
     host_name_str += "[";
     iter.second.sort();
     iter.second.unique();
-    int first = -1, last = -1;
-    for (const auto &num : iter.second) {
+    int first = -1, last = -1, num;
+    std::string first_str, last_str;
+    for (const auto &num_str : iter.second) {
+      num = stoi(num_str);
       if (first < 0) {  // init the head
-        last = first = num;
+        first = last = num;
+        first_str = last_str = num_str;
         continue;
       }
       if (num == last + 1) {  // update the tail
         last++;
+        last_str = num_str;
       } else {
         if (first == last) {
-          host_name_str += std::to_string(first);
+          host_name_str += first_str;
         } else {
-          host_name_str += std::to_string(first);
+          host_name_str += first_str;
           host_name_str += "-";
-          host_name_str += std::to_string(last);
+          host_name_str += last_str;
         }
         host_name_str += ",";
         first = last = num;
+        first_str = last_str = num_str;
       }
     }
     if (first == last) {
-      host_name_str += std::to_string(first);
+      host_name_str += first_str;
     } else {
-      host_name_str += std::to_string(first);
+      host_name_str += first_str;
       host_name_str += "-";
-      host_name_str += std::to_string(last);
+      host_name_str += last_str;
     }
     host_name_str += "],";
   }

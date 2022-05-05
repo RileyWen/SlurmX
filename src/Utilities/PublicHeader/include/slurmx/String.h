@@ -1,11 +1,12 @@
 #pragma once
 
-#include <string>
+#include <spdlog/fmt/fmt.h>
+
+#include <boost/algorithm/string.hpp>
 #include <list>
 #include <regex>
-#include <boost/algorithm/string.hpp>
+#include <string>
 #include <vector>
-#include <spdlog/fmt/fmt.h>
 
 namespace util {
 
@@ -16,4 +17,4 @@ bool ParseHostList(const std::string &host_str,
 
 std::string HostNameListToStr(const std::list<std::string> &hostlist);
 
-}  // namespace slurmx
+}  // namespace util

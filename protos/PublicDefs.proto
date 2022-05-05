@@ -110,6 +110,17 @@ message PartitionInfo {
   string hostlist = 1;
   PartitionState state = 2;
   string name = 3;
+
+  uint32 total_nodes = 4;
+  uint32 alive_nodes = 5;
+  uint32 total_cpus = 6;
+  uint32 avail_cpus = 7;
+  uint32 alloc_cpus = 8;
+  uint32 free_cpus = 9;
+  uint64 total_mem = 10;
+  uint64 avail_mem = 11;
+  uint64 alloc_mem = 12;
+  uint64 free_mem = 13;
 }
 
 message NodeInfo {
@@ -120,4 +131,12 @@ message NodeInfo {
 
   string hostname = 1;
   NodeState state = 2;
+  uint32 cpus = 3;
+  uint32 alloc_cpus = 4;
+  uint32 free_cpus = 5;
+  uint64 real_mem = 6;
+  uint64 alloc_mem = 7;
+  uint64 free_mem = 8;
+  string partition_name = 9;
+  uint32 running_task_num = 10;
 }
