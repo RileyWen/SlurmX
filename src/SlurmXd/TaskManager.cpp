@@ -9,6 +9,7 @@
 
 #include "ResourceAllocators.h"
 #include "protos/XdSubprocess.pb.h"
+#include "slurmx/FdFunctions.h"
 #include "slurmx/FileLogger.h"
 
 namespace Xd {
@@ -518,6 +519,11 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
 
     close(fd);
 
+    // If these file descriptors are not closed, a program like mpirun may
+    // keep waiting for the input from stdin or other fds and will never end.
+    close(0);  // close stdin
+    util::CloseFdFrom(3);
+
     execv(process->GetExecPath().c_str(),
           const_cast<char* const*>(argv.data()));
 
@@ -618,36 +624,33 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
 
       SlurmxErr err = SlurmxErr::kOk;
-      for (int i = 0; i < instance->task.task_per_node(); ++i) {
-        auto process = std::make_unique<ProcessInstance>(
-            sh_path, std::list<std::string>());
+      auto process =
+          std::make_unique<ProcessInstance>(sh_path, std::list<std::string>());
 
-        process->batch_meta.parsed_output_file_pattern =
-            fmt::format("{}/{}-{}-{}.out", instance->task.cwd(),
-                        instance->task.batch_meta().output_file_pattern(),
-                        g_ctlxd_client->GetNodeId().node_index, i);
-        boost::replace_all(process->batch_meta.parsed_output_file_pattern, "%A",
-                           std::to_string(instance->task.task_id()));
+      process->batch_meta.parsed_output_file_pattern =
+          fmt::format("{}/{}-{}.out", instance->task.cwd(),
+                      instance->task.batch_meta().output_file_pattern(),
+                      g_ctlxd_client->GetNodeId().node_index);
+      boost::replace_all(process->batch_meta.parsed_output_file_pattern, "%A",
+                         std::to_string(instance->task.task_id()));
 
-        auto* file_logger = new slurmx::FileLogger(
-            fmt::format("{}-{}", instance->task.task_id(), i),
-            process->batch_meta.parsed_output_file_pattern);
+      auto* file_logger = new slurmx::FileLogger(
+          fmt::format("{}", instance->task.task_id()),
+          process->batch_meta.parsed_output_file_pattern);
 
-        auto clean_cb = [](void* data) {
-          delete reinterpret_cast<slurmx::FileLogger*>(data);
-        };
+      auto clean_cb = [](void* data) {
+        delete reinterpret_cast<slurmx::FileLogger*>(data);
+      };
 
-        auto output_cb = [](std::string&& buf, void* data) {
-          auto* file_logger = reinterpret_cast<slurmx::FileLogger*>(data);
-          file_logger->Output(buf);
-        };
+      auto output_cb = [](std::string&& buf, void* data) {
+        auto* file_logger = reinterpret_cast<slurmx::FileLogger*>(data);
+        file_logger->Output(buf);
+      };
 
-        process->SetUserDataAndCleanCb(file_logger, std::move(clean_cb));
-        process->SetOutputCb(std::move(output_cb));
+      process->SetUserDataAndCleanCb(file_logger, std::move(clean_cb));
+      process->SetOutputCb(std::move(output_cb));
 
-        err = this_->SpawnProcessInInstance_(instance, std::move(process));
-        if (err != SlurmxErr::kOk) break;
-      }
+      err = this_->SpawnProcessInInstance_(instance, std::move(process));
 
       if (err != SlurmxErr::kOk) {
         this_->EvActivateTaskStatusChange_(

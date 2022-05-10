@@ -307,11 +307,13 @@ void TaskScheduler::TaskStatusChange(uint32_t task_id, uint32_t node_index,
                                          task_id);
   m_node_to_tasks_map_[node_index].erase(task_id);
 
-  if (task->end_node_set.size() == task->node_num) {
+  // Todo: Rewrite the code.
+  if (task->end_node_set.size() == 1) {
     uint64_t timestamp = ToUnixSeconds(absl::Now());
     g_db_client->UpdateJobRecordFields(
         task->job_db_inx, {"time_end", "state"},
         {std::to_string(timestamp), std::to_string(task->status)});
+    task->end_node_set.clear();
 
     LockGuard ended_guard(m_ended_task_map_mtx_);
     m_ended_task_map_.emplace(task_id, std::move(iter->second));
