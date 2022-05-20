@@ -1,5 +1,11 @@
 #include "XdServer.h"
 
+#include <arpa/inet.h>
+#include <sys/stat.h>
+#include <yaml-cpp/yaml.h>
+
+#include <filesystem>
+#include <fstream>
 #include <utility>
 
 #include "CtlXdClient.h"
@@ -339,6 +345,100 @@ grpc::Status SlurmXdServiceImpl::TerminateTask(
   g_task_mgr->TerminateTaskAsync(request->task_id());
 
   return Status::OK;
+}
+
+grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPort(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryTaskIdFromPortRequest *request,
+    SlurmxGrpc::QueryTaskIdFromPortReply *response) {
+  std::string ip_hex = fmt::format("{:0>4X}", request->port());
+
+  ino_t inode;
+
+  // find inode
+  // 1._find_match_in_tcp_file
+  std::string tcp_path{"/proc/net/tcp"};
+  std::ifstream tcp_in(tcp_path, std::ios::in);
+  std::string tcp_line;
+  bool is_find_inode = false;
+  if (tcp_in) {
+    while (getline(tcp_in, tcp_line)) {
+      boost::trim(tcp_line);
+      std::vector<std::string> tcp_line_vec;
+      boost::split(tcp_line_vec, tcp_line, boost::is_any_of(" :"),
+                   boost::token_compress_on);
+      /* skip the header */
+      if (tcp_line_vec.size() <= 12) continue;
+      if (ip_hex == tcp_line_vec[2]) {
+        is_find_inode = true;
+        inode = std::stoul(tcp_line_vec[13]);
+        break;
+      }
+    }
+    if (!is_find_inode) {
+      response->set_ok(false);
+      return Status::CANCELLED;
+    }
+  } else  // can't find file
+  {
+    SLURMX_ERROR("Can't open file: {}", tcp_path);
+  }
+
+  // 2.find_pid_by_inode
+  pid_t pid_i = -1;
+  std::filesystem::path proc_path{"/proc"};
+  for (auto const &dir_entry : std::filesystem::directory_iterator(proc_path)) {
+    if (isdigit(dir_entry.path().filename().string()[0])) {
+      std::string pid_s = dir_entry.path().filename().string();
+      std::string proc_fd_path =
+          fmt::format("{}/{}/fd", proc_path.string(), pid_s);
+      if (!std::filesystem::exists(proc_fd_path)) {
+        continue;
+      }
+      for (auto const &fd_dir_entry :
+           std::filesystem::directory_iterator(proc_fd_path)) {
+        struct stat statbuf {};
+        std::string fdpath = fmt::format(
+            "{}/{}", proc_fd_path, fd_dir_entry.path().filename().string());
+        const char *fdchar = fdpath.c_str();
+        if (stat(fdchar, &statbuf) != 0) {
+          continue;
+        }
+        if (statbuf.st_ino == inode) {
+          pid_i = std::stoi(pid_s);
+          break;
+        }
+      }
+    }
+    if (pid_i != -1) {
+      break;
+    }
+  }
+  if (pid_i == -1) {
+    response->set_ok(false);
+    return Status::CANCELLED;
+  }
+
+  // 3.slurm_pid2jobid
+  do {
+    uint32_t task_id = g_task_mgr->QueryTaskIdFromPidAsync(pid_i);
+    if (task_id) {
+      response->set_ok(true);
+      response->set_task_id(task_id);
+      return Status::OK;
+    } else {
+      std::string proc_dir = fmt::format("/proc/{}/status", pid_i);
+      YAML::Node proc_details = YAML::LoadFile(proc_dir);
+      if (proc_details["PPid"]) {
+        pid_i = std::stoi(proc_details["PPid"].as<std::string>());
+      } else {
+        pid_i = 1;
+      }
+    }
+  } while (pid_i > 1);
+
+  response->set_ok(false);
+  return Status::CANCELLED;
 }
 
 XdServer::XdServer(std::string listen_address)

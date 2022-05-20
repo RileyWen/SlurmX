@@ -6,11 +6,11 @@
 #include <event2/event.h>
 #include <event2/util.h>
 #include <evrpc.h>
+#include <grp.h>
 #include <grpc++/grpc++.h>
 #include <spdlog/spdlog.h>
 #include <sys/eventfd.h>
 #include <sys/wait.h>
-#include <grp.h>
 
 #include <any>
 #include <atomic>
@@ -165,6 +165,8 @@ class TaskManager {
       std::function<void(std::string&&, void*)> output_cb,
       std::function<void(bool, int, void*)> finish_cb);
 
+  uint32_t QueryTaskIdFromPidAsync(pid_t pid);
+
   void TerminateTaskAsync(uint32_t task_id);
 
   // Wait internal libevent base loop to exit...
@@ -203,6 +205,12 @@ class TaskManager {
     std::list<std::string> arguments;
     std::function<void(std::string&&, void*)> output_cb;
     std::function<void(bool, int, void*)> finish_cb;
+  };
+
+  struct EvQueueGrpcQueryTaskIdFromPid {
+    // Todo: check the start value of taskid
+    std::promise<uint32_t /*task_id*/> taskid_promise;
+    pid_t pid;
   };
 
   struct EvQueueTaskTerminate {
@@ -326,6 +334,9 @@ class TaskManager {
   static void EvGrpcSpawnInteractiveTaskCb_(evutil_socket_t efd, short events,
                                             void* user_data);
 
+  static void EvGrpcQueryTaskIdFromPidCb_(evutil_socket_t efd, short events,
+                                          void* user_data);
+
   static void EvSubprocessReadCb_(struct bufferevent* bev, void* process);
 
   static void EvTaskStatusChangeCb_(evutil_socket_t efd, short events,
@@ -359,6 +370,10 @@ class TaskManager {
   //  from m_grpc_reqs_. We use this to keep thread-safety.
   struct event* m_ev_grpc_interactive_task_;
   ConcurrentQueue<EvQueueGrpcInteractiveTask> m_grpc_interactive_task_queue_;
+
+  //
+  struct event* m_ev_query_taskId_from_pid_;
+  ConcurrentQueue<EvQueueGrpcQueryTaskIdFromPid> m_query_taskId_from_pid_queue_;
 
   // A custom event that handles the ExecuteTask RPC.
   struct event* m_ev_grpc_execute_task_;
