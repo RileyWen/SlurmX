@@ -167,6 +167,15 @@ message TerminateTaskReply {
   string reason = 2;
 }
 
+message QueryTaskIdFromPortRequest{
+  uint32 port = 1;
+}
+
+message QueryTaskIdFromPortReply{
+  bool ok = 1;
+  uint32 task_id = 2;
+}
+
 message QueryJobsInPartitionRequest {
   string partition = 1;
 }
@@ -240,6 +249,8 @@ service SlurmXd {
   If the task is a batch task, just kill it.
   */
   rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
+
+  rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
 
 
   /* ----------------------------------- Called from SrunX --------------------------------------------------------- */

@@ -52,6 +52,10 @@ class SlurmXdServiceImpl : public SlurmXd::Service {
   grpc::Status TerminateTask(grpc::ServerContext *context,
                              const SlurmxGrpc::TerminateTaskRequest *request,
                              SlurmxGrpc::TerminateTaskReply *response) override;
+  grpc::Status QueryTaskIdFromPort(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::QueryTaskIdFromPortRequest *request,
+      SlurmxGrpc::QueryTaskIdFromPortReply *response) override;
 };
 
 class XdServer {

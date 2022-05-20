@@ -1,0 +1,22 @@
+SlurmCtlXdListenAddr: 0.0.0.0
+SlurmCtlXdListenPort: 10011
+SlurmCtlXdDebugLevel: trace
+SlurmCtlXdLogFile: /tmp/slurmctlxd/slurmctlxd.log
+SlurmCtlXdForeground: true
+
+DbUser: root
+DbPassword: "123456"
+
+SlurmXdDebugLevel: trace
+SlurmXdLogFile: /tmp/slurmxd/slurmxd.log
+SlurmXdForeground: true
+
+Nodes:
+  - name: "cn[15-18]"
+    cpu: 2
+    memory: 2G
+
+Partitions:
+  - name: CPU
+    nodes: "cn[15-18]"
+    AllowUsers: root

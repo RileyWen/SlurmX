@@ -119,3 +119,19 @@ protobuf_generate(
 )
 
 target_link_libraries(proto absl::base absl::synchronization)
+
+# install script
+install(TARGETS slurmctlxd slurmxd
+        EXPORT ${PROJECT_NAME}Targets
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib
+        RUNTIME DESTINATION bin
+        PUBLIC_HEADER DESTINATION include)
+
+set(bindir ${CMAKE_INSTALL_PREFIX}/bin)
+configure_file(./etc/slurmctlxd.service.in ${PROJECT_BINARY_DIR}/etc/slurmctlxd.service)
+configure_file(./etc/slurmxd.service.in ${PROJECT_BINARY_DIR}/etc/slurmxd.service)
+
+install(FILES ${PROJECT_BINARY_DIR}/etc/slurmctlxd.service ${PROJECT_BINARY_DIR}/etc/slurmxd.service DESTINATION /etc/systemd/system/)
+install(FILES ./etc/config.yaml.example DESTINATION /etc/slurmx/)
+install(FILES README.md DESTINATION share/doc/slurmx/)
