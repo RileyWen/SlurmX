@@ -165,7 +165,7 @@ class TaskManager {
       std::function<void(std::string&&, void*)> output_cb,
       std::function<void(bool, int, void*)> finish_cb);
 
-  uint32_t QueryTaskIdFromPidAsync(pid_t pid);
+  std::optional<uint32_t> QueryTaskIdFromPidAsync(pid_t pid);
 
   void TerminateTaskAsync(uint32_t task_id);
 
@@ -207,9 +207,9 @@ class TaskManager {
     std::function<void(bool, int, void*)> finish_cb;
   };
 
-  struct EvQueueGrpcQueryTaskIdFromPid {
-    // Todo: check the start value of taskid
-    std::promise<uint32_t /*task_id*/> taskid_promise;
+  struct EvQueueQueryTaskIdFromPid {
+    // Todo: check the start value of task id
+    std::promise<std::optional<uint32_t> /*task_id*/> task_id_prom;
     pid_t pid;
   };
 
@@ -372,8 +372,8 @@ class TaskManager {
   ConcurrentQueue<EvQueueGrpcInteractiveTask> m_grpc_interactive_task_queue_;
 
   //
-  struct event* m_ev_query_taskId_from_pid_;
-  ConcurrentQueue<EvQueueGrpcQueryTaskIdFromPid> m_query_taskId_from_pid_queue_;
+  struct event* m_ev_query_task_id_from_pid_;
+  ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
 
   // A custom event that handles the ExecuteTask RPC.
   struct event* m_ev_grpc_execute_task_;
