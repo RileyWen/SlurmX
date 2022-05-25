@@ -18,7 +18,7 @@ TaskManager::TaskManager()
       m_ev_sigchld_(nullptr),
       m_ev_base_(nullptr),
       m_ev_grpc_interactive_task_(nullptr),
-      m_ev_query_taskId_from_pid_(nullptr),
+      m_ev_query_task_id_from_pid_(nullptr),
       m_ev_exit_event_(nullptr),
       m_ev_task_status_change_(nullptr),
       m_is_ending_now_(false) {
@@ -45,7 +45,7 @@ TaskManager::TaskManager()
   {  // SIGINT
     m_ev_sigint_ = evsignal_new(m_ev_base_, SIGINT, EvSigintCb_, this);
     if (!m_ev_sigint_) {
-      SLURMX_ERROR("Failed to create the SIGCHLD event!");
+      SLURMX_ERROR("Failed to create the SIGINT event!");
       std::terminate();
     }
 
@@ -59,26 +59,27 @@ TaskManager::TaskManager()
         event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
                   EvGrpcSpawnInteractiveTaskCb_, this);
     if (!m_ev_grpc_interactive_task_) {
-      SLURMX_ERROR("Failed to create the grpc event!");
+      SLURMX_ERROR("Failed to create the SpawnInteractiveTask grpc event!");
       std::terminate();
     }
 
     if (event_add(m_ev_grpc_interactive_task_, nullptr) < 0) {
-      SLURMX_ERROR("Could not add the grpc event to base!");
+      SLURMX_ERROR(
+          "Could not add the SpawnInteractiveTask grpc event to base!");
       std::terminate();
     }
   }
   {  // gRPC: QueryTaskIdFromPid
-    m_ev_query_taskId_from_pid_ =
+    m_ev_query_task_id_from_pid_ =
         event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
                   EvGrpcQueryTaskIdFromPidCb_, this);
-    if (!m_ev_query_taskId_from_pid_) {
-      SLURMX_ERROR("Failed to create the grpc event!");
+    if (!m_ev_query_task_id_from_pid_) {
+      SLURMX_ERROR("Failed to create the QueryTaskIdFromPid grpc event!");
       std::terminate();
     }
 
-    if (event_add(m_ev_query_taskId_from_pid_, nullptr) < 0) {
-      SLURMX_ERROR("Could not add the grpc event to base!");
+    if (event_add(m_ev_query_task_id_from_pid_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the QueryTaskIdFromPid grpc event to base!");
       std::terminate();
     }
   }
@@ -148,7 +149,7 @@ TaskManager::~TaskManager() {
   if (m_ev_sigint_) event_free(m_ev_sigint_);
 
   if (m_ev_grpc_interactive_task_) event_free(m_ev_grpc_interactive_task_);
-  if (m_ev_query_taskId_from_pid_) event_free(m_ev_query_taskId_from_pid_);
+  if (m_ev_query_task_id_from_pid_) event_free(m_ev_query_task_id_from_pid_);
 
   if (m_ev_exit_event_) event_free(m_ev_exit_event_);
   close(m_ev_exit_fd_);
@@ -777,13 +778,14 @@ SlurmxErr TaskManager::SpawnInteractiveTaskAsync(
   return err_future.get();
 }
 
-uint32_t TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
+QuerytaskIdResult TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
   EvQueueGrpcQueryTaskIdFromPid elem{.pid = pid};
-  std::future<uint32_t> taskId_future = elem.taskid_promise.get_future();
-  m_query_taskId_from_pid_queue_.enqueue(std::move(elem));
-  event_active(m_ev_query_taskId_from_pid_, 0, 0);
+  std::future<QuerytaskIdResult> task_id_future =
+      elem.task_id_promise.get_future();
+  m_query_task_id_from_pid_queue_.enqueue(std::move(elem));
+  event_active(m_ev_query_task_id_from_pid_, 0, 0);
 
-  return taskId_future.get();
+  return task_id_future.get();
 }
 
 void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
@@ -831,14 +833,16 @@ void TaskManager::EvGrpcQueryTaskIdFromPidCb_(int efd, short events,
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
   EvQueueGrpcQueryTaskIdFromPid elem;
-  while (this_->m_query_taskId_from_pid_queue_.try_dequeue(elem)) {
+  while (this_->m_query_task_id_from_pid_queue_.try_dequeue(elem)) {
     auto task_iter = this_->m_pid_task_map_.find(elem.pid);
-    if (task_iter == this_->m_pid_task_map_.end())
-      elem.taskid_promise.set_value(0);
-    else {
+    if (task_iter == this_->m_pid_task_map_.end()) {
+      QuerytaskIdResult result{0, false};
+      elem.task_id_promise.set_value(result);
+    } else {
       TaskInstance* instance = task_iter->second;
       uint32_t task_id = instance->task.task_id();
-      elem.taskid_promise.set_value(task_id);
+      QuerytaskIdResult result{task_id, true};
+      elem.task_id_promise.set_value(result);
     }
   }
 }
