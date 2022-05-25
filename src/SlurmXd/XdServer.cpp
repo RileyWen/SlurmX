@@ -362,13 +362,12 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPort(
   std::string tcp_line;
   bool is_find_inode = false;
   if (tcp_in) {
-    getline(tcp_in, tcp_line);  // skip the header
+    getline(tcp_in, tcp_line);  // Skip the header line
     while (getline(tcp_in, tcp_line)) {
       boost::trim(tcp_line);
       std::vector<std::string> tcp_line_vec;
       boost::split(tcp_line_vec, tcp_line, boost::is_any_of(" :"),
                    boost::token_compress_on);
-
       if (ip_hex == tcp_line_vec[2]) {
         is_find_inode = true;
         inode = std::stoul(tcp_line_vec[13]);
@@ -379,8 +378,7 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPort(
       response->set_ok(false);
       return Status::OK;
     }
-  } else  // can't find file
-  {
+  } else {  // can't find file
     SLURMX_ERROR("Can't open file: {}", tcp_path);
   }
 
@@ -421,10 +419,11 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPort(
 
   // 3.slurm_pid2jobid
   do {
-    QuerytaskIdResult result = g_task_mgr->QueryTaskIdFromPidAsync(pid_i);
-    if (result.is_found) {
+    std::optional<uint32_t> task_id_opt =
+        g_task_mgr->QueryTaskIdFromPidAsync(pid_i);
+    if (task_id_opt.has_value()) {
       response->set_ok(true);
-      response->set_task_id(result.task_id);
+      response->set_task_id(task_id_opt.value());
       return Status::OK;
     } else {
       std::string proc_dir = fmt::format("/proc/{}/status", pid_i);

@@ -9,6 +9,7 @@
 
 #include "ResourceAllocators.h"
 #include "protos/XdSubprocess.pb.h"
+#include "slurmx/FdFunctions.h"
 #include "slurmx/FileLogger.h"
 
 namespace Xd {
@@ -535,6 +536,11 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
 
     close(fd);
 
+    // If these file descriptors are not closed, a program like mpirun may
+    // keep waiting for the input from stdin or other fds and will never end.
+    close(0);  // close stdin
+    util::CloseFdFrom(3);
+
     execv(process->GetExecPath().c_str(),
           const_cast<char* const*>(argv.data()));
 
@@ -635,68 +641,62 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
 
       SlurmxErr err = SlurmxErr::kOk;
-      for (int i = 0; i < instance->task.task_per_node(); ++i) {
-        auto process = std::make_unique<ProcessInstance>(
-            sh_path, std::list<std::string>());
+      auto process =
+          std::make_unique<ProcessInstance>(sh_path, std::list<std::string>());
 
-        /* Perform file name substitutions
-         * %A - Job array's master job allocation number.
-         * %a - Job array ID (index) number.
-         * %j - Job ID
-         * %u - User name
-         * %x - Job name
-         */
-        if (instance->task.batch_meta().output_file_pattern().empty()) {
+      /* Perform file name substitutions
+       * %A - Job array's master job allocation number.
+       * %j - Job ID
+       * %u - User name
+       * %x - Job name
+       */
+      if (instance->task.batch_meta().output_file_pattern().empty()) {
+        process->batch_meta.parsed_output_file_pattern =
+            fmt::format("{}/", instance->task.cwd());
+      } else {
+        if (instance->task.batch_meta().output_file_pattern()[0] == '/') {
           process->batch_meta.parsed_output_file_pattern =
-              fmt::format("{}/", instance->task.cwd());
+              instance->task.batch_meta().output_file_pattern();
         } else {
-          if (instance->task.batch_meta().output_file_pattern()[0] == '/') {
-            process->batch_meta.parsed_output_file_pattern =
-                instance->task.batch_meta().output_file_pattern();
-          } else {
-            process->batch_meta.parsed_output_file_pattern =
-                fmt::format("{}/{}", instance->task.cwd(),
-                            instance->task.batch_meta().output_file_pattern());
-          }
+          process->batch_meta.parsed_output_file_pattern =
+              fmt::format("{}/{}", instance->task.cwd(),
+                          instance->task.batch_meta().output_file_pattern());
         }
-
-        if (boost::ends_with(process->batch_meta.parsed_output_file_pattern,
-                             "/")) {
-          process->batch_meta.parsed_output_file_pattern += fmt::format(
-              "SlurmX-{}-{}.out", g_ctlxd_client->GetNodeId().node_index, i);
-        }
-
-        boost::replace_all(process->batch_meta.parsed_output_file_pattern, "%a",
-                           std::to_string(i));
-        boost::replace_all(process->batch_meta.parsed_output_file_pattern, "%j",
-                           std::to_string(instance->task.task_id()));
-        boost::replace_all(process->batch_meta.parsed_output_file_pattern, "%u",
-                           instance->pwd_entry.Username());
-
-        if (!boost::ends_with(process->batch_meta.parsed_output_file_pattern,
-                              ".out")) {
-          process->batch_meta.parsed_output_file_pattern += ".out";
-        }
-
-        auto* file_logger = new slurmx::FileLogger(
-            fmt::format("{}-{}", instance->task.task_id(), i),
-            process->batch_meta.parsed_output_file_pattern);
-
-        auto clean_cb = [](void* data) {
-          delete reinterpret_cast<slurmx::FileLogger*>(data);
-        };
-
-        auto output_cb = [](std::string&& buf, void* data) {
-          auto* file_logger = reinterpret_cast<slurmx::FileLogger*>(data);
-          file_logger->Output(buf);
-        };
-
-        process->SetUserDataAndCleanCb(file_logger, std::move(clean_cb));
-        process->SetOutputCb(std::move(output_cb));
-
-        err = this_->SpawnProcessInInstance_(instance, std::move(process));
-        if (err != SlurmxErr::kOk) break;
       }
+
+      if (boost::ends_with(process->batch_meta.parsed_output_file_pattern,
+                           "/")) {
+        process->batch_meta.parsed_output_file_pattern += fmt::format(
+            "SlurmX-{}.out", g_ctlxd_client->GetNodeId().node_index);
+      }
+
+      boost::replace_all(process->batch_meta.parsed_output_file_pattern, "%j",
+                         std::to_string(instance->task.task_id()));
+      boost::replace_all(process->batch_meta.parsed_output_file_pattern, "%u",
+                         instance->pwd_entry.Username());
+
+      if (!boost::ends_with(process->batch_meta.parsed_output_file_pattern,
+                            ".out")) {
+        process->batch_meta.parsed_output_file_pattern += ".out";
+      }
+
+      auto* file_logger = new slurmx::FileLogger(
+          fmt::format("{}", instance->task.task_id()),
+          process->batch_meta.parsed_output_file_pattern);
+
+      auto clean_cb = [](void* data) {
+        delete reinterpret_cast<slurmx::FileLogger*>(data);
+      };
+
+      auto output_cb = [](std::string&& buf, void* data) {
+        auto* file_logger = reinterpret_cast<slurmx::FileLogger*>(data);
+        file_logger->Output(buf);
+      };
+
+      process->SetUserDataAndCleanCb(file_logger, std::move(clean_cb));
+      process->SetOutputCb(std::move(output_cb));
+
+      err = this_->SpawnProcessInInstance_(instance, std::move(process));
 
       if (err != SlurmxErr::kOk) {
         this_->EvActivateTaskStatusChange_(
@@ -778,14 +778,14 @@ SlurmxErr TaskManager::SpawnInteractiveTaskAsync(
   return err_future.get();
 }
 
-QuerytaskIdResult TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
-  EvQueueGrpcQueryTaskIdFromPid elem{.pid = pid};
-  std::future<QuerytaskIdResult> task_id_future =
-      elem.task_id_promise.get_future();
+std::optional<uint32_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
+  EvQueueQueryTaskIdFromPid elem{.pid = pid};
+  std::future<std::optional<uint32_t>> task_id_opt_future =
+      elem.task_id_prom.get_future();
   m_query_task_id_from_pid_queue_.enqueue(std::move(elem));
   event_active(m_ev_query_task_id_from_pid_, 0, 0);
 
-  return task_id_future.get();
+  return task_id_opt_future.get();
 }
 
 void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
@@ -832,17 +832,15 @@ void TaskManager::EvGrpcQueryTaskIdFromPidCb_(int efd, short events,
                                               void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
-  EvQueueGrpcQueryTaskIdFromPid elem;
+  EvQueueQueryTaskIdFromPid elem;
   while (this_->m_query_task_id_from_pid_queue_.try_dequeue(elem)) {
     auto task_iter = this_->m_pid_task_map_.find(elem.pid);
-    if (task_iter == this_->m_pid_task_map_.end()) {
-      QuerytaskIdResult result{0, false};
-      elem.task_id_promise.set_value(result);
-    } else {
+    if (task_iter == this_->m_pid_task_map_.end())
+      elem.task_id_prom.set_value(std::nullopt);
+    else {
       TaskInstance* instance = task_iter->second;
       uint32_t task_id = instance->task.task_id();
-      QuerytaskIdResult result{task_id, true};
-      elem.task_id_promise.set_value(result);
+      elem.task_id_prom.set_value(task_id);
     }
   }
 }
