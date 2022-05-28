@@ -9,6 +9,7 @@
 #include <sys/stat.h>
 
 #include <atomic>
+#include <filesystem>
 #include <queue>
 #include <thread>
 
@@ -16,6 +17,7 @@
 #include "concurrentqueue/concurrentqueue.h"
 #include "protos/math.grpc.pb.h"
 #include "protos/math.pb.h"
+#include "slurmx/PublicHeader.h"
 
 using grpc::Server;
 using grpc::ServerBuilder;
@@ -667,4 +669,29 @@ TEST(Protobuf, InterprocessPipe) {
   }
 
   t1.join();
+}
+
+TEST(GrpcExample, UnixSocket) {
+  std::filesystem::create_directories(kDefaultSlurmXTempDir);
+
+  std::string server_address =
+      fmt::format("{}{}", "unix://", kDefaultSlurmXdUnixSockPath);
+  SPDLOG_INFO("Unix Server Address: {}", server_address);
+
+  GreeterSyncServer server(server_address);
+
+  GreeterClient greeter(
+      grpc::CreateChannel(server_address, grpc::InsecureChannelCredentials()));
+  std::string user("world");
+  std::string reply = greeter.SayHello(user);
+  SPDLOG_INFO("Greeter received: {}", reply);
+
+  EXPECT_EQ(reply, "Hello world");
+
+  // This method is thread-safe.
+  server.Shutdown();
+
+  // Wait for the server to shutdown. Note that some other thread must be
+  // responsible for shutting down the server for this call to ever return.
+  server.Wait();
 }

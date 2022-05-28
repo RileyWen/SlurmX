@@ -116,7 +116,8 @@ void StartServer() {
 
   // Create log and sh directory recursively.
   try {
-    std::filesystem::create_directories("/tmp/slurmxd/scripts");
+    std::filesystem::create_directories(kDefaultSlurmXTempDir);
+    std::filesystem::create_directories(kDefaultSlurmXScriptDir);
 
     std::filesystem::path log_path{g_config.SlurmXdLogFile};
     auto log_dir = log_path.parent_path();
@@ -159,7 +160,9 @@ void StartServer() {
 
   // Todo: Set FD_CLOEXEC on stdin, stdout, stderr
 
-  g_server = std::make_unique<Xd::XdServer>(g_config.SlurmXdListen);
+  g_server = std::make_unique<Xd::XdServer>(std::list<std::string>{
+      g_config.SlurmXdListen,
+      fmt::format("unix://{}", kDefaultSlurmXdUnixSockPath)});
 
   std::regex addr_port_re(R"(^.*:(\d+)$)");
   std::smatch port_group;

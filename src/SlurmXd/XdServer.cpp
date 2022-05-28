@@ -4,6 +4,7 @@
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
 
+#include <boost/algorithm/string/join.hpp>
 #include <filesystem>
 #include <fstream>
 #include <utility>
@@ -360,7 +361,7 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPort(
   std::string tcp_path{"/proc/net/tcp"};
   std::ifstream tcp_in(tcp_path, std::ios::in);
   std::string tcp_line;
-  bool is_find_inode = false;
+  bool inode_found = false;
   if (tcp_in) {
     getline(tcp_in, tcp_line);  // Skip the header line
     while (getline(tcp_in, tcp_line)) {
@@ -368,13 +369,13 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPort(
       std::vector<std::string> tcp_line_vec;
       boost::split(tcp_line_vec, tcp_line, boost::is_any_of(" :"),
                    boost::token_compress_on);
-      if (ip_hex == tcp_line_vec[2]) {
-        is_find_inode = true;
+      if (ip_hex == tcp_line_vec[4]) {
+        inode_found = true;
         inode = std::stoul(tcp_line_vec[13]);
         break;
       }
     }
-    if (!is_find_inode) {
+    if (!inode_found) {
       response->set_ok(false);
       return Status::OK;
     }
@@ -440,17 +441,21 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPort(
   return Status::OK;
 }
 
-XdServer::XdServer(std::string listen_address)
-    : m_listen_address_(std::move(listen_address)) {
+XdServer::XdServer(std::list<std::string> listen_addresses)
+    : m_listen_addresses_(std::move(listen_addresses)) {
   m_service_impl_ = std::make_unique<SlurmXdServiceImpl>();
 
   grpc::ServerBuilder builder;
-  builder.AddListeningPort(m_listen_address_,
-                           grpc::InsecureServerCredentials());
+
+  for (auto &&address : m_listen_addresses_) {
+    builder.AddListeningPort(address, grpc::InsecureServerCredentials());
+  }
+
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
-  SLURMX_INFO("SlurmXd is listening on {}", m_listen_address_);
+  SLURMX_INFO("SlurmXd is listening on [{}]",
+              boost::join(m_listen_addresses_, ", "));
 
   g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
     p_server->Shutdown();

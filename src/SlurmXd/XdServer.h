@@ -10,6 +10,7 @@
 #include <mutex>
 #include <optional>
 #include <thread>
+#include <list>
 #include <unordered_map>
 
 #include "slurmx/Lock.h"
@@ -61,7 +62,7 @@ class SlurmXdServiceImpl : public SlurmXd::Service {
 
 class XdServer {
  public:
-  explicit XdServer(std::string listen_address);
+  explicit XdServer(std::list<std::string> listen_addresses);
 
   inline void Shutdown() { m_server_->Shutdown(); }
 
@@ -91,7 +92,7 @@ class XdServer {
 
   Mutex m_mtx_;
 
-  const std::string m_listen_address_;
+  const std::list<std::string> m_listen_addresses_;
 
   std::unique_ptr<SlurmXdServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;

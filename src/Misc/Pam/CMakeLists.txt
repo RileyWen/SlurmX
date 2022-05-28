@@ -1,0 +1,15 @@
+add_library(pam_slurmx SHARED
+        Pam.cpp)
+
+# remove "lib" prefix
+set_target_properties(pam_slurmx PROPERTIES PREFIX "")
+
+target_include_directories(pam_slurmx PUBLIC ${PAM_INCLUDE_DIR})
+
+target_link_libraries(pam_slurmx PUBLIC
+        ${PAM_LIBRARIES}
+        proto
+        Boost::boost
+        spdlog::spdlog
+        Utility_PublicHeader
+        )

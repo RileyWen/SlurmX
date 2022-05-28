@@ -621,7 +621,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     // If this is a batch task, run it now.
     if (instance->task.type() == SlurmxGrpc::Batch) {
       instance->batch_meta.parsed_sh_script_path = fmt::format(
-          "/tmp/slurmxd/scripts/slurmx-{}.sh", instance->task.task_id());
+          "{}/slurmx-{}.sh", kDefaultSlurmXScriptDir, instance->task.task_id());
       auto& sh_path = instance->batch_meta.parsed_sh_script_path;
 
       FILE* fptr = fopen(sh_path.c_str(), "w");
