@@ -116,6 +116,12 @@ void TaskScheduler::ScheduleThread_() {
         // allocated node.
         XdNodeId first_node_id{partition_id, task->node_indexes.front()};
 
+        for (auto iter : task->node_indexes) {
+          XdNodeId node_id{partition_id, iter};
+          XdNodeStub* stub = g_node_keeper->GetXdStub(node_id);
+          stub->CreateCgroupForTask(task->task_id);
+        }
+
         // IMPORTANT: task must be put into running_task_map before any
         //  time-consuming operation, otherwise TaskStatusChange RPC will come
         //  earlier before task is put into running_task_map.
@@ -408,6 +414,30 @@ void TaskScheduler::QueryTaskBriefMetaInPartition(
 
       auto* id_it = id_list->Add();
       *id_it = task->task_id;
+    }
+  }
+}
+
+std::string TaskScheduler::QueryNodeListFromTaskId(uint32_t task_id) {
+  {
+    LockGuard pending_guard(m_pending_task_map_mtx_);
+    auto iter = m_pending_task_map_.find(task_id);
+    if (iter != m_pending_task_map_.end()) {
+      return iter->second->allocated_nodes_regex;
+    }
+  }
+  {
+    LockGuard running_guard(m_running_task_map_mtx_);
+    auto iter = m_running_task_map_.find(task_id);
+    if (iter != m_running_task_map_.end()) {
+      return iter->second->allocated_nodes_regex;
+    }
+  }
+  {
+    LockGuard ended_guard(m_ended_task_map_mtx_);
+    auto iter = m_ended_task_map_.find(task_id);
+    if (iter != m_ended_task_map_.end()) {
+      return iter->second->allocated_nodes_regex;
     }
   }
 }

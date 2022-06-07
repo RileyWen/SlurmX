@@ -596,7 +596,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     cgroup = this_->m_cg_mgr_.CreateOrOpen(instance->cg_path,
                                            util::ALL_CONTROLLER_FLAG,
                                            util::NO_CONTROLLER_FLAG, false);
-    // Create cgroup for the new subprocess
+    // Open cgroup for the new subprocess
     if (!cgroup) {
       SLURMX_ERROR("Failed to create cgroup for task #{}",
                    instance->task.task_id());
@@ -894,6 +894,30 @@ void TaskManager::TerminateTaskAsync(uint32_t task_id) {
   EvQueueTaskTerminate elem{task_id};
   m_task_terminate_queue_.enqueue(elem);
   event_active(m_ev_task_terminate_, 0, 0);
+}
+bool TaskManager::CreateCgroup(uint32_t task_id) {
+  std::string cg_path = CgroupStrByTaskId_(task_id);
+  util::Cgroup* cgroup;
+  cgroup = m_cg_mgr_.CreateOrOpen(cg_path, util::ALL_CONTROLLER_FLAG,
+                                  util::NO_CONTROLLER_FLAG, false);
+  // Create cgroup for the new subprocess
+  if (!cgroup) {
+    SLURMX_ERROR("Failed to create cgroup for task #{}", task_id);
+    return false;
+  }
+  return true;
+}
+
+bool TaskManager::ReleaseCgroup(uint32_t task_id) {
+  std::string cg_path = CgroupStrByTaskId_(task_id);
+
+  bool res = m_cg_mgr_.Release(cg_path);
+  // Release cgroup for the new subprocess
+  if (!res) {
+    SLURMX_ERROR("Failed to Release cgroup for task #{}", task_id);
+    return false;
+  }
+  return true;
 }
 
 }  // namespace Xd

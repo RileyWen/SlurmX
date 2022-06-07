@@ -167,6 +167,10 @@ class TaskManager {
 
   std::optional<uint32_t> QueryTaskIdFromPidAsync(pid_t pid);
 
+  bool CreateCgroup(uint32_t task_id);
+
+  bool ReleaseCgroup(uint32_t task_id);
+
   void TerminateTaskAsync(uint32_t task_id);
 
   // Wait internal libevent base loop to exit...

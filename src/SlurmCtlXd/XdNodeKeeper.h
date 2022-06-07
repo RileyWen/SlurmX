@@ -38,6 +38,10 @@ class XdNodeStub {
 
   SlurmxErr ExecuteTask(const TaskInCtlXd *task);
 
+  SlurmxErr CreateCgroupForTask(uint32_t task_id);
+
+  SlurmxErr ReleaseCgroupForTask(uint32_t task_id);
+
   SlurmxErr TerminateTask(uint32_t task_id);
 
  private:

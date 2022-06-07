@@ -439,6 +439,21 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPort(
   response->set_ok(false);
   return Status::OK;
 }
+grpc::Status SlurmXdServiceImpl::CreateCgroupForTask(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::CreateCgroupForTaskRequest *request,
+    SlurmxGrpc::BasicReply *response) {
+  response->set_ok(g_task_mgr->CreateCgroup(request->task_id()));
+  return Status::OK;
+}
+
+grpc::Status SlurmXdServiceImpl::ReleaseCgroupForTask(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::ReleaseCgroupForTaskRequest *request,
+    SlurmxGrpc::BasicReply *response) {
+  response->set_ok(g_task_mgr->ReleaseCgroup(request->task_id()));
+  return Status::OK;
+}
 
 XdServer::XdServer(std::string listen_address)
     : m_listen_address_(std::move(listen_address)) {

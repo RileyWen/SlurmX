@@ -110,6 +110,52 @@ SlurmxErr XdNodeStub::TerminateTask(uint32_t task_id) {
   else
     return SlurmxErr::kGenericFailure;
 }
+SlurmxErr XdNodeStub::CreateCgroupForTask(uint32_t task_id) {
+  using SlurmxGrpc::BasicReply;
+  using SlurmxGrpc::CreateCgroupForTaskRequest;
+
+  ClientContext context;
+  Status status;
+  CreateCgroupForTaskRequest request;
+  BasicReply reply;
+
+  request.set_task_id(task_id);
+  status = m_stub_->CreateCgroupForTask(&context, request, &reply);
+  if (!status.ok()) {
+    SLURMX_DEBUG(
+        "CreateCgroupForTask RPC for Node {} returned with status not ok: {}",
+        m_addr_and_id_.node_id, status.error_message());
+    return SlurmxErr::kRpcFailure;
+  }
+
+  if (reply.ok())
+    return SlurmxErr::kOk;
+  else
+    return SlurmxErr::kGenericFailure;
+}
+SlurmxErr XdNodeStub::ReleaseCgroupForTask(uint32_t task_id) {
+  using SlurmxGrpc::BasicReply;
+  using SlurmxGrpc::ReleaseCgroupForTaskRequest;
+
+  ClientContext context;
+  Status status;
+  ReleaseCgroupForTaskRequest request;
+  BasicReply reply;
+
+  request.set_task_id(task_id);
+  status = m_stub_->ReleaseCgroupForTask(&context, request, &reply);
+  if (!status.ok()) {
+    SLURMX_DEBUG(
+        "ReleaseCgroupForTask RPC for Node {} returned with status not ok: {}",
+        m_addr_and_id_.node_id, status.error_message());
+    return SlurmxErr::kRpcFailure;
+  }
+
+  if (reply.ok())
+    return SlurmxErr::kOk;
+  else
+    return SlurmxErr::kGenericFailure;
+}
 
 XdNodeKeeper::XdNodeKeeper() : m_cq_closed_(false), m_tag_pool_(32, 0) {
   m_cq_thread_ = std::thread(&XdNodeKeeper::StateMonitorThreadFunc_, this);

@@ -137,6 +137,15 @@ message TaskStatusChangeReply {
   bool ok = 1;
 }
 
+message QueryNodeListFromTaskIdRequest {
+  uint32 task_id = 1;
+}
+
+message QueryNodeListFromTaskIdReply {
+  bool ok = 1;
+  string node_list = 2;
+}
+
 message SubmitBatchTaskRequest {
   TaskToCtlXd task = 1;
 }
@@ -156,6 +165,18 @@ message ExecuteTaskRequest {
 message ExecuteTaskReply {
   bool ok = 1;
   string reason = 2;
+}
+
+message CreateCgroupForTaskRequest {
+  uint32 task_id = 1;
+}
+
+message ReleaseCgroupForTaskRequest{
+  uint32 task_id = 1;
+}
+
+message BasicReply {
+  bool ok = 1;
 }
 
 message TerminateTaskRequest {
@@ -211,6 +232,8 @@ service SlurmCtlXd {
   /* RPCs called from SlurmXd*/
   rpc TaskStatusChange(TaskStatusChangeRequest) returns (TaskStatusChangeReply);
 
+  rpc QueryNodeListFromTaskId(QueryNodeListFromTaskIdRequest) returns(QueryNodeListFromTaskIdReply);
+
 
   /* RPCs called from SrunX */
   /* When SrunX request an interactive job, it will first request SrunX to allocate
@@ -241,6 +264,9 @@ service SlurmXd {
      further SrunXStream to execute a real task.
    */
   rpc ExecuteTask(ExecuteTaskRequest) returns(ExecuteTaskReply);
+
+  rpc CreateCgroupForTask(CreateCgroupForTaskRequest) returns(BasicReply);
+  rpc ReleaseCgroupForTask(ReleaseCgroupForTaskRequest) returns(BasicReply);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.

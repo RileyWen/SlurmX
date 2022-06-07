@@ -212,6 +212,21 @@ grpc::Status SlurmCtlXdServiceImpl::QueryJobsInPartition(
   return grpc::Status::OK;
 }
 
+grpc::Status SlurmCtlXdServiceImpl::QueryNodeListFromTaskId(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryNodeListFromTaskIdRequest *request,
+    SlurmxGrpc::QueryNodeListFromTaskIdReply *response) {
+  auto node_list =
+      g_task_scheduler->QueryNodeListFromTaskId(request->task_id());
+  if (!node_list.empty()) {
+    response->set_ok(true);
+    response->set_node_list(node_list);
+  } else {
+    response->set_ok(false);
+  }
+  return grpc::Status::OK;
+}
+
 CtlXdServer::CtlXdServer(std::string listen_address)
     : m_listen_address_(std::move(listen_address)) {
   m_service_impl_ = std::make_unique<SlurmCtlXdServiceImpl>(this);
