@@ -157,6 +157,8 @@ class TaskScheduler {
     return QueryXdNodeIdOfRunningTaskNoLock_(task_id, node_ids);
   }
 
+  std::string QueryNodeListFromTaskId(uint32_t task_id);
+
   bool TerminateTask(uint32_t task_id) {
     LockGuard running_guard(m_running_task_map_mtx_);
     return TerminateTaskNoLock_(task_id);
