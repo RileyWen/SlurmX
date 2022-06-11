@@ -442,27 +442,16 @@ void TaskScheduler::QueryTaskBriefMetaInPartition(
 }
 
 std::string TaskScheduler::QueryNodeListFromTaskId(uint32_t task_id) {
-  {
-    LockGuard pending_guard(m_pending_task_map_mtx_);
-    auto iter = m_pending_task_map_.find(task_id);
-    if (iter != m_pending_task_map_.end()) {
-      return iter->second->allocated_nodes_regex;
-    }
-  }
-  {
     LockGuard running_guard(m_running_task_map_mtx_);
     auto iter = m_running_task_map_.find(task_id);
+    std::string node_list;
     if (iter != m_running_task_map_.end()) {
-      return iter->second->allocated_nodes_regex;
+      int task_per_node = iter->second->task_per_node;
+      for (auto& node : iter->second->nodes) {
+        node_list += node + ":" + std::to_string(task_per_node) + "/n";
+      }
     }
-  }
-  {
-    LockGuard ended_guard(m_ended_task_map_mtx_);
-    auto iter = m_ended_task_map_.find(task_id);
-    if (iter != m_ended_task_map_.end()) {
-      return iter->second->allocated_nodes_regex;
-    }
-  }
+    return node_list;
 }
 
 void MinLoadFirst::CalculateNodeSelectionInfo_(
