@@ -290,7 +290,7 @@ void TaskScheduler::TaskStatusChange(uint32_t task_id, uint32_t node_index,
       task->status = SlurmxGrpc::Finished;
     } else /* Failed */ {
       task->status = SlurmxGrpc::Failed;
-      TerminateTaskNoLock_(task_id);
+      TerminateTaskExcludeOneXdNoLock_(task_id, node_index);
     }
     g_db_client->UpdateJobRecordField(task->job_db_inx, "state",
                                       std::to_string(SlurmxGrpc::Completing));
@@ -299,7 +299,7 @@ void TaskScheduler::TaskStatusChange(uint32_t task_id, uint32_t node_index,
     if (new_status == SlurmxGrpc::Failed &&
         task->status == SlurmxGrpc::Finished) {
       task->status = SlurmxGrpc::Failed;
-      TerminateTaskNoLock_(task_id);
+      TerminateTaskExcludeOneXdNoLock_(task_id, node_index);
     }
   }
 
@@ -350,6 +350,27 @@ bool TaskScheduler::TerminateTaskNoLock_(uint32_t task_id) {
         ok &= true;
       else
         ok &= false;
+    }
+  }
+
+  return ok;
+}
+
+bool TaskScheduler::TerminateTaskExcludeOneXdNoLock_(
+    uint32_t task_id, uint32_t excluded_node_index) {
+  std::list<XdNodeId> node_ids;
+  bool ok = QueryXdNodeIdOfRunningTaskNoLock_(task_id, &node_ids);
+
+  if (ok) {
+    for (XdNodeId xd_node_id : node_ids) {
+      if (excluded_node_index != xd_node_id.node_index) {
+        auto stub = g_node_keeper->GetXdStub(xd_node_id);
+        SlurmxErr err = stub->TerminateTask(task_id);
+        if (err == SlurmxErr::kOk)
+          ok &= true;
+        else
+          ok &= false;
+      }
     }
   }
 
@@ -581,6 +602,9 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
             time_segments.emplace_back(expected_start_time, valid_duration);
             break;
           } else {
+            SLURMX_ASSERT_MSG(task_duration_it->first >= now,
+                              "The start of a duration must be greater than or "
+                              "equal to the end of it");
             SLURMX_TRACE(
                 "\t Trying duration [ now+{}s , now+{}s ) for task #{} is "
                 "valid and set as the start of a time segment.",

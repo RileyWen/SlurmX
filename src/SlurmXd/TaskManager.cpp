@@ -188,9 +188,14 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
       if (WIFEXITED(status)) {
         // Exited with status WEXITSTATUS(status)
         sigchld_info = {pid, false, WEXITSTATUS(status)};
+        SLURMX_TRACE(
+            "Receiving SIGCHLD for pid {}. Signaled: false, Status: {}", pid,
+            WEXITSTATUS(status));
       } else if (WIFSIGNALED(status)) {
         // Killed by signal WTERMSIG(status)
         sigchld_info = {pid, true, WTERMSIG(status)};
+        SLURMX_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}",
+                     pid, WTERMSIG(status));
       }
       /* Todo(More status tracing):
        else if (WIFSTOPPED(status)) {
@@ -233,9 +238,6 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
           this_->m_pid_proc_map_.erase(proc_iter);
 
           if (instance->processes.empty()) {
-            // Remove indexes from pid to TaskInstance*
-            this_->m_pid_task_map_.erase(task_iter);
-
             // See the comment of EvActivateTaskStatusChange_.
             if (instance->task.type() == SlurmxGrpc::Batch) {
               // For a Batch task, the end of the process means it is done.
@@ -253,13 +255,6 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
             }
           }
         }
-      }
-
-      // Todo: Add additional timer to check periodically whether all children
-      //  have exited.
-      if (this_->m_is_ending_now_ && this_->m_task_map_.empty()) {
-        SLURMX_TRACE("EvSigchldCb_ has reaped all child. Stop event loop.");
-        this_->Shutdown();
       }
     } else if (pid == 0)  // There's no child that needs reaping.
       break;
@@ -290,7 +285,7 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
   if (!this_->m_is_ending_now_) {
-    SLURMX_INFO("Caught SIGINT. Send SIGINT to all running tasks...");
+    SLURMX_INFO("Caught SIGINT. Send SIGTERM to all running tasks...");
 
     this_->m_is_ending_now_ = true;
 
@@ -303,12 +298,33 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
       // Send SIGINT to all tasks and the event loop will stop
       // when the ev_sigchld_cb_ of the last task is called.
       for (auto&& [task_id, task_instance] : this_->m_task_map_) {
-        for (auto&& [pid, pr_instance] : task_instance->processes)
-          KillProcessInstance_(pr_instance.get(), SIGINT);
+        for (auto&& [pid, pr_instance] : task_instance->processes) {
+          SLURMX_INFO(
+              "Sending SIGTERM to the process group of task #{} with root "
+              "process pid {}",
+              task_id, pr_instance->GetPid());
+          KillProcessInstance_(pr_instance.get(), SIGTERM);
+        }
       }
     }
   } else {
-    SLURMX_INFO("SIGINT has been triggered already. Ignoring it.");
+    if (this_->m_task_map_.empty()) {
+      // If there is no task to kill, stop the loop directly.
+      this_->Shutdown();
+    } else {
+      SLURMX_INFO(
+          "SIGINT has been triggered already. Sending SIGKILL to all process "
+          "groups instead.");
+      for (auto&& [task_id, task_instance] : this_->m_task_map_) {
+        for (auto&& [pid, pr_instance] : task_instance->processes) {
+          SLURMX_INFO(
+              "Sending SIGINT to the process group of task #{} with root "
+              "process pid {}",
+              task_id, pr_instance->GetPid());
+          KillProcessInstance_(pr_instance.get(), SIGKILL);
+        }
+      }
+    }
   }
 }
 
@@ -356,10 +372,10 @@ SlurmxErr TaskManager::KillProcessInstance_(const ProcessInstance* proc,
 
     if (err == 0)
       return SlurmxErr::kOk;
-    else if (err == EINVAL)
-      return SlurmxErr::kInvalidParam;
-    else
+    else {
+      SLURMX_TRACE("kill failed. error: {}", strerror(errno));
       return SlurmxErr::kGenericFailure;
+    }
   }
 
   return SlurmxErr::kNonExistent;
@@ -579,6 +595,12 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         popped_instance->task.task_id(), std::move(popped_instance));
 
     TaskInstance* instance = iter->second.get();
+
+    // Add task id to the running task set of the UID.
+    // Pam module need it.
+    this_->m_uid_to_task_ids_[instance->task.uid()].emplace(
+        instance->task.task_id());
+
     instance->pwd_entry.Init(instance->task.uid());
     if (!instance->pwd_entry.Valid()) {
       SLURMX_DEBUG("Failed to look up password entry for uid {} of task #{}",
@@ -720,14 +742,16 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
   while (this_->m_task_status_change_queue_.try_dequeue(status_change)) {
     if (status_change.new_status == SlurmxGrpc::TaskStatus::Finished ||
         status_change.new_status == SlurmxGrpc::TaskStatus::Failed) {
-      SLURMX_DEBUG(R"(Destroying Task structure for "{}".)",
-                   status_change.task_id);
+      SLURMX_DEBUG(R"(Destroying Task structure for "{}".)"
+                   R"(Task new status: {})",
+                   status_change.task_id, status_change.new_status);
 
       auto iter = this_->m_task_map_.find(status_change.task_id);
       SLURMX_ASSERT_MSG(iter != this_->m_task_map_.end(),
                         "Task should be found here.");
 
       TaskInstance* task_instance = iter->second.get();
+      uid_t uid = task_instance->task.uid();
 
       if (task_instance->termination_timer) {
         event_del(task_instance->termination_timer);
@@ -736,14 +760,29 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
 
       // Destroy the related cgroup.
       this_->m_cg_mgr_.Release(task_instance->cg_path);
-      SLURMX_DEBUG("Received SIGCHLD. Destroying Cgroup for task #{}",
-                   status_change.task_id);
+      SLURMX_DEBUG("Destroying Cgroup for task #{}", status_change.task_id);
 
       // Free the TaskInstance structure
       this_->m_task_map_.erase(status_change.task_id);
+
+      this_->m_uid_to_task_ids_[uid].erase(status_change.task_id);
+      if (this_->m_uid_to_task_ids_[uid].empty()) {
+        this_->m_uid_to_task_ids_.erase(uid);
+      }
     }
 
+    SLURMX_TRACE("Put TaskStatusChange for task #{} into queue.",
+                 status_change.task_id);
     g_ctlxd_client->TaskStatusChangeAsync(std::move(status_change));
+  }
+
+  // Todo: Add additional timer to check periodically whether all children
+  //  have exited.
+  if (this_->m_is_ending_now_ && this_->m_task_map_.empty()) {
+    SLURMX_TRACE(
+        "SlurmXd is ending and all tasks have been reaped. "
+        "Stop event loop.");
+    this_->Shutdown();
   }
 }
 
@@ -881,7 +920,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
       // send a kill signal here.
       for (auto&& [pid, pr_instance] : task_instance->processes)
         KillProcessInstance_(pr_instance.get(), sig);
-    } else {
+    } else if (task_instance->task.type() == SlurmxGrpc::Interactive) {
       // For an Interactive task with no process running, it ends immediately.
       this_->EvActivateTaskStatusChange_(elem.task_id, SlurmxGrpc::Finished,
                                          std::nullopt);

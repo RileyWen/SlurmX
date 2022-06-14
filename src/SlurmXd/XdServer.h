@@ -6,11 +6,11 @@
 #include <atomic>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <thread>
-#include <list>
 #include <unordered_map>
 
 #include "slurmx/Lock.h"
@@ -58,6 +58,11 @@ class SlurmXdServiceImpl : public SlurmXd::Service {
       grpc::ServerContext *context,
       const SlurmxGrpc::QueryTaskIdFromPortRequest *request,
       SlurmxGrpc::QueryTaskIdFromPortReply *response) override;
+
+  grpc::Status QueryTaskIdFromPortForward(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::QueryTaskIdFromPortForwardRequest *request,
+      SlurmxGrpc::QueryTaskIdFromPortForwardReply *response) override;
 };
 
 class XdServer {

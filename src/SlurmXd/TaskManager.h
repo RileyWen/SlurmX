@@ -1,6 +1,7 @@
 #pragma once
 
 #include <absl/container/flat_hash_map.h>
+#include <absl/container/flat_hash_set.h>
 #include <concurrentqueue/concurrentqueue.h>
 #include <event2/bufferevent.h>
 #include <event2/event.h>
@@ -321,6 +322,9 @@ class TaskManager {
   // ProcessInstance.
   absl::flat_hash_map<uint32_t /*pid*/, TaskInstance*> m_pid_task_map_;
   absl::flat_hash_map<uint32_t /*pid*/, ProcessInstance*> m_pid_proc_map_;
+
+  absl::flat_hash_map<uid_t /*uid*/, absl::flat_hash_set<uint32_t /*task id*/>>
+      m_uid_to_task_ids_;
 
   util::CgroupManager& m_cg_mgr_;
 

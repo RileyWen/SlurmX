@@ -172,6 +172,9 @@ class TaskScheduler {
 
   bool TerminateTaskNoLock_(uint32_t task_id);
 
+  bool TerminateTaskExcludeOneXdNoLock_(uint32_t task_id,
+                                        uint32_t excluded_node_index);
+
   std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
 
   boost::uuids::random_generator_mt19937 m_uuid_gen_;

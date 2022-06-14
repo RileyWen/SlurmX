@@ -176,6 +176,16 @@ message QueryTaskIdFromPortReply{
   uint32 task_id = 2;
 }
 
+message QueryTaskIdFromPortForwardRequest{
+  uint32 port = 1;
+  string target_xd_address = 2;
+}
+
+message QueryTaskIdFromPortForwardReply{
+  bool ok = 1;
+  uint32 task_id = 2;
+}
+
 message QueryJobsInPartitionRequest {
   string partition = 1;
 }
@@ -250,8 +260,12 @@ service SlurmXd {
   */
   rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
 
+
+  /* ----------------------------------- Called from SlurmXd  ------------------------------------------------------ */
   rpc QueryTaskIdFromPort(QueryTaskIdFromPortRequest) returns (QueryTaskIdFromPortReply);
 
+  /* ----------------------------------- Called from Pam Module  --------------------------------------------------- */
+  rpc QueryTaskIdFromPortForward(QueryTaskIdFromPortForwardRequest) returns (QueryTaskIdFromPortForwardReply);
 
   /* ----------------------------------- Called from SrunX --------------------------------------------------------- */
   rpc SrunXStream(stream SrunXStreamRequest) returns (stream SrunXStreamReply);

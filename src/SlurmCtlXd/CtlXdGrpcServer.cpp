@@ -143,7 +143,7 @@ grpc::Status SlurmCtlXdServiceImpl::TaskStatusChange(
 
   g_task_scheduler->TaskStatusChange(request->task_id(), request->node_index(),
                                      status, reason);
-
+  response->set_ok(true);
   return grpc::Status::OK;
 }
 

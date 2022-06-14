@@ -20,23 +20,45 @@ using grpc::Status;
 
 bool QueryPortFromSlurmXd(pam_handle_t *pamh, const std::string &xd_address,
                           uint16_t port_to_query, uint32_t *task_id) {
-  std::shared_ptr<Channel> channel =
-      grpc::CreateChannel(xd_address, grpc::InsecureChannelCredentials());
+  std::string xd_unix_socket_address =
+      fmt::format("unix://{}", kDefaultSlurmXdUnixSockPath);
 
-  // std::unique_ptr will automatically release the dangling stub.
+  std::shared_ptr<Channel> channel = grpc::CreateChannel(
+      xd_unix_socket_address, grpc::InsecureChannelCredentials());
+
+  pam_syslog(pamh, LOG_ERR, "[SlurmX] Channel to %s created",
+             xd_unix_socket_address.c_str());
+
+  //  bool connected =
+  //  channel->WaitForConnected(std::chrono::system_clock::now() +
+  //                                             std::chrono::milliseconds(500));
+  //  if (!connected) {
+  //    pam_syslog(pamh, LOG_ERR, "Failed to establish the channel to %s",
+  //               xd_unix_socket_address.c_str());
+  //    return false;
+  //  }
+
   std::unique_ptr<SlurmxGrpc::SlurmXd::Stub> stub =
       SlurmxGrpc::SlurmXd::NewStub(channel);
 
-  SlurmxGrpc::QueryTaskIdFromPortRequest request;
-  SlurmxGrpc::QueryTaskIdFromPortReply reply;
+  if (!stub) {
+    pam_syslog(pamh, LOG_ERR, "[SlurmX] Failed to create Stub to %s",
+               xd_unix_socket_address.c_str());
+    return false;
+  }
+
+  SlurmxGrpc::QueryTaskIdFromPortForwardRequest request;
+  SlurmxGrpc::QueryTaskIdFromPortForwardReply reply;
   ClientContext context;
   Status status;
 
+  request.set_target_xd_address(xd_address);
   request.set_port(port_to_query);
 
-  status = stub->QueryTaskIdFromPort(&context, request, &reply);
+  status = stub->QueryTaskIdFromPortForward(&context, request, &reply);
   if (!status.ok()) {
-    pam_syslog(pamh, LOG_ERR, "QueryTaskIdFromPort gRPC call failed.");
+    pam_syslog(pamh, LOG_ERR, "QueryTaskIdFromPort gRPC call failed: %s | %s",
+               status.error_message().c_str(), status.error_details().c_str());
     return false;
   }
 
@@ -44,6 +66,7 @@ bool QueryPortFromSlurmXd(pam_handle_t *pamh, const std::string &xd_address,
     pam_syslog(pamh, LOG_ERR,
                "ssh client with remote port %u belongs to task #%u",
                port_to_query, reply.task_id());
+    *task_id = reply.task_id();
     return true;
   } else {
     pam_syslog(pamh, LOG_ERR,
@@ -109,7 +132,11 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
     return PAM_PERM_DENIED;
   }
 
+  pam_syslog(pamh, LOG_ERR, "[SlurmX] /proc/net/tcp opened.");
+
   std::unordered_map<ino_t, std::string> inode_addr_port_map;
+
+  pam_syslog(pamh, LOG_ERR, "[SlurmX] inode_addr_port_map inited.");
 
   std::getline(tcp_file, line);
   while (std::getline(tcp_file, line)) {
@@ -199,9 +226,13 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
   }
 
   uint32_t task_id;
-  bool belongs_to_a_task{false};
+  bool belongs_to_a_task;
   std::string server_address =
-      fmt::format("{}.{}.{}.{}:{}", addr[0], addr[1], addr[2], addr[3], port);
+      fmt::format("{}.{}.{}.{}:{}", addr[0], addr[1], addr[2], addr[3],
+                  std::strtoul(kXdDefaultPort, nullptr, 10));
+
+  pam_syslog(pamh, LOG_ERR, "[SlurmX] Try to query %s for remote port %hu",
+             server_address.c_str(), port);
 
   belongs_to_a_task =
       QueryPortFromSlurmXd(pamh, server_address, port, &task_id);

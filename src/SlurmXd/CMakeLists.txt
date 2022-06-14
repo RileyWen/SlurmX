@@ -35,3 +35,8 @@ target_link_libraries(slurmxd
 
         yaml-cpp
         )
+
+# Linker flag for c++ 17 filesystem library
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_link_libraries(slurmxd stdc++fs)
+endif ()

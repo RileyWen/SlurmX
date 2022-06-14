@@ -13,3 +13,8 @@ target_link_libraries(pam_slurmx PUBLIC
         spdlog::spdlog
         Utility_PublicHeader
         )
+
+# Linker flag for c++ 17 filesystem library
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    target_link_libraries(pam_slurmx PUBLIC stdc++fs)
+endif ()
