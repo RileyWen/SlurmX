@@ -19,6 +19,8 @@ TaskManager::TaskManager()
       m_ev_sigchld_(nullptr),
       m_ev_base_(nullptr),
       m_ev_grpc_interactive_task_(nullptr),
+      m_ev_grpc_create_cg_(nullptr),
+      m_ev_grpc_release_cg_(nullptr),
       m_ev_query_task_id_from_pid_(nullptr),
       m_ev_exit_event_(nullptr),
       m_ev_task_status_change_(nullptr),
@@ -66,6 +68,32 @@ TaskManager::TaskManager()
 
     if (event_add(m_ev_grpc_interactive_task_, nullptr) < 0) {
       SLURMX_ERROR("Could not add the grpc event to base!");
+      std::terminate();
+    }
+  }
+  {  // gRPC: CreateCgroup
+    m_ev_grpc_create_cg_ = event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
+                                     EvGrpcCreateCgroupCb_, this);
+    if (!m_ev_grpc_create_cg_) {
+      SLURMX_ERROR("Failed to create the create cgroup event!");
+      std::terminate();
+    }
+
+    if (event_add(m_ev_grpc_create_cg_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the create cgroup event to base!");
+      std::terminate();
+    }
+  }
+  {  // gRPC: ReleaseCgroup
+    m_ev_grpc_release_cg_ = event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
+                                      EvGrpcReleaseCgroupCb_, this);
+    if (!m_ev_grpc_release_cg_) {
+      SLURMX_ERROR("Failed to create the release cgroup event!");
+      std::terminate();
+    }
+
+    if (event_add(m_ev_grpc_release_cg_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the release cgroup event to base!");
       std::terminate();
     }
   }
@@ -149,6 +177,8 @@ TaskManager::~TaskManager() {
   if (m_ev_sigint_) event_free(m_ev_sigint_);
 
   if (m_ev_grpc_interactive_task_) event_free(m_ev_grpc_interactive_task_);
+  if (m_ev_grpc_create_cg_) event_free(m_ev_grpc_create_cg_);
+  if (m_ev_grpc_release_cg_) event_free(m_ev_grpc_release_cg_);
   if (m_ev_query_task_id_from_pid_) event_free(m_ev_query_task_id_from_pid_);
 
   if (m_ev_exit_event_) event_free(m_ev_exit_event_);
@@ -598,7 +628,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
 
     // Add task id to the running task set of the UID.
     // Pam module need it.
-    this_->m_uid_to_task_ids_[instance->task.uid()].emplace(
+    this_->m_uid_to_task_ids_map_[instance->task.uid()].emplace(
         instance->task.task_id());
 
     instance->pwd_entry.Init(instance->task.uid());
@@ -612,30 +642,29 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       return;
     }
 
-    instance->cg_path = CgroupStrByTaskId_(instance->task.task_id());
-    util::Cgroup* cgroup;
-    cgroup = this_->m_cg_mgr_.CreateOrOpen(instance->cg_path,
-                                           util::ALL_CONTROLLER_FLAG,
-                                           util::NO_CONTROLLER_FLAG, false);
-    // Open cgroup for the new subprocess
-    if (!cgroup) {
-      SLURMX_ERROR("Failed to create cgroup for task #{}",
+    auto cg_iter =
+        this_->m_task_id_to_cg_path_map_.find(instance->task.task_id());
+    if (cg_iter != this_->m_task_id_to_cg_path_map_.end()) {
+      util::Cgroup* cgroup = cg_iter->second;
+      instance->cg_path = cgroup->GetCgroupString();
+      if (!AllocatableResourceAllocator::Allocate(
+              instance->task.resources().allocatable_resource(), cgroup)) {
+        SLURMX_ERROR(
+            "Failed to allocate allocatable resource in cgroup for task #{}",
+            instance->task.task_id());
+        this_->EvActivateTaskStatusChange_(
+            instance->task.task_id(), SlurmxGrpc::TaskStatus::Failed,
+            fmt::format(
+                "Cannot allocate resources for the instance of task #{}",
+                instance->task.task_id()));
+        return;
+      }
+    } else {
+      SLURMX_ERROR("Failed to find created cgroup for task #{}",
                    instance->task.task_id());
       this_->EvActivateTaskStatusChange_(
           instance->task.task_id(), SlurmxGrpc::TaskStatus::Failed,
-          fmt::format("Cannot create cgroup for the instance of task #{}",
-                      instance->task.task_id()));
-      return;
-    }
-
-    if (!AllocatableResourceAllocator::Allocate(
-            instance->task.resources().allocatable_resource(), cgroup)) {
-      SLURMX_ERROR(
-          "Failed to allocate allocatable resource in cgroup for task #{}",
-          instance->task.task_id());
-      this_->EvActivateTaskStatusChange_(
-          instance->task.task_id(), SlurmxGrpc::TaskStatus::Failed,
-          fmt::format("Cannot allocate resources for the instance of task #{}",
+          fmt::format("Failed to find created cgroup for task #{}",
                       instance->task.task_id()));
       return;
     }
@@ -758,17 +787,8 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
         event_free(task_instance->termination_timer);
       }
 
-      // Destroy the related cgroup.
-      this_->m_cg_mgr_.Release(task_instance->cg_path);
-      SLURMX_DEBUG("Destroying Cgroup for task #{}", status_change.task_id);
-
       // Free the TaskInstance structure
       this_->m_task_map_.erase(status_change.task_id);
-
-      this_->m_uid_to_task_ids_[uid].erase(status_change.task_id);
-      if (this_->m_uid_to_task_ids_[uid].empty()) {
-        this_->m_uid_to_task_ids_.erase(uid);
-      }
     }
 
     SLURMX_TRACE("Put TaskStatusChange for task #{} into queue.",
@@ -934,29 +954,76 @@ void TaskManager::TerminateTaskAsync(uint32_t task_id) {
   event_active(m_ev_task_terminate_, 0, 0);
 }
 
-bool TaskManager::CreateCgroup(uint32_t task_id) {
-  std::string cg_path = CgroupStrByTaskId_(task_id);
-  util::Cgroup* cgroup;
-  cgroup = m_cg_mgr_.CreateOrOpen(cg_path, util::ALL_CONTROLLER_FLAG,
-                                  util::NO_CONTROLLER_FLAG, false);
-  // Create cgroup for the new subprocess
-  if (!cgroup) {
-    SLURMX_ERROR("Failed to create cgroup for task #{}", task_id);
-    return false;
-  }
-  return true;
+bool TaskManager::CreateCgroupAsync(uint32_t task_id, uid_t uid) {
+  EvQueueCreateCg elem{.task_id = task_id, .uid = uid};
+
+  std::future<bool> ok_fut = elem.ok_prom.get_future();
+  m_grpc_create_cg_queue_.enqueue(std::move(elem));
+  event_active(m_ev_grpc_create_cg_, 0, 0);
+  return ok_fut.get();
 }
 
-bool TaskManager::ReleaseCgroup(uint32_t task_id) {
-  std::string cg_path = CgroupStrByTaskId_(task_id);
+bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
+  EvQueueReleaseCg elem{.task_id = task_id, .uid = uid};
 
-  bool res = m_cg_mgr_.Release(cg_path);
-  // Release cgroup for the new subprocess
-  if (!res) {
-    SLURMX_ERROR("Failed to Release cgroup for task #{}", task_id);
-    return false;
+  std::future<bool> ok_fut = elem.ok_prom.get_future();
+  m_grpc_release_cg_queue_.enqueue(std::move(elem));
+  event_active(m_ev_grpc_release_cg_, 0, 0);
+  return ok_fut.get();
+}
+
+void TaskManager::EvGrpcCreateCgroupCb_(int efd, short events,
+                                        void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  EvQueueCreateCg create_cg;
+  while (this_->m_grpc_create_cg_queue_.try_dequeue(create_cg)) {
+    SLURMX_DEBUG("Creating Cgroup for task #{}", create_cg.task_id);
+
+    std::string cg_path = CgroupStrByTaskId_(create_cg.task_id);
+    util::Cgroup* cgroup;
+    cgroup = this_->m_cg_mgr_.CreateOrOpen(cg_path, util::ALL_CONTROLLER_FLAG,
+                                           util::NO_CONTROLLER_FLAG, false);
+    // Create cgroup for the new subprocess
+    if (!cgroup) {
+      SLURMX_ERROR("Failed to create cgroup for task #{}", create_cg.task_id);
+      create_cg.ok_prom.set_value(false);
+    } else {
+      create_cg.ok_prom.set_value(true);
+      this_->m_task_id_to_cg_path_map_.emplace(create_cg.task_id, cgroup);
+    }
   }
-  return true;
+}
+
+void TaskManager::EvGrpcReleaseCgroupCb_(int efd, short events,
+                                         void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  EvQueueReleaseCg release_cg;
+  while (this_->m_grpc_release_cg_queue_.try_dequeue(release_cg)) {
+    SLURMX_DEBUG("Destroying Cgroup for task #{}", release_cg.task_id);
+
+    auto iter = this_->m_task_id_to_cg_path_map_.find(release_cg.task_id);
+    if (iter != this_->m_task_id_to_cg_path_map_.end()) {
+      this_->m_task_id_to_cg_path_map_.erase(iter);
+    }
+
+    this_->m_uid_to_task_ids_map_[release_cg.uid].erase(release_cg.task_id);
+    if (this_->m_uid_to_task_ids_map_[release_cg.uid].empty()) {
+      this_->m_uid_to_task_ids_map_.erase(release_cg.uid);
+    }
+
+    std::string cg_path = CgroupStrByTaskId_(release_cg.task_id);
+
+    bool res = this_->m_cg_mgr_.Release(cg_path);
+    // Release cgroup for the new subprocess
+    if (!res) {
+      SLURMX_ERROR("Failed to Release cgroup for task #{}", release_cg.task_id);
+      release_cg.ok_prom.set_value(false);
+    } else {
+      release_cg.ok_prom.set_value(true);
+    }
+  }
 }
 
 }  // namespace Xd

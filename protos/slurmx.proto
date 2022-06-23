@@ -169,14 +169,20 @@ message ExecuteTaskReply {
 
 message CreateCgroupForTaskRequest {
   uint32 task_id = 1;
+  uint32 uid = 2;
+}
+
+message CreateCgroupForTaskReply{
+  bool ok = 1;
 }
 
 message ReleaseCgroupForTaskRequest{
   uint32 task_id = 1;
+  uint32 uid = 2;
 }
 
-message BasicReply {
-  bool ok = 1;
+message ReleaseCgroupForTaskReply{
+  uint32 ok = 1;
 }
 
 message TerminateTaskRequest {
@@ -275,8 +281,8 @@ service SlurmXd {
    */
   rpc ExecuteTask(ExecuteTaskRequest) returns(ExecuteTaskReply);
 
-  rpc CreateCgroupForTask(CreateCgroupForTaskRequest) returns(BasicReply);
-  rpc ReleaseCgroupForTask(ReleaseCgroupForTaskRequest) returns(BasicReply);
+  rpc CreateCgroupForTask(CreateCgroupForTaskRequest) returns(CreateCgroupForTaskReply);
+  rpc ReleaseCgroupForTask(ReleaseCgroupForTaskRequest) returns(ReleaseCgroupForTaskReply);
 
   /*
   If the task is an interactive task, the resource uuid is also revoked.

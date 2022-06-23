@@ -67,12 +67,12 @@ class SlurmXdServiceImpl : public SlurmXd::Service {
   grpc::Status CreateCgroupForTask(
       grpc::ServerContext *context,
       const SlurmxGrpc::CreateCgroupForTaskRequest *request,
-      SlurmxGrpc::BasicReply *response) override;
+      SlurmxGrpc::CreateCgroupForTaskReply *response) override;
 
   grpc::Status ReleaseCgroupForTask(
       grpc::ServerContext *context,
       const SlurmxGrpc::ReleaseCgroupForTaskRequest *request,
-      SlurmxGrpc::BasicReply *response) override;
+      SlurmxGrpc::ReleaseCgroupForTaskReply *response) override;
 };
 
 class XdServer {

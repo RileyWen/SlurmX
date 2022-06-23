@@ -462,16 +462,18 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPort(
 grpc::Status SlurmXdServiceImpl::CreateCgroupForTask(
     grpc::ServerContext *context,
     const SlurmxGrpc::CreateCgroupForTaskRequest *request,
-    SlurmxGrpc::BasicReply *response) {
-  response->set_ok(g_task_mgr->CreateCgroup(request->task_id()));
+    SlurmxGrpc::CreateCgroupForTaskReply *response) {
+  bool ok = g_task_mgr->CreateCgroupAsync(request->task_id(), request->uid());
+  response->set_ok(ok);
   return Status::OK;
 }
 
 grpc::Status SlurmXdServiceImpl::ReleaseCgroupForTask(
     grpc::ServerContext *context,
     const SlurmxGrpc::ReleaseCgroupForTaskRequest *request,
-    SlurmxGrpc::BasicReply *response) {
-  response->set_ok(g_task_mgr->ReleaseCgroup(request->task_id()));
+    SlurmxGrpc::ReleaseCgroupForTaskReply *response) {
+  bool ok = g_task_mgr->ReleaseCgroupAsync(request->task_id(), request->uid());
+  response->set_ok(ok);
   return Status::OK;
 }
 

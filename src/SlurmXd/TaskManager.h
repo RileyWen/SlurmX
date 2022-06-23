@@ -168,9 +168,9 @@ class TaskManager {
 
   std::optional<uint32_t> QueryTaskIdFromPidAsync(pid_t pid);
 
-  bool CreateCgroup(uint32_t task_id);
+  bool CreateCgroupAsync(uint32_t task_id, uid_t uid);
 
-  bool ReleaseCgroup(uint32_t task_id);
+  bool ReleaseCgroupAsync(uint32_t task_id, uid_t uid);
 
   void TerminateTaskAsync(uint32_t task_id);
 
@@ -213,9 +213,20 @@ class TaskManager {
   };
 
   struct EvQueueQueryTaskIdFromPid {
-    // Todo: check the start value of task id
     std::promise<std::optional<uint32_t> /*task_id*/> task_id_prom;
     pid_t pid;
+  };
+
+  struct EvQueueCreateCg {
+    uint32_t task_id;
+    uid_t uid;
+    std::promise<bool> ok_prom;
+  };
+
+  struct EvQueueReleaseCg {
+    uint32_t task_id;
+    uid_t uid;
+    std::promise<bool> ok_prom;
   };
 
   struct EvQueueTaskTerminate {
@@ -327,8 +338,11 @@ class TaskManager {
   absl::flat_hash_map<uint32_t /*pid*/, TaskInstance*> m_pid_task_map_;
   absl::flat_hash_map<uint32_t /*pid*/, ProcessInstance*> m_pid_proc_map_;
 
+  // Note: this map doesn't own `util::Cgroup*`! DO NOT free it!
+  absl::flat_hash_map<uint32_t /*task id*/, util::Cgroup* /*cgroup*/>
+      m_task_id_to_cg_path_map_;
   absl::flat_hash_map<uid_t /*uid*/, absl::flat_hash_set<uint32_t /*task id*/>>
-      m_uid_to_task_ids_;
+      m_uid_to_task_ids_map_;
 
   util::CgroupManager& m_cg_mgr_;
 
@@ -338,6 +352,12 @@ class TaskManager {
 
   static void EvGrpcExecuteTaskCb_(evutil_socket_t efd, short events,
                                    void* user_data);
+
+  static void EvGrpcCreateCgroupCb_(evutil_socket_t efd, short events,
+                                    void* user_data);
+
+  static void EvGrpcReleaseCgroupCb_(evutil_socket_t efd, short events,
+                                     void* user_data);
 
   static void EvGrpcSpawnInteractiveTaskCb_(evutil_socket_t efd, short events,
                                             void* user_data);
@@ -379,9 +399,14 @@ class TaskManager {
   struct event* m_ev_grpc_interactive_task_;
   ConcurrentQueue<EvQueueGrpcInteractiveTask> m_grpc_interactive_task_queue_;
 
-  //
   struct event* m_ev_query_task_id_from_pid_;
   ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
+
+  struct event* m_ev_grpc_create_cg_;
+  ConcurrentQueue<EvQueueCreateCg> m_grpc_create_cg_queue_;
+
+  struct event* m_ev_grpc_release_cg_;
+  ConcurrentQueue<EvQueueReleaseCg> m_grpc_release_cg_queue_;
 
   // A custom event that handles the ExecuteTask RPC.
   struct event* m_ev_grpc_execute_task_;

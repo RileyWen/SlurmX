@@ -111,19 +111,20 @@ SlurmxErr XdNodeStub::TerminateTask(uint32_t task_id) {
     return SlurmxErr::kGenericFailure;
 }
 
-SlurmxErr XdNodeStub::CreateCgroupForTask(uint32_t task_id) {
-  using SlurmxGrpc::BasicReply;
+SlurmxErr XdNodeStub::CreateCgroupForTask(uint32_t task_id, uid_t uid) {
+  using SlurmxGrpc::CreateCgroupForTaskReply;
   using SlurmxGrpc::CreateCgroupForTaskRequest;
 
   ClientContext context;
   Status status;
   CreateCgroupForTaskRequest request;
-  BasicReply reply;
+  CreateCgroupForTaskReply reply;
 
   request.set_task_id(task_id);
+  request.set_uid(uid);
   status = m_stub_->CreateCgroupForTask(&context, request, &reply);
   if (!status.ok()) {
-    SLURMX_DEBUG(
+    SLURMX_ERROR(
         "CreateCgroupForTask RPC for Node {} returned with status not ok: {}",
         m_addr_and_id_.node_id, status.error_message());
     return SlurmxErr::kRpcFailure;
@@ -134,20 +135,22 @@ SlurmxErr XdNodeStub::CreateCgroupForTask(uint32_t task_id) {
   else
     return SlurmxErr::kGenericFailure;
 }
-SlurmxErr XdNodeStub::ReleaseCgroupForTask(uint32_t task_id) {
-  using SlurmxGrpc::BasicReply;
+
+SlurmxErr XdNodeStub::ReleaseCgroupForTask(uint32_t task_id, uid_t uid) {
+  using SlurmxGrpc::ReleaseCgroupForTaskReply;
   using SlurmxGrpc::ReleaseCgroupForTaskRequest;
 
   ClientContext context;
   Status status;
   ReleaseCgroupForTaskRequest request;
-  BasicReply reply;
+  ReleaseCgroupForTaskReply reply;
 
   request.set_task_id(task_id);
+  request.set_uid(uid);
   status = m_stub_->ReleaseCgroupForTask(&context, request, &reply);
   if (!status.ok()) {
     SLURMX_DEBUG(
-        "ReleaseCgroupForTask RPC for Node {} returned with status not ok: {}",
+        "ReleaseCgroupForTask gRPC for Node {} returned with status not ok: {}",
         m_addr_and_id_.node_id, status.error_message());
     return SlurmxErr::kRpcFailure;
   }
