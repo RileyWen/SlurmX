@@ -481,11 +481,46 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPortForward(
     grpc::ServerContext *context,
     const SlurmxGrpc::QueryTaskIdFromPortForwardRequest *request,
     SlurmxGrpc::QueryTaskIdFromPortForwardReply *response) {
+  // Check whether the remote address is in the addresses of CraneD nodes.
+  auto ip_iter =
+      g_config.NodesHostnameToIpv4.find(request->target_xd_address());
+  if (ip_iter == g_config.NodesHostnameToIpv4.end()) {
+    // Not in the addresses of CraneD nodes. This ssh request comes from a user.
+    // Check if the user's uid is running a task. If so, move it in to the
+    // cgroup of his first task. If not so, reject this ssh request.
+    SLURMX_TRACE(
+        "Receive QueryTaskIdFromPortForward from Pam module: "
+        "port: {}, xd_address: {}. This ssh comes from a user machine. uid: {}",
+        request->port(), request->target_xd_address(), request->uid());
+
+    response->set_from_user(true);
+
+    TaskInfoOfUid info{};
+    if (g_task_mgr->QueryTaskInfoOfUidAsync(request->uid(), &info)) {
+      SLURMX_TRACE(
+          "Found a task #{} belonging to uid {}. "
+          "Moving this ssh session process into the task's cgroup...",
+          info.first_task_id, request->uid());
+      util::CgroupManager::Instance().MigrateProcTo(
+          request->pid(), info.first_task_cgroup->GetCgroupString());
+      response->set_task_id(info.first_task_id);
+      response->set_ok(true);
+    } else {
+      SLURMX_TRACE(
+          "Found no task belonging to uid {}. Reject this ssh request.",
+          request->uid());
+      response->set_ok(false);
+    }
+    return Status::OK;
+  }
+
   SLURMX_TRACE(
       "Receive QueryTaskIdFromPortForward from Pam module: "
-      "port: {}, xd_address: {}",
-      request->port(), request->target_xd_address());
-
+      "port: {}, xd_address: {}. This ssh comes from a CraneD node. uid: {}",
+      request->port(), request->target_xd_address(), request->uid());
+  // In the addresses of CraneD nodes. This ssh request comes from a CraneD
+  // node. Check if the remote port belongs to a task. If so, move it in to the
+  // cgroup of this task. If not so, reject this ssh request.
   std::shared_ptr<Channel> channel_of_remote_xd = grpc::CreateChannel(
       request->target_xd_address(), grpc::InsecureChannelCredentials());
 
@@ -510,10 +545,25 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPortForward(
   }
 
   if (reply_from_remote_xd.ok()) {
-    SLURMX_TRACE("ssh client with remote port {} belongs to task #{}",
-                 request->port(), reply_from_remote_xd.task_id());
-    response->set_ok(true);
-    response->set_task_id(reply_from_remote_xd.task_id());
+    util::Cgroup *cg;
+    if (g_task_mgr->QueryCgOfTaskIdAsync(reply_from_remote_xd.task_id(), &cg)) {
+      SLURMX_TRACE(
+          "ssh client with remote port {} belongs to task #{}. "
+          "Moving this ssh session process into the task's cgroup",
+          request->port(), reply_from_remote_xd.task_id());
+
+      util::CgroupManager::Instance().MigrateProcTo(request->pid(),
+                                                    cg->GetCgroupString());
+      response->set_ok(true);
+      response->set_task_id(reply_from_remote_xd.task_id());
+    } else {
+      SLURMX_TRACE(
+          "ssh client with remote port {} belongs to task #{}. "
+          "But the task's cgroup is not found. Reject this ssh request",
+          request->port(), reply_from_remote_xd.task_id());
+      response->set_ok(false);
+    }
+
     return Status::OK;
   } else {
     SLURMX_TRACE("ssh client with remote port {} doesn't belong to any task",

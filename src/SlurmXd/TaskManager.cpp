@@ -111,6 +111,33 @@ TaskManager::TaskManager()
       std::terminate();
     }
   }
+  {  // gRPC: QueryTaskInfoOfUid
+    m_ev_query_task_info_of_uid_ =
+        event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
+                  EvGrpcQueryTaskInfoOfUidCb_, this);
+    if (!m_ev_query_task_info_of_uid_) {
+      SLURMX_ERROR("Failed to create the query info of uid event!");
+      std::terminate();
+    }
+
+    if (event_add(m_ev_query_task_info_of_uid_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the query info of uid event to base!");
+      std::terminate();
+    }
+  }
+  {  // gRPC: QueryCgOfTaskId
+    m_ev_query_cg_of_task_id_ = event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
+                                          EvGrpcQueryCgOfTaskIdCb_, this);
+    if (!m_ev_query_cg_of_task_id_) {
+      SLURMX_ERROR("Failed to create the query cg of task id event!");
+      std::terminate();
+    }
+
+    if (event_add(m_ev_query_cg_of_task_id_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the query cg of task id event to base!");
+      std::terminate();
+    }
+  }
   {  // Exit Event
     if ((m_ev_exit_fd_ = eventfd(0, EFD_CLOEXEC)) < 0) {
       SLURMX_ERROR("Failed to init the eventfd!");
@@ -177,6 +204,8 @@ TaskManager::~TaskManager() {
   if (m_ev_sigint_) event_free(m_ev_sigint_);
 
   if (m_ev_grpc_interactive_task_) event_free(m_ev_grpc_interactive_task_);
+  if (m_ev_query_task_info_of_uid_) event_free(m_ev_query_task_info_of_uid_);
+  if (m_ev_query_cg_of_task_id_) event_free(m_ev_query_cg_of_task_id_);
   if (m_ev_grpc_create_cg_) event_free(m_ev_grpc_create_cg_);
   if (m_ev_grpc_release_cg_) event_free(m_ev_grpc_release_cg_);
   if (m_ev_query_task_id_from_pid_) event_free(m_ev_query_task_id_from_pid_);
@@ -642,9 +671,8 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       return;
     }
 
-    auto cg_iter =
-        this_->m_task_id_to_cg_path_map_.find(instance->task.task_id());
-    if (cg_iter != this_->m_task_id_to_cg_path_map_.end()) {
+    auto cg_iter = this_->m_task_id_to_cg_map_.find(instance->task.task_id());
+    if (cg_iter != this_->m_task_id_to_cg_map_.end()) {
       util::Cgroup* cgroup = cg_iter->second;
       instance->cg_path = cgroup->GetCgroupString();
       if (!AllocatableResourceAllocator::Allocate(
@@ -990,7 +1018,8 @@ void TaskManager::EvGrpcCreateCgroupCb_(int efd, short events,
       create_cg.ok_prom.set_value(false);
     } else {
       create_cg.ok_prom.set_value(true);
-      this_->m_task_id_to_cg_path_map_.emplace(create_cg.task_id, cgroup);
+      this_->m_task_id_to_cg_map_.emplace(create_cg.task_id, cgroup);
+      this_->m_uid_to_task_ids_map_[create_cg.uid].emplace(create_cg.task_id);
     }
   }
 }
@@ -1003,9 +1032,9 @@ void TaskManager::EvGrpcReleaseCgroupCb_(int efd, short events,
   while (this_->m_grpc_release_cg_queue_.try_dequeue(release_cg)) {
     SLURMX_DEBUG("Destroying Cgroup for task #{}", release_cg.task_id);
 
-    auto iter = this_->m_task_id_to_cg_path_map_.find(release_cg.task_id);
-    if (iter != this_->m_task_id_to_cg_path_map_.end()) {
-      this_->m_task_id_to_cg_path_map_.erase(iter);
+    auto iter = this_->m_task_id_to_cg_map_.find(release_cg.task_id);
+    if (iter != this_->m_task_id_to_cg_map_.end()) {
+      this_->m_task_id_to_cg_map_.erase(iter);
     }
 
     this_->m_uid_to_task_ids_map_[release_cg.uid].erase(release_cg.task_id);
@@ -1022,6 +1051,73 @@ void TaskManager::EvGrpcReleaseCgroupCb_(int efd, short events,
       release_cg.ok_prom.set_value(false);
     } else {
       release_cg.ok_prom.set_value(true);
+    }
+  }
+}
+
+bool TaskManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid* info) {
+  EvQueueQueryTaskInfoOfUid elem{.uid = uid};
+
+  std::future<TaskInfoOfUid> info_fut = elem.info_prom.get_future();
+  m_query_task_info_of_uid_queue_.enqueue(std::move(elem));
+  event_active(m_ev_query_task_info_of_uid_, 0, 0);
+
+  *info = info_fut.get();
+  return info->first_task_id > 0;
+}
+
+void TaskManager::EvGrpcQueryTaskInfoOfUidCb_(int efd, short events,
+                                              void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  EvQueueQueryTaskInfoOfUid query;
+  while (this_->m_query_task_info_of_uid_queue_.try_dequeue(query)) {
+    SLURMX_DEBUG("Query task info for uid {}", query.uid);
+
+    TaskInfoOfUid info{.job_cnt = 0};
+
+    auto iter = this_->m_uid_to_task_ids_map_.find(query.uid);
+    if (iter != this_->m_uid_to_task_ids_map_.end()) {
+      info.job_cnt = iter->second.size();
+      info.first_task_id = *iter->second.begin();
+
+      try {
+        this_->m_task_id_to_cg_map_.at(info.first_task_id);
+      } catch (const std::out_of_range& e) {
+        SLURMX_ERROR("Cannot find Cgroup* for uid {}'s task #{}!", query.uid,
+                     info.first_task_id);
+        info.job_cnt = 0;
+      }
+    }
+
+    query.info_prom.set_value(info);
+  }
+}
+
+bool TaskManager::QueryCgOfTaskIdAsync(uint32_t task_id, util::Cgroup** cg) {
+  EvQueueQueryCgOfTaskId elem{.task_id = task_id};
+
+  std::future<util::Cgroup*> cg_fut = elem.cg_prom.get_future();
+  m_query_cg_of_task_id_queue_.enqueue(std::move(elem));
+  event_active(m_ev_query_cg_of_task_id_, 0, 0);
+
+  *cg = cg_fut.get();
+  return *cg != nullptr;
+}
+
+void TaskManager::EvGrpcQueryCgOfTaskIdCb_(int efd, short events,
+                                           void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  EvQueueQueryCgOfTaskId query;
+  while (this_->m_query_cg_of_task_id_queue_.try_dequeue(query)) {
+    SLURMX_DEBUG("Query Cgroup* task #{}", query.task_id);
+
+    auto iter = this_->m_task_id_to_cg_map_.find(query.task_id);
+    if (iter != this_->m_task_id_to_cg_map_.end()) {
+      query.cg_prom.set_value(iter->second);
+    } else {
+      query.cg_prom.set_value(nullptr);
     }
   }
 }

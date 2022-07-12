@@ -27,7 +27,6 @@
 
 #include "CtlXdClient.h"
 #include "XdPublicDefs.h"
-#include "cgroup.linux.h"
 #include "protos/slurmx.grpc.pb.h"
 #include "protos/slurmx.pb.h"
 #include "slurmx/PublicHeader.h"
@@ -168,6 +167,10 @@ class TaskManager {
 
   std::optional<uint32_t> QueryTaskIdFromPidAsync(pid_t pid);
 
+  bool QueryCgOfTaskIdAsync(uint32_t task_id, util::Cgroup** cg);
+
+  bool QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid* info);
+
   bool CreateCgroupAsync(uint32_t task_id, uid_t uid);
 
   bool ReleaseCgroupAsync(uint32_t task_id, uid_t uid);
@@ -231,6 +234,16 @@ class TaskManager {
 
   struct EvQueueTaskTerminate {
     uint32_t task_id;
+  };
+
+  struct EvQueueQueryTaskInfoOfUid {
+    uid_t uid;
+    std::promise<TaskInfoOfUid> info_prom;
+  };
+
+  struct EvQueueQueryCgOfTaskId {
+    uint32_t task_id;
+    std::promise<util::Cgroup*> cg_prom;
   };
 
   struct EvTimerCbArg {
@@ -340,7 +353,7 @@ class TaskManager {
 
   // Note: this map doesn't own `util::Cgroup*`! DO NOT free it!
   absl::flat_hash_map<uint32_t /*task id*/, util::Cgroup* /*cgroup*/>
-      m_task_id_to_cg_path_map_;
+      m_task_id_to_cg_map_;
   absl::flat_hash_map<uid_t /*uid*/, absl::flat_hash_set<uint32_t /*task id*/>>
       m_uid_to_task_ids_map_;
 
@@ -358,6 +371,12 @@ class TaskManager {
 
   static void EvGrpcReleaseCgroupCb_(evutil_socket_t efd, short events,
                                      void* user_data);
+
+  static void EvGrpcQueryTaskInfoOfUidCb_(evutil_socket_t efd, short events,
+                                          void* user_data);
+
+  static void EvGrpcQueryCgOfTaskIdCb_(evutil_socket_t efd, short events,
+                                       void* user_data);
 
   static void EvGrpcSpawnInteractiveTaskCb_(evutil_socket_t efd, short events,
                                             void* user_data);
@@ -401,6 +420,12 @@ class TaskManager {
 
   struct event* m_ev_query_task_id_from_pid_;
   ConcurrentQueue<EvQueueQueryTaskIdFromPid> m_query_task_id_from_pid_queue_;
+
+  struct event* m_ev_query_task_info_of_uid_;
+  ConcurrentQueue<EvQueueQueryTaskInfoOfUid> m_query_task_info_of_uid_queue_;
+
+  struct event* m_ev_query_cg_of_task_id_;
+  ConcurrentQueue<EvQueueQueryCgOfTaskId> m_query_cg_of_task_id_queue_;
 
   struct event* m_ev_grpc_create_cg_;
   ConcurrentQueue<EvQueueCreateCg> m_grpc_create_cg_queue_;

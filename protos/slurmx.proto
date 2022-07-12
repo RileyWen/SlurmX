@@ -206,11 +206,14 @@ message QueryTaskIdFromPortReply{
 message QueryTaskIdFromPortForwardRequest{
   uint32 port = 1;
   string target_xd_address = 2;
+  uint32 uid = 3;
+  int32 pid = 4;
 }
 
 message QueryTaskIdFromPortForwardReply{
   bool ok = 1;
-  uint32 task_id = 2;
+  bool from_user = 2;
+  uint32 task_id = 3;
 }
 
 message QueryJobsInPartitionRequest {

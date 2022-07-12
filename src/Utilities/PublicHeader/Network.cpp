@@ -57,4 +57,28 @@ bool ResolveHostnameFromIpv6(const std::string& addr, std::string* hostname) {
   }
 }
 
+bool ResolveIpv4FromHostname(const std::string& hostname, std::string* addr) {
+  struct addrinfo hints {};
+  struct addrinfo *res, *tmp;
+  char host[256];
+
+  hints.ai_family = AF_INET;
+
+  int ret = getaddrinfo(hostname.c_str(), nullptr, &hints, &res);
+  if (ret != 0) {
+    SLURMX_TRACE("Error in getaddrinfo when resolving hostname {}",
+                 hostname.c_str(), gai_strerror(ret));
+    return false;
+  }
+
+  for (tmp = res; tmp != nullptr; tmp = tmp->ai_next) {
+    getnameinfo(tmp->ai_addr, tmp->ai_addrlen, host, sizeof(host), nullptr, 0,
+                NI_NUMERICHOST);
+    addr->assign(host);
+  }
+
+  freeaddrinfo(res);
+  return true;
+}
+
 }  // namespace slurmx

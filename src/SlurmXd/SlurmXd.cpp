@@ -12,36 +12,15 @@
 #include <regex>
 
 #include "CtlXdClient.h"
+#include "XdPublicDefs.h"
 #include "XdServer.h"
 #include "slurmx/PublicHeader.h"
 #include "slurmx/String.h"
+#include "slurmx/Network.h"
 
-struct Node {
-  uint32_t cpu;
-  uint64_t memory_bytes;
-
-  std::string partition_name;
-};
-
-struct Partition {
-  std::unordered_set<std::string> nodes;
-  std::unordered_set<std::string> AllowAccounts;
-};
-
-struct Config {
-  std::string SlurmXdListen;
-  std::string ControlMachine;
-  std::string SlurmXdDebugLevel;
-  std::string SlurmXdLogFile;
-
-  bool SlurmXdForeground{};
-
-  std::string Hostname;
-  std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
-  std::unordered_map<std::string, Partition> Partitions;
-};
-
-Config g_config;
+using Xd::g_config;
+using Xd::Node;
+using Xd::Partition;
 
 void GlobalVariableInit() {
   // Enable inter-thread custom event notification.
@@ -307,7 +286,17 @@ int main(int argc, char** argv) {
           } else
             std::exit(1);
 
-          for (auto&& name : name_list) g_config.Nodes[name] = node_ptr;
+          for (auto&& name : name_list) {
+            std::string ipv4;
+            if (!slurmx::ResolveIpv4FromHostname(name, &ipv4)) {
+              SLURMX_ERROR("Init error: Cannot resolve hostname of {}", name);
+              std::exit(1);
+            }
+            SLURMX_TRACE("Resolve hostname {} to {}", name, ipv4);
+            g_config.NodesHostnameToIpv4[name] = ipv4;
+
+            g_config.Nodes[name] = node_ptr;
+          }
         }
       }
 

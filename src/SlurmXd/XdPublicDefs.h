@@ -4,6 +4,7 @@
 
 #include <optional>
 
+#include "cgroup.linux.h"
 #include "slurmx/PublicHeader.h"
 
 namespace Xd {
@@ -57,5 +58,39 @@ class PasswordEntry {
   std::string m_pw_dir_;    /* home directory */
   std::string m_pw_shell_;  /* shell program */
 };
+
+struct TaskInfoOfUid {
+  uint32_t job_cnt;
+  uint32_t first_task_id;
+  util::Cgroup* first_task_cgroup;
+};
+
+struct Node {
+  uint32_t cpu;
+  uint64_t memory_bytes;
+
+  std::string partition_name;
+};
+
+struct Partition {
+  std::unordered_set<std::string> nodes;
+  std::unordered_set<std::string> AllowAccounts;
+};
+
+struct Config {
+  std::string SlurmXdListen;
+  std::string ControlMachine;
+  std::string SlurmXdDebugLevel;
+  std::string SlurmXdLogFile;
+
+  bool SlurmXdForeground{};
+
+  std::string Hostname;
+  std::unordered_map<std::string, std::string> NodesHostnameToIpv4;
+  std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
+  std::unordered_map<std::string, Partition> Partitions;
+};
+
+inline Config g_config;
 
 }  // namespace Xd

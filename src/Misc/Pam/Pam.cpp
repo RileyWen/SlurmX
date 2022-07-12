@@ -1,4 +1,5 @@
 #include <grpc++/grpc++.h>
+#include <pwd.h>
 #include <security/_pam_macros.h>
 #include <security/pam_ext.h>
 #include <security/pam_modules.h>
@@ -18,8 +19,9 @@ using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
 
-bool QueryPortFromSlurmXd(pam_handle_t *pamh, const std::string &xd_address,
-                          uint16_t port_to_query, uint32_t *task_id) {
+bool QueryPortFromSlurmXd(pam_handle_t *pamh, uid_t uid,
+                          const std::string &xd_address, uint16_t port_to_query,
+                          uint32_t *task_id) {
   std::string xd_unix_socket_address =
       fmt::format("unix://{}", kDefaultSlurmXdUnixSockPath);
 
@@ -54,6 +56,8 @@ bool QueryPortFromSlurmXd(pam_handle_t *pamh, const std::string &xd_address,
 
   request.set_target_xd_address(xd_address);
   request.set_port(port_to_query);
+  request.set_uid(uid);
+  request.set_pid(getpid());
 
   status = stub->QueryTaskIdFromPortForward(&context, request, &reply);
   if (!status.ok()) {
@@ -115,6 +119,32 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
                      const char **argv) {
   int rc;
   char *user_name = nullptr;
+  uid_t uid;
+
+  size_t buf_size;
+  char *buf;
+  struct passwd pwd, *pwd_result;
+
+  /* Calculate buffer size for getpwnam_r */
+  buf_size = sysconf(_SC_GETPW_R_SIZE_MAX);
+  if (buf_size == -1) buf_size = 16384; /* take a large guess */
+
+  buf = new char[buf_size];
+  errno = 0;
+  rc = getpwnam_r(user_name, &pwd, buf, buf_size, &pwd_result);
+  if (pwd_result == nullptr) {
+    if (rc == 0) {
+      pam_syslog(pamh, LOG_ERR, "[SlurmX] getpwnam_r could not locate user %s",
+                 user_name);
+    } else {
+      pam_syslog(pamh, LOG_ERR, "[SlurmX] getpwnam_r: %s", strerror(errno));
+    }
+
+    delete buf;
+    return PAM_SESSION_ERR;
+  }
+  uid = pwd.pw_uid;
+  delete buf;
 
   /* Asking the application for a username */
   rc = pam_get_item(pamh, PAM_USER, (const void **)&user_name);
@@ -235,7 +265,7 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
              server_address.c_str(), port);
 
   belongs_to_a_task =
-      QueryPortFromSlurmXd(pamh, server_address, port, &task_id);
+      QueryPortFromSlurmXd(pamh, uid, server_address, port, &task_id);
 
   if (belongs_to_a_task) {
     pam_syslog(pamh, LOG_ERR,
