@@ -2,6 +2,7 @@
 
 #include <pwd.h>
 
+#include <BS_thread_pool.hpp>
 #include <optional>
 
 #include "cgroup.linux.h"
@@ -62,7 +63,8 @@ class PasswordEntry {
 struct TaskInfoOfUid {
   uint32_t job_cnt;
   uint32_t first_task_id;
-  util::Cgroup* first_task_cgroup;
+  bool cgroup_exists;
+  std::string cgroup_path;
 };
 
 struct Node {
@@ -86,11 +88,13 @@ struct Config {
   bool SlurmXdForeground{};
 
   std::string Hostname;
-  std::unordered_map<std::string, std::string> NodesHostnameToIpv4;
+  std::unordered_map<std::string, std::string> Ipv4ToNodesHostname;
   std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
   std::unordered_map<std::string, Partition> Partitions;
 };
 
 inline Config g_config;
+
+inline std::unique_ptr<BS::thread_pool> g_thread_pool;
 
 }  // namespace Xd

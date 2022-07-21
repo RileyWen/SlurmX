@@ -64,6 +64,11 @@ class SlurmXdServiceImpl : public SlurmXd::Service {
       const SlurmxGrpc::QueryTaskIdFromPortForwardRequest *request,
       SlurmxGrpc::QueryTaskIdFromPortForwardReply *response) override;
 
+  grpc::Status MigrateSshProcToCgroup(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::MigrateSshProcToCgroupRequest *request,
+      SlurmxGrpc::MigrateSshProcToCgroupReply *response) override;
+
   grpc::Status CreateCgroupForTask(
       grpc::ServerContext *context,
       const SlurmxGrpc::CreateCgroupForTaskRequest *request,

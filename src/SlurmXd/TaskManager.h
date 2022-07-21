@@ -238,6 +238,7 @@ class TaskManager {
 
   struct EvQueueQueryTaskInfoOfUid {
     uid_t uid;
+    pid_t pid;
     std::promise<TaskInfoOfUid> info_prom;
   };
 

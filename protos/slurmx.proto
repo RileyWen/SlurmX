@@ -204,16 +204,17 @@ message QueryTaskIdFromPortReply{
 }
 
 message QueryTaskIdFromPortForwardRequest{
-  uint32 port = 1;
+  uint32 ssh_remote_port = 1;
   string target_xd_address = 2;
-  uint32 uid = 3;
-  int32 pid = 4;
+  string target_xd_port = 3;
+  uint32 uid = 4;
 }
 
 message QueryTaskIdFromPortForwardReply{
   bool ok = 1;
   bool from_user = 2;
   uint32 task_id = 3;
+  string cgroup_path = 4;
 }
 
 message QueryJobsInPartitionRequest {
@@ -243,6 +244,14 @@ message QueryPartitionInfoReply {
   repeated PartitionInfo partition_info = 1;
 }
 
+message MigrateSshProcToCgroupRequest {
+  int32 pid = 1;
+  string cgroup_path = 2;
+}
+
+message MigrateSshProcToCgroupReply {
+  bool ok = 1;
+}
 
 // Todo: Divide service into two parts: one for SlurmXd and one for SrunX
 //  We need to distinguish the message sender
@@ -301,6 +310,7 @@ service SlurmXd {
 
   /* ----------------------------------- Called from Pam Module  --------------------------------------------------- */
   rpc QueryTaskIdFromPortForward(QueryTaskIdFromPortForwardRequest) returns (QueryTaskIdFromPortForwardReply);
+  rpc MigrateSshProcToCgroup(MigrateSshProcToCgroupRequest) returns (MigrateSshProcToCgroupReply);
 
   /* ----------------------------------- Called from SrunX --------------------------------------------------------- */
   rpc SrunXStream(stream SrunXStreamRequest) returns (stream SrunXStreamReply);

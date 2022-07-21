@@ -1032,25 +1032,58 @@ void TaskManager::EvGrpcReleaseCgroupCb_(int efd, short events,
   while (this_->m_grpc_release_cg_queue_.try_dequeue(release_cg)) {
     SLURMX_DEBUG("Destroying Cgroup for task #{}", release_cg.task_id);
 
-    auto iter = this_->m_task_id_to_cg_map_.find(release_cg.task_id);
-    if (iter != this_->m_task_id_to_cg_map_.end()) {
-      this_->m_task_id_to_cg_map_.erase(iter);
-    }
-
     this_->m_uid_to_task_ids_map_[release_cg.uid].erase(release_cg.task_id);
     if (this_->m_uid_to_task_ids_map_[release_cg.uid].empty()) {
       this_->m_uid_to_task_ids_map_.erase(release_cg.uid);
     }
 
-    std::string cg_path = CgroupStrByTaskId_(release_cg.task_id);
-
-    bool res = this_->m_cg_mgr_.Release(cg_path);
-    // Release cgroup for the new subprocess
-    if (!res) {
-      SLURMX_ERROR("Failed to Release cgroup for task #{}", release_cg.task_id);
+    auto iter = this_->m_task_id_to_cg_map_.find(release_cg.task_id);
+    if (iter == this_->m_task_id_to_cg_map_.end()) {
+      SLURMX_ERROR("Failed to find cgroup for task #{}", release_cg.task_id);
       release_cg.ok_prom.set_value(false);
+      return;
     } else {
+      // The termination of all processes in a cgroup is a time-consuming work.
+      // Therefore, once we are sure that the cgroup for this task exists, we
+      // let gRPC call return and put the termination work into the thread pool
+      // to avoid blocking the event loop of TaskManager.
+      // Kind of async behavior.
       release_cg.ok_prom.set_value(true);
+
+      util::Cgroup* cg = iter->second;
+      this_->m_task_id_to_cg_map_.erase(iter);
+
+      g_thread_pool->push_task(
+          [cg, cg_mgr = &this_->m_cg_mgr_, task_id = release_cg.task_id] {
+            bool rc;
+            int cnt = 0;
+
+            while (true) {
+              if (cg->Empty()) {
+                SLURMX_TRACE("Cgroup {} now has no process inside.",
+                             cg->GetCgroupString());
+                break;
+              }
+
+              if (cnt >= 5) {
+                SLURMX_ERROR(
+                    "Couldn't kill the processes in cgroup {} after {} times. "
+                    "Skipping it.",
+                    cg->GetCgroupString(), cnt);
+                break;
+              }
+
+              cg->KillAllProcesses();
+              ++cnt;
+              std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+
+            rc = cg_mgr->Release(cg->GetCgroupString());
+            // Release cgroup for the new subprocess
+            if (!rc) {
+              SLURMX_ERROR("Failed to Release cgroup for task #{}", task_id);
+            }
+          });
     }
   }
 }
@@ -1063,7 +1096,7 @@ bool TaskManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid* info) {
   event_active(m_ev_query_task_info_of_uid_, 0, 0);
 
   *info = info_fut.get();
-  return info->first_task_id > 0;
+  return info->job_cnt > 0 && info->cgroup_exists;
 }
 
 void TaskManager::EvGrpcQueryTaskInfoOfUidCb_(int efd, short events,
@@ -1074,7 +1107,7 @@ void TaskManager::EvGrpcQueryTaskInfoOfUidCb_(int efd, short events,
   while (this_->m_query_task_info_of_uid_queue_.try_dequeue(query)) {
     SLURMX_DEBUG("Query task info for uid {}", query.uid);
 
-    TaskInfoOfUid info{.job_cnt = 0};
+    TaskInfoOfUid info{.job_cnt = 0, .cgroup_exists = false};
 
     auto iter = this_->m_uid_to_task_ids_map_.find(query.uid);
     if (iter != this_->m_uid_to_task_ids_map_.end()) {
@@ -1082,11 +1115,12 @@ void TaskManager::EvGrpcQueryTaskInfoOfUidCb_(int efd, short events,
       info.first_task_id = *iter->second.begin();
 
       try {
-        this_->m_task_id_to_cg_map_.at(info.first_task_id);
+        util::Cgroup* cg = this_->m_task_id_to_cg_map_.at(info.first_task_id);
+        info.cgroup_path = cg->GetCgroupString();
+        info.cgroup_exists = true;
       } catch (const std::out_of_range& e) {
         SLURMX_ERROR("Cannot find Cgroup* for uid {}'s task #{}!", query.uid,
                      info.first_task_id);
-        info.job_cnt = 0;
       }
     }
 

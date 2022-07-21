@@ -6,6 +6,9 @@
 
 #include "cgroup.linux.h"
 
+#include <csignal>
+#include <fstream>
+
 namespace util {
 
 /*
@@ -321,7 +324,7 @@ bool CgroupManager::Release(const std::string &cgroup_path) {
       SLURMX_WARN("Unable to completely remove cgroup {}: {} {}\n",
                   cgroup_path.c_str(), err, cgroup_strerror(err));
     } else {
-      SLURMX_WARN("Deleted cgroup {}.", cgroup_path.c_str());
+      SLURMX_TRACE("Deleted cgroup {}.", cgroup_path.c_str());
     }
 
     // Notice the cgroup struct freed here is not the one held by Cgroup class.
@@ -356,130 +359,174 @@ bool CgroupManager::MigrateProcTo(pid_t pid, const std::string &cgroup_path) {
   // If there is no memory controller present, we skip all this and just attempt
   // a migrate
   int err;
-  u_int64_t orig_migrate;
-  bool changed_orig = false;
-  char *orig_cgroup_path = nullptr;
-  struct cgroup *orig_cgroup;
-  struct cgroup_controller *memory_controller;
-  if (Mounted(Controller::MEMORY_CONTROLLER) &&
-      (err = cgroup_get_current_controller_path(
-           pid, GetControllerStringView(Controller::MEMORY_CONTROLLER).data(),
-           &orig_cgroup_path))) {
-    SLURMX_WARN(
-        "Unable to determine current memory cgroup for PID {}. Error {}: {}\n",
-        pid, err, cgroup_strerror(err));
-    return false;
-  }
-  // We will migrate the PID to the new cgroup even if it is in the proper
-  // memory controller cgroup It is possible for the task to be in multiple
-  // cgroups.
-  if (Mounted(Controller::MEMORY_CONTROLLER) && (orig_cgroup_path != NULL) &&
-      (cgroup_path == orig_cgroup_path)) {
-    // Yes, there are race conditions here - can't really avoid this.
-    // Throughout this block, we can assume memory controller exists.
-    // Get original value of migrate.
-    orig_cgroup = cgroup_new_cgroup(orig_cgroup_path);
-    assert(orig_cgroup != nullptr);
-    if ((err = cgroup_get_cgroup(orig_cgroup))) {
-      SLURMX_WARN("Unable to read original cgroup {}. Error {}: {}\n",
-                  orig_cgroup_path, err, cgroup_strerror(err));
-      cgroup_free(&orig_cgroup);
-      goto after_migrate;
-    }
-    if ((memory_controller = cgroup_get_controller(
-             orig_cgroup,
-             GetControllerStringView(Controller::MEMORY_CONTROLLER).data())) ==
-        nullptr) {
-      SLURMX_WARN(
-          "Unable to get memory controller of cgroup {}. Error {}: {}\n",
-          orig_cgroup_path, err, cgroup_strerror(err));
-      cgroup_free(&orig_cgroup);
-      goto after_migrate;
-    }
-    if ((err = cgroup_get_value_uint64(memory_controller,
-                                       "memory.move_charge_at_immigrate",
-                                       &orig_migrate))) {
-      if (err == ECGROUPVALUENOTEXIST) {
-        // Older kernels don't have the ability to migrate memory accounting
-        // to the new cgroup.
-        SLURMX_WARN(
-            "This kernel does not support memory usage migration; cgroup "
-            "{} memory statistics"
-            " will be slightly incorrect.\n",
-            cgroup_path.c_str());
-      } else {
-        SLURMX_WARN(
-            "Unable to read cgroup {} memory controller settings for "
-            "migration: {} {}\n",
-            orig_cgroup_path, err, cgroup_strerror(err));
-      }
-      cgroup_free(&orig_cgroup);
-      goto after_migrate;
-    }
-    if (orig_migrate != 3) {
-      cgroup_free(&orig_cgroup);
-      orig_cgroup = cgroup_new_cgroup(orig_cgroup_path);
-      memory_controller = cgroup_add_controller(
-          orig_cgroup,
-          GetControllerStringView(Controller::MEMORY_CONTROLLER).data());
-      assert(memory_controller !=
-             NULL);  // Memory controller must already exist
-      cgroup_add_value_uint64(memory_controller,
-                              "memory.move_charge_at_immigrate", 3);
-      if ((err = cgroup_modify_cgroup(orig_cgroup))) {
-        // Not allowed to change settings
-        SLURMX_WARN(
-            "Unable to change cgroup {} memory controller settings for "
-            "migration. "
-            "Some memory accounting will be inaccurate: {} "
-            "{}\n",
-            orig_cgroup_path, err, cgroup_strerror(err));
-      } else {
-        changed_orig = true;
-      }
-    }
-    cgroup_free(&orig_cgroup);
-  }
-
+//  u_int64_t orig_migrate;
+//  bool changed_orig = false;
+//  char *orig_cgroup_path = nullptr;
+//  struct cgroup *orig_cgroup;
+//  struct cgroup_controller *memory_controller;
+//  if (Mounted(Controller::MEMORY_CONTROLLER) &&
+//      (err = cgroup_get_current_controller_path(
+//           pid, GetControllerStringView(Controller::MEMORY_CONTROLLER).data(),
+//           &orig_cgroup_path))) {
+//    SLURMX_WARN(
+//        "Unable to determine current memory cgroup for PID {}. Error {}:
+//        {}\n", pid, err, cgroup_strerror(err));
+//    return false;
+//  }
+//  // We will migrate the PID to the new cgroup even if it is in the proper
+//  // memory controller cgroup It is possible for the task to be in multiple
+//  // cgroups.
+//  if (Mounted(Controller::MEMORY_CONTROLLER) && (orig_cgroup_path != NULL) &&
+//      (cgroup_path == orig_cgroup_path)) {
+//    // Yes, there are race conditions here - can't really avoid this.
+//    // Throughout this block, we can assume memory controller exists.
+//    // Get original value of migrate.
+//    orig_cgroup = cgroup_new_cgroup(orig_cgroup_path);
+//    assert(orig_cgroup != nullptr);
+//    if ((err = cgroup_get_cgroup(orig_cgroup))) {
+//      SLURMX_WARN("Unable to read original cgroup {}. Error {}: {}\n",
+//                  orig_cgroup_path, err, cgroup_strerror(err));
+//      cgroup_free(&orig_cgroup);
+//      goto after_migrate;
+//    }
+//    if ((memory_controller = cgroup_get_controller(
+//             orig_cgroup,
+//             GetControllerStringView(Controller::MEMORY_CONTROLLER).data()))
+//             ==
+//        nullptr) {
+//      SLURMX_WARN(
+//          "Unable to get memory controller of cgroup {}. Error {}: {}\n",
+//          orig_cgroup_path, err, cgroup_strerror(err));
+//      cgroup_free(&orig_cgroup);
+//      goto after_migrate;
+//    }
+//    if ((err = cgroup_get_value_uint64(memory_controller,
+//                                       "memory.move_charge_at_immigrate",
+//                                       &orig_migrate))) {
+//      if (err == ECGROUPVALUENOTEXIST) {
+//        // Older kernels don't have the ability to migrate memory accounting
+//        // to the new cgroup.
+//        SLURMX_WARN(
+//            "This kernel does not support memory usage migration; cgroup "
+//            "{} memory statistics"
+//            " will be slightly incorrect.\n",
+//            cgroup_path.c_str());
+//      } else {
+//        SLURMX_WARN(
+//            "Unable to read cgroup {} memory controller settings for "
+//            "migration: {} {}\n",
+//            orig_cgroup_path, err, cgroup_strerror(err));
+//      }
+//      cgroup_free(&orig_cgroup);
+//      goto after_migrate;
+//    }
+//    if (orig_migrate != 3) {
+//      cgroup_free(&orig_cgroup);
+//      orig_cgroup = cgroup_new_cgroup(orig_cgroup_path);
+//      memory_controller = cgroup_add_controller(
+//          orig_cgroup,
+//          GetControllerStringView(Controller::MEMORY_CONTROLLER).data());
+//      assert(memory_controller !=
+//             NULL);  // Memory controller must already exist
+//      cgroup_add_value_uint64(memory_controller,
+//                              "memory.move_charge_at_immigrate", 3);
+//      if ((err = cgroup_modify_cgroup(orig_cgroup))) {
+//        // Not allowed to change settings
+//        SLURMX_WARN(
+//            "Unable to change cgroup {} memory controller settings for "
+//            "migration. "
+//            "Some memory accounting will be inaccurate: {} "
+//            "{}\n",
+//            orig_cgroup_path, err, cgroup_strerror(err));
+//      } else {
+//        changed_orig = true;
+//      }
+//    }
+//    cgroup_free(&orig_cgroup);
+//  }
+//
 after_migrate:
 
-  orig_cgroup = NULL;
-  err = cgroup_attach_task_pid(iter->second.first->m_cgroup_, pid);
-  if (err) {
+  //  orig_cgroup = NULL;
+  struct cgroup *pcg = iter->second.first->m_cgroup_;
+  err = cgroup_attach_task_pid(pcg, pid);
+  if (err != 0) {
     SLURMX_WARN("Cannot attach pid {} to cgroup {}: {} {}\n", pid,
                 cgroup_path.c_str(), err, cgroup_strerror(err));
   }
 
-  if (changed_orig) {
-    if ((orig_cgroup = cgroup_new_cgroup(orig_cgroup_path)) == NULL) {
-      goto after_restore;
-    }
-    if (((memory_controller = cgroup_add_controller(
-              orig_cgroup,
-              GetControllerStringView(Controller::MEMORY_CONTROLLER).data())) !=
-         nullptr) &&
-        (!cgroup_add_value_uint64(memory_controller,
-                                  "memory.move_charge_at_immigrate",
-                                  orig_migrate))) {
-      if ((err = cgroup_modify_cgroup(orig_cgroup))) {
-        SLURMX_WARN(
-            "Unable to change cgroup {} memory controller settings for "
-            "migration. "
-            "Some memory accounting will be inaccurate: {} "
-            "{}\n",
-            orig_cgroup_path, err, cgroup_strerror(err));
-      } else {
-        changed_orig = true;
-      }
-    }
-    cgroup_free(&orig_cgroup);
-  }
+//  std::string cpu_cg_path =
+//      fmt::format("/sys/fs/cgroup/cpu,cpuacct/{}/cgroup.procs", cgroup_path);
+//
+//  std::ifstream cpu_cg_content(cpu_cg_path);
+//  std::string line;
+//
+//  FILE *cpu_cg_f = fopen(cpu_cg_path.c_str(), "ae");
+//  if (cpu_cg_f == nullptr) {
+//    SLURMX_ERROR("fopen failed: {}", strerror(errno));
+//    err = 1;
+//    goto end;
+//  } else {
+//    SLURMX_TRACE("Open {} succeeded.", cpu_cg_path);
+//  }
+//
+//  err = fprintf(cpu_cg_f, "%d", pid);
+//  if (err < 0) {
+//    SLURMX_ERROR("fprintf failed: {}", strerror(errno));
+//    goto end;
+//  } else {
+//    SLURMX_TRACE("fprintf {} bytes succeeded.", err);
+//  }
+//
+//  err = fflush(cpu_cg_f);
+//  if (err < 0) {
+//    SLURMX_ERROR("fflush failed: {}", strerror(errno));
+//    goto end;
+//  } else {
+//    SLURMX_TRACE("fflush succeeded.");
+//  }
+//
+//  fclose(cpu_cg_f);
+//
+//  if (cpu_cg_content.is_open()) {
+//    while (std::getline(cpu_cg_content, line)) {
+//      SLURMX_TRACE("Pid in {}: {}", cgroup_path, line);
+//    }
+//    cpu_cg_content.close();
+//  }
 
-after_restore:
-  if (orig_cgroup_path != nullptr) {
-    free(orig_cgroup_path);
-  }
-  return err == 0 ? true : false;
+//  if (changed_orig) {
+//    if ((orig_cgroup = cgroup_new_cgroup(orig_cgroup_path)) == NULL) {
+//      goto after_restore;
+//    }
+//    if (((memory_controller = cgroup_add_controller(
+//              orig_cgroup,
+//              GetControllerStringView(Controller::MEMORY_CONTROLLER).data()))
+//              !=
+//         nullptr) &&
+//        (!cgroup_add_value_uint64(memory_controller,
+//                                  "memory.move_charge_at_immigrate",
+//                                  orig_migrate))) {
+//      if ((err = cgroup_modify_cgroup(orig_cgroup))) {
+//        SLURMX_WARN(
+//            "Unable to change cgroup {} memory controller settings for "
+//            "migration. "
+//            "Some memory accounting will be inaccurate: {} "
+//            "{}\n",
+//            orig_cgroup_path, err, cgroup_strerror(err));
+//      } else {
+//        changed_orig = true;
+//      }
+//    }
+//    cgroup_free(&orig_cgroup);
+//  }
+//
+// after_restore:
+//  if (orig_cgroup_path != nullptr) {
+//    free(orig_cgroup_path);
+//  }
+end:
+  return err == 0;
 }
 
 Cgroup *CgroupManager::Find(const std::string &cgroup_path) {
@@ -632,6 +679,58 @@ bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
   }
 
   return true;
+}
+
+bool Cgroup::KillAllProcesses() {
+  using namespace CgroupConstant::Internal;
+
+  const char *controller = CgroupConstant::GetControllerStringView(
+                               CgroupConstant::Controller::CPU_CONTROLLER)
+                               .data();
+
+  const char *cg_name = m_cgroup_path_.c_str();
+
+  int size, rc;
+  pid_t *pids;
+
+  rc = cgroup_get_procs(const_cast<char *>(cg_name),
+                        const_cast<char *>(controller), &pids, &size);
+
+  if (rc == 0) {
+    for (int i = 0; i < size; ++i) {
+      kill(pids[i], SIGKILL);
+    }
+    free(pids);
+    return true;
+  } else {
+    SLURMX_ERROR("cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
+                 cgroup_strerror(rc));
+    return false;
+  }
+}
+
+bool Cgroup::Empty() {
+  using namespace CgroupConstant::Internal;
+
+  const char *controller = CgroupConstant::GetControllerStringView(
+                               CgroupConstant::Controller::CPU_CONTROLLER)
+                               .data();
+
+  const char *cg_name = m_cgroup_path_.c_str();
+
+  int size, rc;
+  pid_t *pids;
+
+  rc = cgroup_get_procs(const_cast<char *>(cg_name),
+                        const_cast<char *>(controller), &pids, &size);
+  if (rc == 0) {
+    free(pids);
+    return size == 0;
+  } else {
+    SLURMX_ERROR("cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
+                 cgroup_strerror(rc));
+    return false;
+  }
 }
 
 }  // namespace util

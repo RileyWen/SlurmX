@@ -214,6 +214,10 @@ class Cgroup {
                         CgroupConstant::ControllerFile controller_file,
                         const std::string &str);
 
+  bool KillAllProcesses();
+
+  bool Empty();
+
  private:
   std::string m_cgroup_path_;
   mutable struct cgroup *m_cgroup_;

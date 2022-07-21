@@ -8,15 +8,14 @@
 
 #include <cxxopts.hpp>
 #include <filesystem>
-#include <iostream>
 #include <regex>
 
 #include "CtlXdClient.h"
 #include "XdPublicDefs.h"
 #include "XdServer.h"
+#include "slurmx/Network.h"
 #include "slurmx/PublicHeader.h"
 #include "slurmx/String.h"
-#include "slurmx/Network.h"
 
 using Xd::g_config;
 using Xd::Node;
@@ -77,6 +76,9 @@ void GlobalVariableInit() {
   spdlog::flush_every(std::chrono::seconds(1));
 
   spdlog::set_level(spdlog::level::trace);
+
+  Xd::g_thread_pool = std::make_unique<BS::thread_pool>(
+      std::thread::hardware_concurrency() / 2);
 
   g_task_mgr = std::make_unique<Xd::TaskManager>();
 
@@ -292,8 +294,8 @@ int main(int argc, char** argv) {
               SLURMX_ERROR("Init error: Cannot resolve hostname of {}", name);
               std::exit(1);
             }
-            SLURMX_TRACE("Resolve hostname {} to {}", name, ipv4);
-            g_config.NodesHostnameToIpv4[name] = ipv4;
+            SLURMX_INFO("Resolve hostname {} to {}", name, ipv4);
+            g_config.Ipv4ToNodesHostname[ipv4] = name;
 
             g_config.Nodes[name] = node_ptr;
           }
@@ -340,8 +342,8 @@ int main(int argc, char** argv) {
             if (node_it != g_config.Nodes.end()) {
               node_it->second->partition_name = name;
               part.nodes.emplace(node_it->first);
-              SLURMX_TRACE("Set the partition of node {} to {}", node_it->first,
-                           name);
+              SLURMX_INFO("Set the partition of node {} to {}", node_it->first,
+                          name);
             }
           }
 

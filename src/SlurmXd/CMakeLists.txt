@@ -26,6 +26,8 @@ target_link_libraries(slurmxd
         libevent::core
         libevent::pthreads
 
+        bs_thread_pool
+
         cxxopts::cxxopts
         Threads::Threads
         nlohmann_json::nlohmann_json

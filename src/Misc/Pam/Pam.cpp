@@ -1,150 +1,28 @@
-#include <grpc++/grpc++.h>
-#include <pwd.h>
-#include <security/_pam_macros.h>
-#include <security/pam_ext.h>
-#include <security/pam_modules.h>
 #include <spdlog/fmt/fmt.h>
-#include <sys/stat.h>
-#include <syslog.h>
 
-#include <boost/algorithm/string.hpp>
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
 
-#include "protos/slurmx.grpc.pb.h"
+#include "PamUtil.h"
 #include "slurmx/PublicHeader.h"
 
-using grpc::Channel;
-using grpc::ClientContext;
-using grpc::Status;
+#define PAM_STR_TRUE ("T")
+#define PAM_STR_FALSE ("F")
+#define PAM_ITEM_AUTH_RESULT ("AUTH_RES")
+#define PAM_ITEM_TASK_ID ("TASK_ID")
+#define PAM_ITEM_CG_PATH ("CG_PATH")
 
-bool QueryPortFromSlurmXd(pam_handle_t *pamh, uid_t uid,
-                          const std::string &xd_address, uint16_t port_to_query,
-                          uint32_t *task_id) {
-  std::string xd_unix_socket_address =
-      fmt::format("unix://{}", kDefaultSlurmXdUnixSockPath);
-
-  std::shared_ptr<Channel> channel = grpc::CreateChannel(
-      xd_unix_socket_address, grpc::InsecureChannelCredentials());
-
-  pam_syslog(pamh, LOG_ERR, "[SlurmX] Channel to %s created",
-             xd_unix_socket_address.c_str());
-
-  //  bool connected =
-  //  channel->WaitForConnected(std::chrono::system_clock::now() +
-  //                                             std::chrono::milliseconds(500));
-  //  if (!connected) {
-  //    pam_syslog(pamh, LOG_ERR, "Failed to establish the channel to %s",
-  //               xd_unix_socket_address.c_str());
-  //    return false;
-  //  }
-
-  std::unique_ptr<SlurmxGrpc::SlurmXd::Stub> stub =
-      SlurmxGrpc::SlurmXd::NewStub(channel);
-
-  if (!stub) {
-    pam_syslog(pamh, LOG_ERR, "[SlurmX] Failed to create Stub to %s",
-               xd_unix_socket_address.c_str());
-    return false;
-  }
-
-  SlurmxGrpc::QueryTaskIdFromPortForwardRequest request;
-  SlurmxGrpc::QueryTaskIdFromPortForwardReply reply;
-  ClientContext context;
-  Status status;
-
-  request.set_target_xd_address(xd_address);
-  request.set_port(port_to_query);
-  request.set_uid(uid);
-  request.set_pid(getpid());
-
-  status = stub->QueryTaskIdFromPortForward(&context, request, &reply);
-  if (!status.ok()) {
-    pam_syslog(pamh, LOG_ERR, "QueryTaskIdFromPort gRPC call failed: %s | %s",
-               status.error_message().c_str(), status.error_details().c_str());
-    return false;
-  }
-
-  if (reply.ok()) {
-    pam_syslog(pamh, LOG_ERR,
-               "ssh client with remote port %u belongs to task #%u",
-               port_to_query, reply.task_id());
-    *task_id = reply.task_id();
-    return true;
-  } else {
-    pam_syslog(pamh, LOG_ERR,
-               "ssh client with remote port %u doesn't belong to any task",
-               port_to_query);
-    return false;
-  }
-}
-
-void PamSendMsgToClient(pam_handle_t *pamh, const char *mesg) {
-  int rc;
-  struct pam_conv *conv;
-  void *dummy; /* needed to eliminate warning
-                * dereferencing type-punned pointer will
-                * break strict-aliasing rules */
-  struct pam_message msg[1];
-  const struct pam_message *pmsg[1];
-  struct pam_response *prsp;
-
-  // Get conversation function to talk with app.
-  rc = pam_get_item(pamh, PAM_CONV, (const void **)&dummy);
-  conv = (struct pam_conv *)dummy;
-  if (rc != PAM_SUCCESS) {
-    pam_syslog(pamh, LOG_ERR, "unable to get pam_conv: %s",
-               pam_strerror(pamh, rc));
-    return;
-  }
-
-  // Construct msg to send to app.
-  msg[0].msg_style = PAM_ERROR_MSG;
-  msg[0].msg = mesg;
-  pmsg[0] = &msg[0];
-  prsp = nullptr;
-
-  /*  Send msg to app and free the (meaningless) rsp.
-   */
-  rc = conv->conv(1, pmsg, &prsp, conv->appdata_ptr);
-  if (rc != PAM_SUCCESS)
-    pam_syslog(pamh, LOG_ERR, "unable to converse with app: %s",
-               pam_strerror(pamh, rc));
-  if (prsp != nullptr) _pam_drop_reply(prsp, 1);
-}
+void clean_up_cb(pam_handle_t *pamh, void *data, int error_status) {
+  free(data);
+};
 
 extern "C" {
+
 int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
                      const char **argv) {
   int rc;
+  bool ok;
   char *user_name = nullptr;
   uid_t uid;
-
-  size_t buf_size;
-  char *buf;
-  struct passwd pwd, *pwd_result;
-
-  /* Calculate buffer size for getpwnam_r */
-  buf_size = sysconf(_SC_GETPW_R_SIZE_MAX);
-  if (buf_size == -1) buf_size = 16384; /* take a large guess */
-
-  buf = new char[buf_size];
-  errno = 0;
-  rc = getpwnam_r(user_name, &pwd, buf, buf_size, &pwd_result);
-  if (pwd_result == nullptr) {
-    if (rc == 0) {
-      pam_syslog(pamh, LOG_ERR, "[SlurmX] getpwnam_r could not locate user %s",
-                 user_name);
-    } else {
-      pam_syslog(pamh, LOG_ERR, "[SlurmX] getpwnam_r: %s", strerror(errno));
-    }
-
-    delete buf;
-    return PAM_SESSION_ERR;
-  }
-  uid = pwd.pw_uid;
-  delete buf;
 
   /* Asking the application for a username */
   rc = pam_get_item(pamh, PAM_USER, (const void **)&user_name);
@@ -155,127 +33,91 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
     pam_syslog(pamh, LOG_ERR, "[SlurmX] Checking user: %s", user_name);
   }
 
-  std::ifstream tcp_file("/proc/net/tcp");
-  std::string line;
-  if (!tcp_file) {
-    pam_syslog(pamh, LOG_ERR, "[SlurmX] Failed to open /proc/net/tcp");
-    return PAM_PERM_DENIED;
+  ok = PamGetRemoteUid(pamh, user_name, &uid);
+  if (!ok) {
+    return PAM_USER_UNKNOWN;
   }
-
-  pam_syslog(pamh, LOG_ERR, "[SlurmX] /proc/net/tcp opened.");
-
-  std::unordered_map<ino_t, std::string> inode_addr_port_map;
-
-  pam_syslog(pamh, LOG_ERR, "[SlurmX] inode_addr_port_map inited.");
-
-  std::getline(tcp_file, line);
-  while (std::getline(tcp_file, line)) {
-    boost::trim(line);
-    std::vector<std::string> line_vec;
-    boost::split(line_vec, line, boost::is_any_of(" "),
-                 boost::token_compress_on);
-
-    // 2nd row is remote address and 9th row is inode num.
-    pam_syslog(pamh, LOG_ERR, "[SlurmX] TCP conn %s %s, inode: %s",
-               line_vec[0].c_str(), line_vec[2].c_str(), line_vec[9].c_str());
-    ino_t inode_num = std::stoul(line_vec[9]);
-    inode_addr_port_map.emplace(inode_num, line_vec[2]);
-  }
-
-#ifndef NDEBUG
-  std::string output;
-  for (auto &&[k, v] : inode_addr_port_map) {
-    output += fmt::format("{}:{} ", k, v);
-  }
-
-  pam_syslog(pamh, LOG_ERR, "[SlurmX] inode_addr_port_map: %s", output.c_str());
-#endif
 
   uint8_t addr[4];
   uint16_t port;
-  bool src_found{false};
+  ok = PamGetRemoteAddressPort(pamh, addr, &port);
 
-  std::string fds_path = "/proc/self/fd";
-  for (const auto &entry : std::filesystem::directory_iterator(fds_path)) {
-    // entry must have call stat() once in its implementation.
-    // So entry.is_socket() points to the real file.
-    if (entry.is_socket()) {
-      pam_syslog(pamh, LOG_ERR, "[SlurmX] Checking socket fd %s",
-                 entry.path().c_str());
-      struct stat stat_buf {};
-      // stat() will resolve symbol link.
-      if (stat(entry.path().c_str(), &stat_buf) != 0) {
-        pam_syslog(pamh, LOG_ERR, "[SlurmX] stat failed for socket fd %s",
-                   entry.path().c_str());
-        continue;
-      } else {
-        pam_syslog(pamh, LOG_ERR, "[SlurmX] inode num for socket fd %s is %lu",
-                   entry.path().c_str(), stat_buf.st_ino);
-      }
-
-      auto iter = inode_addr_port_map.find(stat_buf.st_ino);
-      if (iter == inode_addr_port_map.end()) {
-        pam_syslog(pamh, LOG_ERR,
-                   "[SlurmX] inode num %lu not found in /proc/net/tcp",
-                   stat_buf.st_ino);
-      } else {
-        std::vector<std::string> addr_port_hex;
-        boost::split(addr_port_hex, iter->second, boost::is_any_of(":"));
-
-        const std::string &addr_hex = addr_port_hex[0];
-        const std::string &port_hex = addr_port_hex[1];
-        pam_syslog(pamh, LOG_ERR,
-                   "[SlurmX] hex addr and port for inode num %lu: %s:%s",
-                   stat_buf.st_ino, addr_hex.c_str(), port_hex.c_str());
-
-        for (int i = 0; i < 4; i++) {
-          std::string addr_part = addr_hex.substr(6 - 2 * i, 2);
-          addr[i] = std::stoul(addr_part, nullptr, 16);
-          pam_syslog(pamh, LOG_ERR,
-                     "[SlurmX] Transform %d part of hex addr: %s to int %hhu",
-                     i, addr_part.c_str(), addr[i]);
-        }
-
-        port = std::stoul(port_hex, nullptr, 16);
-
-        pam_syslog(pamh, LOG_ERR,
-                   "[SlurmX] inode num %lu found in /proc/net/tcp: "
-                   "%hhu.%hhu.%hhu.%hhu:%hu",
-                   stat_buf.st_ino, addr[0], addr[1], addr[2], addr[3], port);
-
-        src_found = true;
-        break;
-      }
-    }
-  }
-
-  if (!src_found) {
+  if (!ok) {
     PamSendMsgToClient(
         pamh, "SlurmX: Cannot resolve src address and port in pam module.");
-    return PAM_PERM_DENIED;
+    return PAM_AUTH_ERR;
   }
 
   uint32_t task_id;
-  bool belongs_to_a_task;
+  std::string cgroup_path;
+
   std::string server_address =
-      fmt::format("{}.{}.{}.{}:{}", addr[0], addr[1], addr[2], addr[3],
-                  std::strtoul(kXdDefaultPort, nullptr, 10));
+      fmt::format("{}.{}.{}.{}", addr[0], addr[1], addr[2], addr[3]);
 
   pam_syslog(pamh, LOG_ERR, "[SlurmX] Try to query %s for remote port %hu",
              server_address.c_str(), port);
 
-  belongs_to_a_task =
-      QueryPortFromSlurmXd(pamh, uid, server_address, port, &task_id);
+  ok = GrpcQueryPortFromSlurmXd(pamh, uid, server_address, kXdDefaultPort, port,
+                                &task_id, &cgroup_path);
 
-  if (belongs_to_a_task) {
+  if (ok) {
     pam_syslog(pamh, LOG_ERR,
                "[SlurmX] Accepted ssh connection with remote port %hu ", port);
+
+    char *auth_result = strdup(PAM_STR_TRUE);
+    char *task_id_str = strdup(std::to_string(task_id).c_str());
+    char *cgroup_path_str = strdup(cgroup_path.c_str());
+
+    pam_set_data(pamh, PAM_ITEM_AUTH_RESULT, auth_result, clean_up_cb);
+    pam_set_data(pamh, PAM_ITEM_TASK_ID, task_id_str, clean_up_cb);
+    pam_set_data(pamh, PAM_ITEM_CG_PATH, cgroup_path_str, clean_up_cb);
+
     return PAM_SUCCESS;
   } else {
+    char *auth_result = strdup(PAM_STR_FALSE);
+    pam_set_data(pamh, PAM_ITEM_AUTH_RESULT, auth_result, clean_up_cb);
+
     pam_syslog(pamh, LOG_ERR,
                "[SlurmX] Rejected ssh connection with remote port %hu ", port);
-    PamSendMsgToClient(pamh, "Rejected by SlurmX");
+    PamSendMsgToClient(pamh, "Rejected by CraneD PAM Module.");
     return PAM_PERM_DENIED;
   }
+}
+
+int pam_sm_open_session(pam_handle_t *pamh, int flags, int argc,
+                        const char **argv) {
+  int task_id;
+  char *auth_result;
+  char *task_id_str;
+  char *cgroup_path_str;
+  bool ok;
+
+  pam_get_data(pamh, PAM_ITEM_AUTH_RESULT, (const void **)&auth_result);
+  if (strcmp(auth_result, PAM_STR_TRUE) == 0) {
+    pam_get_data(pamh, PAM_ITEM_TASK_ID, (const void **)&task_id_str);
+    pam_get_data(pamh, PAM_ITEM_CG_PATH, (const void **)&cgroup_path_str);
+
+    pam_syslog(pamh, LOG_ERR,
+               "[SlurmX] open_session retrieved task_id: %s, cg_path: %s",
+               task_id_str, cgroup_path_str);
+
+    task_id = std::atoi(task_id_str);
+
+    ok = GrpcMigrateSshProcToCgroup(pamh, getpid(), cgroup_path_str);
+    if (ok)
+      return PAM_SUCCESS;
+    else
+      return PAM_SESSION_ERR;
+  } else {
+    // If auth result is false, it indicates that system administrator allow a
+    // user with no task running to log im, and then we just let it pass.
+    return PAM_SUCCESS;
+  }
+}
+
+// This function is required once pam_sm_open_session is written.
+int pam_sm_close_session(pam_handle_t *pamh, int flags, int argc,
+                         const char **argv) {
+  return PAM_IGNORE;
 }
 }

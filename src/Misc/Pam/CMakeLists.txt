@@ -1,5 +1,8 @@
 add_library(pam_slurmx SHARED
-        Pam.cpp)
+        Pam.cpp
+        PamUtil.h
+        PamUtil.cpp
+        )
 
 # remove "lib" prefix
 set_target_properties(pam_slurmx PROPERTIES PREFIX "")

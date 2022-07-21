@@ -483,32 +483,37 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPortForward(
     SlurmxGrpc::QueryTaskIdFromPortForwardReply *response) {
   // Check whether the remote address is in the addresses of CraneD nodes.
   auto ip_iter =
-      g_config.NodesHostnameToIpv4.find(request->target_xd_address());
-  if (ip_iter == g_config.NodesHostnameToIpv4.end()) {
+      g_config.Ipv4ToNodesHostname.find(request->target_xd_address());
+  if (ip_iter == g_config.Ipv4ToNodesHostname.end()) {
     // Not in the addresses of CraneD nodes. This ssh request comes from a user.
     // Check if the user's uid is running a task. If so, move it in to the
     // cgroup of his first task. If not so, reject this ssh request.
     SLURMX_TRACE(
         "Receive QueryTaskIdFromPortForward from Pam module: "
-        "port: {}, xd_address: {}. This ssh comes from a user machine. uid: {}",
-        request->port(), request->target_xd_address(), request->uid());
+        "ssh_remote_port: {}, xd_address: {}, xd_port: {}. "
+        "This ssh comes from a user machine. uid: {}",
+        request->ssh_remote_port(), request->target_xd_address(),
+        request->target_xd_port(), request->uid());
 
     response->set_from_user(true);
 
     TaskInfoOfUid info{};
-    if (g_task_mgr->QueryTaskInfoOfUidAsync(request->uid(), &info)) {
+    bool ok = g_task_mgr->QueryTaskInfoOfUidAsync(request->uid(), &info);
+    if (ok) {
       SLURMX_TRACE(
           "Found a task #{} belonging to uid {}. "
-          "Moving this ssh session process into the task's cgroup...",
-          info.first_task_id, request->uid());
-      util::CgroupManager::Instance().MigrateProcTo(
-          request->pid(), info.first_task_cgroup->GetCgroupString());
+          "This ssh session process is going to be moved into the task's "
+          "cgroup {}.",
+          info.first_task_id, request->uid(), info.cgroup_path);
       response->set_task_id(info.first_task_id);
+      response->set_cgroup_path(info.cgroup_path);
       response->set_ok(true);
     } else {
       SLURMX_TRACE(
-          "Found no task belonging to uid {}. Reject this ssh request.",
-          request->uid());
+          "This ssh session can't be moved into uid {}'s tasks. "
+          "This uid has {} task(s) and cgroup found: {}. "
+          "Reject this ssh request.",
+          request->uid(), info.job_cnt, info.cgroup_exists);
       response->set_ok(false);
     }
     return Status::OK;
@@ -516,13 +521,18 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPortForward(
 
   SLURMX_TRACE(
       "Receive QueryTaskIdFromPortForward from Pam module: "
-      "port: {}, xd_address: {}. This ssh comes from a CraneD node. uid: {}",
-      request->port(), request->target_xd_address(), request->uid());
+      "ssh_remote_port: {}, xd_address: {}, xd_port: {}. "
+      "This ssh comes from a CraneD node. uid: {}",
+      request->ssh_remote_port(), request->target_xd_address(),
+      request->target_xd_port(), request->uid());
   // In the addresses of CraneD nodes. This ssh request comes from a CraneD
   // node. Check if the remote port belongs to a task. If so, move it in to the
   // cgroup of this task. If not so, reject this ssh request.
-  std::shared_ptr<Channel> channel_of_remote_xd = grpc::CreateChannel(
-      request->target_xd_address(), grpc::InsecureChannelCredentials());
+
+  std::string target_xd = fmt::format("{}:{}", request->target_xd_address(),
+                                      request->target_xd_port());
+  std::shared_ptr<Channel> channel_of_remote_xd =
+      grpc::CreateChannel(target_xd, grpc::InsecureChannelCredentials());
 
   std::unique_ptr<SlurmxGrpc::SlurmXd::Stub> stub_of_remote_xd =
       SlurmxGrpc::SlurmXd::NewStub(channel_of_remote_xd);
@@ -532,7 +542,7 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPortForward(
   ClientContext context_of_remote_xd;
   Status status_remote_xd;
 
-  request_to_remote_xd.set_port(request->port());
+  request_to_remote_xd.set_port(request->ssh_remote_port());
 
   status_remote_xd = stub_of_remote_xd->QueryTaskIdFromPort(
       &context_of_remote_xd, request_to_remote_xd, &reply_from_remote_xd);
@@ -550,27 +560,46 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPortForward(
       SLURMX_TRACE(
           "ssh client with remote port {} belongs to task #{}. "
           "Moving this ssh session process into the task's cgroup",
-          request->port(), reply_from_remote_xd.task_id());
+          request->ssh_remote_port(), reply_from_remote_xd.task_id());
 
-      util::CgroupManager::Instance().MigrateProcTo(request->pid(),
-                                                    cg->GetCgroupString());
       response->set_ok(true);
       response->set_task_id(reply_from_remote_xd.task_id());
+      response->set_cgroup_path(cg->GetCgroupString());
     } else {
       SLURMX_TRACE(
           "ssh client with remote port {} belongs to task #{}. "
           "But the task's cgroup is not found. Reject this ssh request",
-          request->port(), reply_from_remote_xd.task_id());
+          request->ssh_remote_port(), reply_from_remote_xd.task_id());
       response->set_ok(false);
     }
 
     return Status::OK;
   } else {
     SLURMX_TRACE("ssh client with remote port {} doesn't belong to any task",
-                 request->port());
+                 request->ssh_remote_port());
     response->set_ok(false);
     return Status::OK;
   }
+}
+
+grpc::Status SlurmXdServiceImpl::MigrateSshProcToCgroup(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::MigrateSshProcToCgroupRequest *request,
+    SlurmxGrpc::MigrateSshProcToCgroupReply *response) {
+  SLURMX_TRACE("Moving pid {} to cgroup {}", request->pid(),
+               request->cgroup_path());
+  bool ok = util::CgroupManager::Instance().MigrateProcTo(
+      request->pid(), request->cgroup_path());
+
+  if (!ok) {
+    SLURMX_ERROR("GrpcMigrateSshProcToCgroup failed on pid: {}, cgroup: {}",
+                 request->pid(), request->cgroup_path());
+    response->set_ok(false);
+  } else {
+    response->set_ok(true);
+  }
+
+  return Status::OK;
 }
 
 XdServer::XdServer(std::list<std::string> listen_addresses)
