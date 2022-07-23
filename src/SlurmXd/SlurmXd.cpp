@@ -8,226 +8,21 @@
 
 #include <cxxopts.hpp>
 #include <filesystem>
-#include <iostream>
 #include <regex>
 
 #include "CtlXdClient.h"
+#include "XdPublicDefs.h"
 #include "XdServer.h"
+#include "slurmx/FdFunctions.h"
+#include "slurmx/Network.h"
 #include "slurmx/PublicHeader.h"
 #include "slurmx/String.h"
 
-struct Node {
-  uint32_t cpu;
-  uint64_t memory_bytes;
+using Xd::g_config;
+using Xd::Node;
+using Xd::Partition;
 
-  std::string partition_name;
-};
-
-struct Partition {
-  std::unordered_set<std::string> nodes;
-  std::unordered_set<std::string> AllowAccounts;
-};
-
-struct Config {
-  std::string SlurmXdListen;
-  std::string ControlMachine;
-  std::string SlurmXdDebugLevel;
-  std::string SlurmXdLogFile;
-
-  bool SlurmXdForeground{};
-
-  std::string Hostname;
-  std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
-  std::unordered_map<std::string, Partition> Partitions;
-};
-
-Config g_config;
-
-void GlobalVariableInit() {
-  // Enable inter-thread custom event notification.
-  evthread_use_pthreads();
-
-  if (g_config.SlurmXdDebugLevel == "trace")
-    spdlog::set_level(spdlog::level::trace);
-  else if (g_config.SlurmXdDebugLevel == "debug")
-    spdlog::set_level(spdlog::level::debug);
-  else if (g_config.SlurmXdDebugLevel == "info")
-    spdlog::set_level(spdlog::level::info);
-  else if (g_config.SlurmXdDebugLevel == "warn")
-    spdlog::set_level(spdlog::level::warn);
-  else if (g_config.SlurmXdDebugLevel == "error")
-    spdlog::set_level(spdlog::level::err);
-  else {
-    SLURMX_ERROR("Illegal debug-level format.");
-    std::exit(1);
-  }
-
-  auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-      g_config.SlurmXdLogFile, 1048576 * 5, 3);
-
-  auto console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
-
-  if (g_config.SlurmXdDebugLevel == "trace") {
-    file_sink->set_level(spdlog::level::trace);
-    console_sink->set_level(spdlog::level::trace);
-  } else if (g_config.SlurmXdDebugLevel == "debug") {
-    file_sink->set_level(spdlog::level::debug);
-    console_sink->set_level(spdlog::level::debug);
-  } else if (g_config.SlurmXdDebugLevel == "info") {
-    file_sink->set_level(spdlog::level::info);
-    console_sink->set_level(spdlog::level::info);
-  } else if (g_config.SlurmXdDebugLevel == "warn") {
-    file_sink->set_level(spdlog::level::warn);
-    console_sink->set_level(spdlog::level::warn);
-  } else if (g_config.SlurmXdDebugLevel == "error") {
-    file_sink->set_level(spdlog::level::err);
-    console_sink->set_level(spdlog::level::err);
-  } else {
-    SLURMX_ERROR("Illegal debug-level format.");
-    std::exit(1);
-  }
-
-  spdlog::init_thread_pool(256, 1);
-  auto logger = std::make_shared<spdlog::async_logger>(
-      "default", spdlog::sinks_init_list{file_sink, console_sink},
-      spdlog::thread_pool(), spdlog::async_overflow_policy::block);
-
-  spdlog::set_default_logger(logger);
-
-  spdlog::flush_on(spdlog::level::err);
-  spdlog::flush_every(std::chrono::seconds(1));
-
-  spdlog::set_level(spdlog::level::trace);
-
-  g_task_mgr = std::make_unique<Xd::TaskManager>();
-
-  g_ctlxd_client = std::make_unique<Xd::CtlXdClient>();
-}
-
-void StartServer() {
-  auto node_it = g_config.Nodes.find(g_config.Hostname);
-  if (node_it == g_config.Nodes.end()) {
-    SLURMX_ERROR("This machine {} is not contained in Nodes!",
-                 g_config.Hostname);
-    std::exit(1);
-  }
-
-  SLURMX_INFO("Found this machine {} in Nodes", g_config.Hostname);
-
-  // Create log and sh directory recursively.
-  try {
-    std::filesystem::create_directories("/tmp/slurmxd/scripts");
-
-    std::filesystem::path log_path{g_config.SlurmXdLogFile};
-    auto log_dir = log_path.parent_path();
-    if (!log_dir.empty()) std::filesystem::create_directories(log_dir);
-  } catch (const std::exception& e) {
-    SLURMX_ERROR("Invalid SlurmXdLogFile path {}: {}", g_config.SlurmXdLogFile,
-                 e.what());
-  }
-
-  GlobalVariableInit();
-
-  SlurmxErr err;
-
-  uint32_t part_id = 0, node_index = 0;
-  const std::string& part_name = node_it->second->partition_name;
-  auto part_it = g_config.Partitions.find(part_name);
-  if (part_it == g_config.Partitions.end()) {
-    SLURMX_ERROR(
-        "This machine {} belongs to {} partition, but the partition "
-        "doesn't exist.",
-        g_config.Hostname, part_name);
-    std::exit(1);
-  }
-  part_id = std::distance(g_config.Partitions.begin(), part_it);
-
-  auto node_it_in_part = part_it->second.nodes.find(g_config.Hostname);
-  if (node_it_in_part == part_it->second.nodes.end()) {
-    SLURMX_ERROR(
-        "This machine {} can't be found in "
-        "g_config.Partition[\"{}\"].nodes . Exit.",
-        g_config.Hostname, part_name);
-    std::exit(1);
-  }
-  node_index = std::distance(part_it->second.nodes.begin(), node_it_in_part);
-  XdNodeId node_id{part_id, node_index};
-  SLURMX_TRACE("NodeId of this machine: {}", node_id);
-
-  g_ctlxd_client->SetNodeId(node_id);
-  g_ctlxd_client->InitChannelAndStub(g_config.ControlMachine);
-
-  // Todo: Set FD_CLOEXEC on stdin, stdout, stderr
-
-  g_server = std::make_unique<Xd::XdServer>(g_config.SlurmXdListen);
-
-  std::regex addr_port_re(R"(^.*:(\d+)$)");
-  std::smatch port_group;
-  if (!std::regex_match(g_config.SlurmXdListen, port_group, addr_port_re)) {
-    SLURMX_ERROR("Illegal CtlXd address format.");
-    std::exit(1);
-  }
-
-  g_server->Wait();
-
-  // Free global variables
-  g_task_mgr.reset();
-  g_server.reset();
-  g_ctlxd_client.reset();
-
-  std::exit(0);
-}
-
-void StartDeamon() {
-  /* Our process ID and Session ID */
-  pid_t pid, sid;
-
-  /* Fork off the parent process */
-  pid = fork();
-  if (pid < 0) {
-    SLURMX_ERROR("Error: fork()");
-    exit(1);
-  }
-  /* If we got a good PID, then
-     we can exit the parent process. */
-  if (pid > 0) {
-    exit(0);
-  }
-
-  /* Change the file mode mask */
-  umask(0);
-
-  /* Open any logs here */
-
-  /* Create a new SID for the child process */
-  sid = setsid();
-  if (sid < 0) {
-    /* Log the failure */
-    SLURMX_ERROR("Error: setsid()");
-    exit(1);
-  }
-
-  /* Change the current working directory */
-  if ((chdir("/")) < 0) {
-    SLURMX_ERROR("Error: chdir()");
-    /* Log the failure */
-    exit(1);
-  }
-
-  /* Close out the standard file descriptors */
-  close(STDIN_FILENO);
-  close(STDOUT_FILENO);
-  close(STDERR_FILENO);
-
-  /* Daemon-specific initialization goes here */
-  StartServer();
-
-  exit(EXIT_SUCCESS);
-}
-
-int main(int argc, char** argv) {
-  // Todo: Add single program instance checking.
-
+void ParseConfig(int argc, char** argv) {
   if (std::filesystem::exists(kDefaultConfigPath)) {
     try {
       YAML::Node config = YAML::LoadFile(kDefaultConfigPath);
@@ -242,13 +37,13 @@ int main(int argc, char** argv) {
         addr = config["ControlMachine"].as<std::string>();
         g_config.ControlMachine = fmt::format("{}:{}", addr, kCtlXdDefaultPort);
       } else
-        return 1;
+        std::exit(1);
 
       if (config["SlurmXdDebugLevel"])
         g_config.SlurmXdDebugLevel =
             config["SlurmXdDebugLevel"].as<std::string>();
       else
-        return 1;
+        std::exit(1);
 
       if (config["SlurmXdLogFile"])
         g_config.SlurmXdLogFile = config["SlurmXdLogFile"].as<std::string>();
@@ -304,7 +99,27 @@ int main(int argc, char** argv) {
           } else
             std::exit(1);
 
-          for (auto&& name : name_list) g_config.Nodes[name] = node_ptr;
+          for (auto&& name : name_list) {
+            if (slurmx::IsAValidIpv4Address(name)) {
+              SLURMX_INFO(
+                  "Node name `{}` is a valid ipv4 address and doesn't "
+                  "need resolving.",
+                  name);
+              g_config.Ipv4ToNodesHostname[name] = name;
+              g_config.Nodes[name] = node_ptr;
+            } else {
+              std::string ipv4;
+              if (!slurmx::ResolveIpv4FromHostname(name, &ipv4)) {
+                SLURMX_ERROR("Init error: Cannot resolve hostname of `{}`",
+                             name);
+                std::exit(1);
+              }
+              SLURMX_INFO("Resolve hostname `{}` to `{}`", name, ipv4);
+              g_config.Ipv4ToNodesHostname[ipv4] = name;
+
+              g_config.Nodes[name] = node_ptr;
+            }
+          }
         }
       }
 
@@ -317,7 +132,7 @@ int main(int argc, char** argv) {
           Partition part;
 
           if (partition["name"]) {
-            name.append(partition["name"].Scalar());
+            name.assign(partition["name"].Scalar());
           } else
             std::exit(1);
 
@@ -326,19 +141,10 @@ int main(int argc, char** argv) {
           } else
             std::exit(1);
 
-          std::vector<absl::string_view> split = absl::StrSplit(nodes, ',');
           std::list<std::string> name_list;
           if (!util::ParseHostList(nodes, &name_list)) {
             SLURMX_ERROR("Illegal node name string format.");
             std::exit(1);
-          }
-
-          for (auto&& str : split) {
-            std::string str_s{absl::StripAsciiWhitespace(str)};
-            if (!util::ParseHostList(str_s, &name_list)) {
-              SLURMX_ERROR("Illegal node name string format.");
-              std::exit(1);
-            }
           }
 
           for (auto&& node : name_list) {
@@ -348,8 +154,8 @@ int main(int argc, char** argv) {
             if (node_it != g_config.Nodes.end()) {
               node_it->second->partition_name = name;
               part.nodes.emplace(node_it->first);
-              SLURMX_TRACE("Set the partition of node {} to {}", node_it->first,
-                           name);
+              SLURMX_INFO("Set the partition of node {} to {}", node_it->first,
+                          name);
             }
           }
 
@@ -367,7 +173,7 @@ int main(int argc, char** argv) {
     } catch (YAML::BadFile& e) {
       SLURMX_ERROR("Can't open config file {}: {}", kDefaultConfigPath,
                    e.what());
-      return 1;
+      std::exit(1);
     }
   } else {
     cxxopts::Options options("slurmxd");
@@ -393,16 +199,24 @@ int main(int argc, char** argv) {
 
     if (parsed_args.count("help") > 0) {
       fmt::print("{}\n", options.help());
-      return 0;
+      std::exit(1);
     }
 
     g_config.SlurmXdListen = parsed_args["listen"].as<std::string>();
 
     if (parsed_args.count("server-address") == 0) {
       fmt::print("SlurmCtlXd address must be specified.\n{}\n", options.help());
-      return 1;
+      std::exit(1);
     }
     g_config.ControlMachine = parsed_args["server-address"].as<std::string>();
+  }
+
+  // Check the format of SlurmXdListen
+  std::regex addr_port_re(R"(^.*:(\d+)$)");
+  std::smatch port_group;
+  if (!std::regex_match(g_config.SlurmXdListen, port_group, addr_port_re)) {
+    SLURMX_ERROR("Illegal CtlXd address format.");
+    std::exit(1);
   }
 
   char hostname[HOST_NAME_MAX + 1];
@@ -413,10 +227,206 @@ int main(int argc, char** argv) {
   }
   g_config.Hostname.assign(hostname);
 
+  auto node_it = g_config.Nodes.find(g_config.Hostname);
+  if (node_it == g_config.Nodes.end()) {
+    SLURMX_ERROR("This machine {} is not contained in Nodes!",
+                 g_config.Hostname);
+    std::exit(1);
+  }
+
+  SLURMX_INFO("Found this machine {} in Nodes", g_config.Hostname);
+
+  uint32_t part_id, node_index;
+  const std::string& part_name = node_it->second->partition_name;
+  auto part_it = g_config.Partitions.find(part_name);
+  if (part_it == g_config.Partitions.end()) {
+    SLURMX_ERROR(
+        "This machine {} belongs to {} partition, but the partition "
+        "doesn't exist.",
+        g_config.Hostname, part_name);
+    std::exit(1);
+  }
+  part_id = std::distance(g_config.Partitions.begin(), part_it);
+
+  auto node_it_in_part = part_it->second.nodes.find(g_config.Hostname);
+  if (node_it_in_part == part_it->second.nodes.end()) {
+    SLURMX_ERROR(
+        "This machine {} can't be found in "
+        "g_config.Partition[\"{}\"].nodes . Exit.",
+        g_config.Hostname, part_name);
+    std::exit(1);
+  }
+  node_index = std::distance(part_it->second.nodes.begin(), node_it_in_part);
+  XdNodeId node_id{part_id, node_index};
+  SLURMX_INFO("NodeId of this machine: {}", node_id);
+
+  g_config.NodeId = node_id;
+}
+
+void InitSpdlog() {
+  if (g_config.SlurmXdDebugLevel == "trace")
+    spdlog::set_level(spdlog::level::trace);
+  else if (g_config.SlurmXdDebugLevel == "debug")
+    spdlog::set_level(spdlog::level::debug);
+  else if (g_config.SlurmXdDebugLevel == "info")
+    spdlog::set_level(spdlog::level::info);
+  else if (g_config.SlurmXdDebugLevel == "warn")
+    spdlog::set_level(spdlog::level::warn);
+  else if (g_config.SlurmXdDebugLevel == "error")
+    spdlog::set_level(spdlog::level::err);
+  else {
+    SLURMX_ERROR("Illegal debug-level format.");
+    std::exit(1);
+  }
+
+  auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+      g_config.SlurmXdLogFile, 1048576 * 5, 3);
+
+  auto console_sink = std::make_shared<spdlog::sinks::stderr_color_sink_mt>();
+
+  if (g_config.SlurmXdDebugLevel == "trace") {
+    file_sink->set_level(spdlog::level::trace);
+    console_sink->set_level(spdlog::level::trace);
+  } else if (g_config.SlurmXdDebugLevel == "debug") {
+    file_sink->set_level(spdlog::level::debug);
+    console_sink->set_level(spdlog::level::debug);
+  } else if (g_config.SlurmXdDebugLevel == "info") {
+    file_sink->set_level(spdlog::level::info);
+    console_sink->set_level(spdlog::level::info);
+  } else if (g_config.SlurmXdDebugLevel == "warn") {
+    file_sink->set_level(spdlog::level::warn);
+    console_sink->set_level(spdlog::level::warn);
+  } else if (g_config.SlurmXdDebugLevel == "error") {
+    file_sink->set_level(spdlog::level::err);
+    console_sink->set_level(spdlog::level::err);
+  } else {
+    SLURMX_ERROR("Illegal debug-level format.");
+    std::exit(1);
+  }
+
+  spdlog::init_thread_pool(256, 1);
+  auto logger = std::make_shared<spdlog::async_logger>(
+      "default", spdlog::sinks_init_list{file_sink, console_sink},
+      spdlog::thread_pool(), spdlog::async_overflow_policy::block);
+
+  spdlog::set_default_logger(logger);
+
+  spdlog::flush_on(spdlog::level::err);
+  spdlog::flush_every(std::chrono::seconds(1));
+
+  spdlog::set_level(spdlog::level::trace);
+}
+
+void CreateRequiredDirectories() {
+  // Create log and sh directory recursively.
+  try {
+    std::filesystem::create_directories(kDefaultSlurmXTempDir);
+    std::filesystem::create_directories(kDefaultSlurmXScriptDir);
+
+    std::filesystem::path log_path{g_config.SlurmXdLogFile};
+    auto log_dir = log_path.parent_path();
+    if (!log_dir.empty()) std::filesystem::create_directories(log_dir);
+  } catch (const std::exception& e) {
+    SLURMX_ERROR("Invalid SlurmXdLogFile path {}: {}", g_config.SlurmXdLogFile,
+                 e.what());
+  }
+}
+
+void GlobalVariableInit() {
+  CreateRequiredDirectories();
+  InitSpdlog();
+
+  // Enable inter-thread custom event notification.
+  evthread_use_pthreads();
+
+  Xd::g_thread_pool = std::make_unique<BS::thread_pool>(
+      std::thread::hardware_concurrency() / 2);
+
+  g_task_mgr = std::make_unique<Xd::TaskManager>();
+
+  g_ctlxd_client = std::make_unique<Xd::CtlXdClient>();
+  g_ctlxd_client->SetNodeId(g_config.NodeId);
+  g_ctlxd_client->InitChannelAndStub(g_config.ControlMachine);
+}
+
+void StartServer() {
+  GlobalVariableInit();
+
+  // Set FD_CLOEXEC on stdin, stdout, stderr
+  util::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
+
+  g_server = std::make_unique<Xd::XdServer>(std::list<std::string>{
+      g_config.SlurmXdListen,
+      fmt::format("unix://{}", kDefaultSlurmXdUnixSockPath)});
+
+  g_server->Wait();
+
+  // Free global variables
+  g_task_mgr.reset();
+  g_server.reset();
+  g_ctlxd_client.reset();
+
+  std::exit(0);
+}
+
+void StartDaemon() {
+  /* Our process ID and Session ID */
+  pid_t pid, sid;
+
+  /* Fork off the parent process */
+  pid = fork();
+  if (pid < 0) {
+    SLURMX_ERROR("Error: fork()");
+    exit(1);
+  }
+  /* If we got a good PID, then
+     we can exit the parent process. */
+  if (pid > 0) {
+    exit(0);
+  }
+
+  /* Change the file mode mask */
+  umask(0);
+
+  /* Open any logs here */
+
+  /* Create a new SID for the child process */
+  sid = setsid();
+  if (sid < 0) {
+    /* Log the failure */
+    SLURMX_ERROR("Error: setsid()");
+    exit(1);
+  }
+
+  /* Change the current working directory */
+  if ((chdir("/")) < 0) {
+    SLURMX_ERROR("Error: chdir()");
+    /* Log the failure */
+    exit(1);
+  }
+
+  /* Close out the standard file descriptors */
+  close(STDIN_FILENO);
+  close(STDOUT_FILENO);
+  close(STDERR_FILENO);
+
+  /* Daemon-specific initialization goes here */
+  StartServer();
+
+  exit(EXIT_SUCCESS);
+}
+
+int main(int argc, char** argv) {
+  // Todo: Add single program instance checking.
+
+  // If config parsing fails, this function will not return and will call
+  // std::exit(1) instead.
+  ParseConfig(argc, argv);
+
   if (g_config.SlurmXdForeground)
     StartServer();
   else
-    StartDeamon();
+    StartDaemon();
 
   return 0;
 }

@@ -140,8 +140,6 @@ struct TaskInCtlXd {
   std::list<uint32_t> node_indexes;
   std::string allocated_nodes_regex;
 
-  std::unordered_set<uint32_t> end_node_set;
-
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.

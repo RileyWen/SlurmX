@@ -1,5 +1,11 @@
 #include "slurmx/String.h"
 
+#include <absl/strings/strip.h>
+
+#include <queue>
+
+#include "slurmx/PublicHeader.h"
+
 namespace util {
 
 std::string ReadableMemory(uint64_t memory_bytes) {
@@ -57,14 +63,57 @@ bool ParseNodeList(const std::string &node_str,
 
 bool ParseHostList(const std::string &host_str,
                    std::list<std::string> *hostlist) {
-  std::regex regex(R"(.*\[(.*)\]$)");
-  if (!std::regex_match(host_str, regex)) {
-    hostlist->emplace_back(host_str);
-    return true;
+  std::string name_str(host_str);
+  name_str += ',';  // uniform end format
+  std::string name_meta;
+  std::list<std::string> str_list;
+
+  std::queue<char> char_queue;
+  for (auto c : name_str) {
+    if (c == '[') {
+      if (char_queue.empty()) {
+        char_queue.push(c);
+      } else {
+        SLURMX_ERROR("Illegal node name string format: duplicate brackets");
+        return false;
+      }
+    } else if (c == ']') {
+      if (char_queue.empty()) {
+        SLURMX_ERROR("Illegal node name string format: isolated bracket");
+        return false;
+      } else {
+        while (!char_queue.empty()) {
+          name_meta += char_queue.front();
+          char_queue.pop();
+        }
+        name_meta += c;
+      }
+    } else if (c == ',') {
+      if (char_queue.empty()) {
+        str_list.emplace_back(name_meta);
+        name_meta.clear();
+      } else {
+        char_queue.push(c);
+      }
+    } else {
+      if (char_queue.empty()) {
+        name_meta += c;
+      } else {
+        char_queue.push(c);
+      }
+    }
   }
 
-  std::string end_str;
-  return ParseNodeList(host_str, hostlist, end_str);
+  for (auto &&str : str_list) {
+    std::string str_s{absl::StripAsciiWhitespace(str)};
+    std::regex regex(R"(.*\[(.*)\]$)");
+    if (!std::regex_match(str_s, regex)) {
+      hostlist->emplace_back(str_s);
+    } else {
+      if (!ParseNodeList(str_s, hostlist, "")) return false;
+    }
+  }
+  return true;
 }
 
 std::string HostNameListToStr(const std::list<std::string> &hostlist) {

@@ -36,6 +36,16 @@ if (${FORCE_COLORED_OUTPUT})
 endif ()
 
 
+# Notify CMake that we have module files to find packages/libs.
+set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModule/")
+
+find_package(PAM REQUIRED)
+
+# Check if we found PAM.
+if (NOT PAM_FOUND)
+    message(FATAL_ERROR "PAM library was not found.")
+endif ()
+
 # Find third-party libraries
 set(DEPENDENCIES_PRE_INSTALLED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/pre_installed)
 set(DEPENDENCIES_ONLINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/online)
@@ -119,3 +129,20 @@ protobuf_generate(
 )
 
 target_link_libraries(proto absl::base absl::synchronization)
+set_property(TARGET proto PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+# install script
+install(TARGETS slurmctlxd slurmxd
+        EXPORT ${PROJECT_NAME}Targets
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib
+        RUNTIME DESTINATION bin
+        PUBLIC_HEADER DESTINATION include)
+
+set(bindir ${CMAKE_INSTALL_PREFIX}/bin)
+configure_file(./etc/slurmctlxd.service.in ${PROJECT_BINARY_DIR}/etc/slurmctlxd.service)
+configure_file(./etc/slurmxd.service.in ${PROJECT_BINARY_DIR}/etc/slurmxd.service)
+
+install(FILES ${PROJECT_BINARY_DIR}/etc/slurmctlxd.service ${PROJECT_BINARY_DIR}/etc/slurmxd.service DESTINATION /etc/systemd/system/)
+install(FILES ./etc/config.yaml.example DESTINATION /etc/slurmx/)
+install(FILES README.md DESTINATION share/doc/slurmx/)

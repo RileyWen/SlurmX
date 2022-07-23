@@ -143,7 +143,7 @@ grpc::Status SlurmCtlXdServiceImpl::TaskStatusChange(
 
   g_task_scheduler->TaskStatusChange(request->task_id(), request->node_index(),
                                      status, reason);
-
+  response->set_ok(true);
   return grpc::Status::OK;
 }
 
@@ -209,6 +209,21 @@ grpc::Status SlurmCtlXdServiceImpl::QueryJobsInPartition(
       partition_id, QueryBriefTaskMetaFieldControl{true, true, true, true},
       response);
 
+  return grpc::Status::OK;
+}
+
+grpc::Status SlurmCtlXdServiceImpl::QueryNodeListFromTaskId(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryNodeListFromTaskIdRequest *request,
+    SlurmxGrpc::QueryNodeListFromTaskIdReply *response) {
+  auto node_list =
+      g_task_scheduler->QueryNodeListFromTaskId(request->task_id());
+  if (!node_list.empty()) {
+    response->set_ok(true);
+    response->set_node_list(node_list);
+  } else {
+    response->set_ok(false);
+  }
   return grpc::Status::OK;
 }
 

@@ -9,6 +9,7 @@
 
 #include "ResourceAllocators.h"
 #include "protos/XdSubprocess.pb.h"
+#include "slurmx/FdFunctions.h"
 #include "slurmx/FileLogger.h"
 
 namespace Xd {
@@ -18,6 +19,9 @@ TaskManager::TaskManager()
       m_ev_sigchld_(nullptr),
       m_ev_base_(nullptr),
       m_ev_grpc_interactive_task_(nullptr),
+      m_ev_grpc_create_cg_(nullptr),
+      m_ev_grpc_release_cg_(nullptr),
+      m_ev_query_task_id_from_pid_(nullptr),
       m_ev_exit_event_(nullptr),
       m_ev_task_status_change_(nullptr),
       m_is_ending_now_(false) {
@@ -64,6 +68,73 @@ TaskManager::TaskManager()
 
     if (event_add(m_ev_grpc_interactive_task_, nullptr) < 0) {
       SLURMX_ERROR("Could not add the grpc event to base!");
+      std::terminate();
+    }
+  }
+  {  // gRPC: CreateCgroup
+    m_ev_grpc_create_cg_ = event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
+                                     EvGrpcCreateCgroupCb_, this);
+    if (!m_ev_grpc_create_cg_) {
+      SLURMX_ERROR("Failed to create the create cgroup event!");
+      std::terminate();
+    }
+
+    if (event_add(m_ev_grpc_create_cg_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the create cgroup event to base!");
+      std::terminate();
+    }
+  }
+  {  // gRPC: ReleaseCgroup
+    m_ev_grpc_release_cg_ = event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
+                                      EvGrpcReleaseCgroupCb_, this);
+    if (!m_ev_grpc_release_cg_) {
+      SLURMX_ERROR("Failed to create the release cgroup event!");
+      std::terminate();
+    }
+
+    if (event_add(m_ev_grpc_release_cg_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the release cgroup event to base!");
+      std::terminate();
+    }
+  }
+  {  // gRPC: QueryTaskIdFromPid
+    m_ev_query_task_id_from_pid_ =
+        event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
+                  EvGrpcQueryTaskIdFromPidCb_, this);
+    if (!m_ev_query_task_id_from_pid_) {
+      SLURMX_ERROR("Failed to create the query task id event!");
+      std::terminate();
+    }
+
+    if (event_add(m_ev_query_task_id_from_pid_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the query task id event to base!");
+      std::terminate();
+    }
+  }
+  {  // gRPC: QueryTaskInfoOfUid
+    m_ev_query_task_info_of_uid_ =
+        event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
+                  EvGrpcQueryTaskInfoOfUidCb_, this);
+    if (!m_ev_query_task_info_of_uid_) {
+      SLURMX_ERROR("Failed to create the query info of uid event!");
+      std::terminate();
+    }
+
+    if (event_add(m_ev_query_task_info_of_uid_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the query info of uid event to base!");
+      std::terminate();
+    }
+  }
+  {  // gRPC: QueryCgOfTaskId
+    m_ev_query_cg_of_task_id_ = event_new(m_ev_base_, -1, EV_PERSIST | EV_READ,
+                                          EvGrpcQueryCgOfTaskIdCb_, this);
+    if (!m_ev_query_cg_of_task_id_) {
+      SLURMX_ERROR("Failed to create the query cg of task id event!");
+      std::terminate();
+    }
+
+    if (event_add(m_ev_query_cg_of_task_id_, nullptr) < 0) {
+      SLURMX_ERROR("Could not add the query cg of task id event to base!");
       std::terminate();
     }
   }
@@ -133,6 +204,11 @@ TaskManager::~TaskManager() {
   if (m_ev_sigint_) event_free(m_ev_sigint_);
 
   if (m_ev_grpc_interactive_task_) event_free(m_ev_grpc_interactive_task_);
+  if (m_ev_query_task_info_of_uid_) event_free(m_ev_query_task_info_of_uid_);
+  if (m_ev_query_cg_of_task_id_) event_free(m_ev_query_cg_of_task_id_);
+  if (m_ev_grpc_create_cg_) event_free(m_ev_grpc_create_cg_);
+  if (m_ev_grpc_release_cg_) event_free(m_ev_grpc_release_cg_);
+  if (m_ev_query_task_id_from_pid_) event_free(m_ev_query_task_id_from_pid_);
 
   if (m_ev_exit_event_) event_free(m_ev_exit_event_);
   close(m_ev_exit_fd_);
@@ -171,9 +247,14 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
       if (WIFEXITED(status)) {
         // Exited with status WEXITSTATUS(status)
         sigchld_info = {pid, false, WEXITSTATUS(status)};
+        SLURMX_TRACE(
+            "Receiving SIGCHLD for pid {}. Signaled: false, Status: {}", pid,
+            WEXITSTATUS(status));
       } else if (WIFSIGNALED(status)) {
         // Killed by signal WTERMSIG(status)
         sigchld_info = {pid, true, WTERMSIG(status)};
+        SLURMX_TRACE("Receiving SIGCHLD for pid {}. Signaled: true, Signal: {}",
+                     pid, WTERMSIG(status));
       }
       /* Todo(More status tracing):
        else if (WIFSTOPPED(status)) {
@@ -216,9 +297,6 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
           this_->m_pid_proc_map_.erase(proc_iter);
 
           if (instance->processes.empty()) {
-            // Remove indexes from pid to TaskInstance*
-            this_->m_pid_task_map_.erase(task_iter);
-
             // See the comment of EvActivateTaskStatusChange_.
             if (instance->task.type() == SlurmxGrpc::Batch) {
               // For a Batch task, the end of the process means it is done.
@@ -236,13 +314,6 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
             }
           }
         }
-      }
-
-      // Todo: Add additional timer to check periodically whether all children
-      //  have exited.
-      if (this_->m_is_ending_now_ && this_->m_task_map_.empty()) {
-        SLURMX_TRACE("EvSigchldCb_ has reaped all child. Stop event loop.");
-        this_->Shutdown();
       }
     } else if (pid == 0)  // There's no child that needs reaping.
       break;
@@ -273,7 +344,7 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
   auto* this_ = reinterpret_cast<TaskManager*>(user_data);
 
   if (!this_->m_is_ending_now_) {
-    SLURMX_INFO("Caught SIGINT. Send SIGINT to all running tasks...");
+    SLURMX_INFO("Caught SIGINT. Send SIGTERM to all running tasks...");
 
     this_->m_is_ending_now_ = true;
 
@@ -286,12 +357,33 @@ void TaskManager::EvSigintCb_(int sig, short events, void* user_data) {
       // Send SIGINT to all tasks and the event loop will stop
       // when the ev_sigchld_cb_ of the last task is called.
       for (auto&& [task_id, task_instance] : this_->m_task_map_) {
-        for (auto&& [pid, pr_instance] : task_instance->processes)
-          KillProcessInstance_(pr_instance.get(), SIGINT);
+        for (auto&& [pid, pr_instance] : task_instance->processes) {
+          SLURMX_INFO(
+              "Sending SIGTERM to the process group of task #{} with root "
+              "process pid {}",
+              task_id, pr_instance->GetPid());
+          KillProcessInstance_(pr_instance.get(), SIGTERM);
+        }
       }
     }
   } else {
-    SLURMX_INFO("SIGINT has been triggered already. Ignoring it.");
+    if (this_->m_task_map_.empty()) {
+      // If there is no task to kill, stop the loop directly.
+      this_->Shutdown();
+    } else {
+      SLURMX_INFO(
+          "SIGINT has been triggered already. Sending SIGKILL to all process "
+          "groups instead.");
+      for (auto&& [task_id, task_instance] : this_->m_task_map_) {
+        for (auto&& [pid, pr_instance] : task_instance->processes) {
+          SLURMX_INFO(
+              "Sending SIGINT to the process group of task #{} with root "
+              "process pid {}",
+              task_id, pr_instance->GetPid());
+          KillProcessInstance_(pr_instance.get(), SIGKILL);
+        }
+      }
+    }
   }
 }
 
@@ -339,10 +431,10 @@ SlurmxErr TaskManager::KillProcessInstance_(const ProcessInstance* proc,
 
     if (err == 0)
       return SlurmxErr::kOk;
-    else if (err == EINVAL)
-      return SlurmxErr::kInvalidParam;
-    else
+    else {
+      SLURMX_TRACE("kill failed. error: {}", strerror(errno));
       return SlurmxErr::kGenericFailure;
+    }
   }
 
   return SlurmxErr::kNonExistent;
@@ -518,6 +610,11 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
 
     close(fd);
 
+    // If these file descriptors are not closed, a program like mpirun may
+    // keep waiting for the input from stdin or other fds and will never end.
+    close(0);  // close stdin
+    util::CloseFdFrom(3);
+
     execv(process->GetExecPath().c_str(),
           const_cast<char* const*>(argv.data()));
 
@@ -557,6 +654,12 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         popped_instance->task.task_id(), std::move(popped_instance));
 
     TaskInstance* instance = iter->second.get();
+
+    // Add task id to the running task set of the UID.
+    // Pam module need it.
+    this_->m_uid_to_task_ids_map_[instance->task.uid()].emplace(
+        instance->task.task_id());
+
     instance->pwd_entry.Init(instance->task.uid());
     if (!instance->pwd_entry.Valid()) {
       SLURMX_DEBUG("Failed to look up password entry for uid {} of task #{}",
@@ -568,30 +671,28 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       return;
     }
 
-    instance->cg_path = CgroupStrByTaskId_(instance->task.task_id());
-    util::Cgroup* cgroup;
-    cgroup = this_->m_cg_mgr_.CreateOrOpen(instance->cg_path,
-                                           util::ALL_CONTROLLER_FLAG,
-                                           util::NO_CONTROLLER_FLAG, false);
-    // Create cgroup for the new subprocess
-    if (!cgroup) {
-      SLURMX_ERROR("Failed to create cgroup for task #{}",
+    auto cg_iter = this_->m_task_id_to_cg_map_.find(instance->task.task_id());
+    if (cg_iter != this_->m_task_id_to_cg_map_.end()) {
+      util::Cgroup* cgroup = cg_iter->second;
+      instance->cg_path = cgroup->GetCgroupString();
+      if (!AllocatableResourceAllocator::Allocate(
+              instance->task.resources().allocatable_resource(), cgroup)) {
+        SLURMX_ERROR(
+            "Failed to allocate allocatable resource in cgroup for task #{}",
+            instance->task.task_id());
+        this_->EvActivateTaskStatusChange_(
+            instance->task.task_id(), SlurmxGrpc::TaskStatus::Failed,
+            fmt::format(
+                "Cannot allocate resources for the instance of task #{}",
+                instance->task.task_id()));
+        return;
+      }
+    } else {
+      SLURMX_ERROR("Failed to find created cgroup for task #{}",
                    instance->task.task_id());
       this_->EvActivateTaskStatusChange_(
           instance->task.task_id(), SlurmxGrpc::TaskStatus::Failed,
-          fmt::format("Cannot create cgroup for the instance of task #{}",
-                      instance->task.task_id()));
-      return;
-    }
-
-    if (!AllocatableResourceAllocator::Allocate(
-            instance->task.resources().allocatable_resource(), cgroup)) {
-      SLURMX_ERROR(
-          "Failed to allocate allocatable resource in cgroup for task #{}",
-          instance->task.task_id());
-      this_->EvActivateTaskStatusChange_(
-          instance->task.task_id(), SlurmxGrpc::TaskStatus::Failed,
-          fmt::format("Cannot allocate resources for the instance of task #{}",
+          fmt::format("Failed to find created cgroup for task #{}",
                       instance->task.task_id()));
       return;
     }
@@ -599,7 +700,7 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
     // If this is a batch task, run it now.
     if (instance->task.type() == SlurmxGrpc::Batch) {
       instance->batch_meta.parsed_sh_script_path = fmt::format(
-          "/tmp/slurmxd/scripts/slurmx-{}.sh", instance->task.task_id());
+          "{}/slurmx-{}.sh", kDefaultSlurmXScriptDir, instance->task.task_id());
       auto& sh_path = instance->batch_meta.parsed_sh_script_path;
 
       FILE* fptr = fopen(sh_path.c_str(), "w");
@@ -618,36 +719,62 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
       chmod(sh_path.c_str(), strtol("0755", nullptr, 8));
 
       SlurmxErr err = SlurmxErr::kOk;
-      for (int i = 0; i < instance->task.task_per_node(); ++i) {
-        auto process = std::make_unique<ProcessInstance>(
-            sh_path, std::list<std::string>());
+      auto process =
+          std::make_unique<ProcessInstance>(sh_path, std::list<std::string>());
 
+      /* Perform file name substitutions
+       * %A - Job array's master job allocation number.
+       * %j - Job ID
+       * %u - User name
+       * %x - Job name
+       */
+      if (instance->task.batch_meta().output_file_pattern().empty()) {
         process->batch_meta.parsed_output_file_pattern =
-            fmt::format("{}/{}-{}-{}.out", instance->task.cwd(),
-                        instance->task.batch_meta().output_file_pattern(),
-                        g_ctlxd_client->GetNodeId().node_index, i);
-        boost::replace_all(process->batch_meta.parsed_output_file_pattern, "%A",
-                           std::to_string(instance->task.task_id()));
-
-        auto* file_logger = new slurmx::FileLogger(
-            fmt::format("{}-{}", instance->task.task_id(), i),
-            process->batch_meta.parsed_output_file_pattern);
-
-        auto clean_cb = [](void* data) {
-          delete reinterpret_cast<slurmx::FileLogger*>(data);
-        };
-
-        auto output_cb = [](std::string&& buf, void* data) {
-          auto* file_logger = reinterpret_cast<slurmx::FileLogger*>(data);
-          file_logger->Output(buf);
-        };
-
-        process->SetUserDataAndCleanCb(file_logger, std::move(clean_cb));
-        process->SetOutputCb(std::move(output_cb));
-
-        err = this_->SpawnProcessInInstance_(instance, std::move(process));
-        if (err != SlurmxErr::kOk) break;
+            fmt::format("{}/", instance->task.cwd());
+      } else {
+        if (instance->task.batch_meta().output_file_pattern()[0] == '/') {
+          process->batch_meta.parsed_output_file_pattern =
+              instance->task.batch_meta().output_file_pattern();
+        } else {
+          process->batch_meta.parsed_output_file_pattern =
+              fmt::format("{}/{}", instance->task.cwd(),
+                          instance->task.batch_meta().output_file_pattern());
+        }
       }
+
+      if (boost::ends_with(process->batch_meta.parsed_output_file_pattern,
+                           "/")) {
+        process->batch_meta.parsed_output_file_pattern += fmt::format(
+            "SlurmX-{}.out", g_ctlxd_client->GetNodeId().node_index);
+      }
+
+      boost::replace_all(process->batch_meta.parsed_output_file_pattern, "%j",
+                         std::to_string(instance->task.task_id()));
+      boost::replace_all(process->batch_meta.parsed_output_file_pattern, "%u",
+                         instance->pwd_entry.Username());
+
+      if (!boost::ends_with(process->batch_meta.parsed_output_file_pattern,
+                            ".out")) {
+        process->batch_meta.parsed_output_file_pattern += ".out";
+      }
+
+      auto* file_logger = new slurmx::FileLogger(
+          fmt::format("{}", instance->task.task_id()),
+          process->batch_meta.parsed_output_file_pattern);
+
+      auto clean_cb = [](void* data) {
+        delete reinterpret_cast<slurmx::FileLogger*>(data);
+      };
+
+      auto output_cb = [](std::string&& buf, void* data) {
+        auto* file_logger = reinterpret_cast<slurmx::FileLogger*>(data);
+        file_logger->Output(buf);
+      };
+
+      process->SetUserDataAndCleanCb(file_logger, std::move(clean_cb));
+      process->SetOutputCb(std::move(output_cb));
+
+      err = this_->SpawnProcessInInstance_(instance, std::move(process));
 
       if (err != SlurmxErr::kOk) {
         this_->EvActivateTaskStatusChange_(
@@ -672,30 +799,38 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
   while (this_->m_task_status_change_queue_.try_dequeue(status_change)) {
     if (status_change.new_status == SlurmxGrpc::TaskStatus::Finished ||
         status_change.new_status == SlurmxGrpc::TaskStatus::Failed) {
-      SLURMX_DEBUG(R"(Destroying Task structure for "{}".)",
-                   status_change.task_id);
+      SLURMX_DEBUG(R"(Destroying Task structure for "{}".)"
+                   R"(Task new status: {})",
+                   status_change.task_id, status_change.new_status);
 
       auto iter = this_->m_task_map_.find(status_change.task_id);
       SLURMX_ASSERT_MSG(iter != this_->m_task_map_.end(),
                         "Task should be found here.");
 
       TaskInstance* task_instance = iter->second.get();
+      uid_t uid = task_instance->task.uid();
 
       if (task_instance->termination_timer) {
         event_del(task_instance->termination_timer);
         event_free(task_instance->termination_timer);
       }
 
-      // Destroy the related cgroup.
-      this_->m_cg_mgr_.Release(task_instance->cg_path);
-      SLURMX_DEBUG("Received SIGCHLD. Destroying Cgroup for task #{}",
-                   status_change.task_id);
-
       // Free the TaskInstance structure
       this_->m_task_map_.erase(status_change.task_id);
     }
 
+    SLURMX_TRACE("Put TaskStatusChange for task #{} into queue.",
+                 status_change.task_id);
     g_ctlxd_client->TaskStatusChangeAsync(std::move(status_change));
+  }
+
+  // Todo: Add additional timer to check periodically whether all children
+  //  have exited.
+  if (this_->m_is_ending_now_ && this_->m_task_map_.empty()) {
+    SLURMX_TRACE(
+        "SlurmXd is ending and all tasks have been reaped. "
+        "Stop event loop.");
+    this_->Shutdown();
   }
 }
 
@@ -727,6 +862,16 @@ SlurmxErr TaskManager::SpawnInteractiveTaskAsync(
   event_active(m_ev_grpc_interactive_task_, 0, 0);
 
   return err_future.get();
+}
+
+std::optional<uint32_t> TaskManager::QueryTaskIdFromPidAsync(pid_t pid) {
+  EvQueueQueryTaskIdFromPid elem{.pid = pid};
+  std::future<std::optional<uint32_t>> task_id_opt_future =
+      elem.task_id_prom.get_future();
+  m_query_task_id_from_pid_queue_.enqueue(std::move(elem));
+  event_active(m_ev_query_task_id_from_pid_, 0, 0);
+
+  return task_id_opt_future.get();
 }
 
 void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
@@ -769,6 +914,23 @@ void TaskManager::EvGrpcSpawnInteractiveTaskCb_(int efd, short events,
   }
 }
 
+void TaskManager::EvGrpcQueryTaskIdFromPidCb_(int efd, short events,
+                                              void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  EvQueueQueryTaskIdFromPid elem;
+  while (this_->m_query_task_id_from_pid_queue_.try_dequeue(elem)) {
+    auto task_iter = this_->m_pid_task_map_.find(elem.pid);
+    if (task_iter == this_->m_pid_task_map_.end())
+      elem.task_id_prom.set_value(std::nullopt);
+    else {
+      TaskInstance* instance = task_iter->second;
+      uint32_t task_id = instance->task.task_id();
+      elem.task_id_prom.set_value(task_id);
+    }
+  }
+}
+
 void TaskManager::EvOnTimerCb_(int, short, void* arg_) {
   auto* arg = reinterpret_cast<EvTimerCbArg*>(arg_);
   TaskManager* this_ = arg->task_manager;
@@ -806,7 +968,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
       // send a kill signal here.
       for (auto&& [pid, pr_instance] : task_instance->processes)
         KillProcessInstance_(pr_instance.get(), sig);
-    } else {
+    } else if (task_instance->task.type() == SlurmxGrpc::Interactive) {
       // For an Interactive task with no process running, it ends immediately.
       this_->EvActivateTaskStatusChange_(elem.task_id, SlurmxGrpc::Finished,
                                          std::nullopt);
@@ -818,6 +980,180 @@ void TaskManager::TerminateTaskAsync(uint32_t task_id) {
   EvQueueTaskTerminate elem{task_id};
   m_task_terminate_queue_.enqueue(elem);
   event_active(m_ev_task_terminate_, 0, 0);
+}
+
+bool TaskManager::CreateCgroupAsync(uint32_t task_id, uid_t uid) {
+  EvQueueCreateCg elem{.task_id = task_id, .uid = uid};
+
+  std::future<bool> ok_fut = elem.ok_prom.get_future();
+  m_grpc_create_cg_queue_.enqueue(std::move(elem));
+  event_active(m_ev_grpc_create_cg_, 0, 0);
+  return ok_fut.get();
+}
+
+bool TaskManager::ReleaseCgroupAsync(uint32_t task_id, uid_t uid) {
+  EvQueueReleaseCg elem{.task_id = task_id, .uid = uid};
+
+  std::future<bool> ok_fut = elem.ok_prom.get_future();
+  m_grpc_release_cg_queue_.enqueue(std::move(elem));
+  event_active(m_ev_grpc_release_cg_, 0, 0);
+  return ok_fut.get();
+}
+
+void TaskManager::EvGrpcCreateCgroupCb_(int efd, short events,
+                                        void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  EvQueueCreateCg create_cg;
+  while (this_->m_grpc_create_cg_queue_.try_dequeue(create_cg)) {
+    SLURMX_DEBUG("Creating Cgroup for task #{}", create_cg.task_id);
+
+    std::string cg_path = CgroupStrByTaskId_(create_cg.task_id);
+    util::Cgroup* cgroup;
+    cgroup = this_->m_cg_mgr_.CreateOrOpen(cg_path, util::ALL_CONTROLLER_FLAG,
+                                           util::NO_CONTROLLER_FLAG, false);
+    // Create cgroup for the new subprocess
+    if (!cgroup) {
+      SLURMX_ERROR("Failed to create cgroup for task #{}", create_cg.task_id);
+      create_cg.ok_prom.set_value(false);
+    } else {
+      create_cg.ok_prom.set_value(true);
+      this_->m_task_id_to_cg_map_.emplace(create_cg.task_id, cgroup);
+      this_->m_uid_to_task_ids_map_[create_cg.uid].emplace(create_cg.task_id);
+    }
+  }
+}
+
+void TaskManager::EvGrpcReleaseCgroupCb_(int efd, short events,
+                                         void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  EvQueueReleaseCg release_cg;
+  while (this_->m_grpc_release_cg_queue_.try_dequeue(release_cg)) {
+    SLURMX_DEBUG("Destroying Cgroup for task #{}", release_cg.task_id);
+
+    this_->m_uid_to_task_ids_map_[release_cg.uid].erase(release_cg.task_id);
+    if (this_->m_uid_to_task_ids_map_[release_cg.uid].empty()) {
+      this_->m_uid_to_task_ids_map_.erase(release_cg.uid);
+    }
+
+    auto iter = this_->m_task_id_to_cg_map_.find(release_cg.task_id);
+    if (iter == this_->m_task_id_to_cg_map_.end()) {
+      SLURMX_ERROR("Failed to find cgroup for task #{}", release_cg.task_id);
+      release_cg.ok_prom.set_value(false);
+      return;
+    } else {
+      // The termination of all processes in a cgroup is a time-consuming work.
+      // Therefore, once we are sure that the cgroup for this task exists, we
+      // let gRPC call return and put the termination work into the thread pool
+      // to avoid blocking the event loop of TaskManager.
+      // Kind of async behavior.
+      release_cg.ok_prom.set_value(true);
+
+      util::Cgroup* cg = iter->second;
+      this_->m_task_id_to_cg_map_.erase(iter);
+
+      g_thread_pool->push_task(
+          [cg, cg_mgr = &this_->m_cg_mgr_, task_id = release_cg.task_id] {
+            bool rc;
+            int cnt = 0;
+
+            while (true) {
+              if (cg->Empty()) {
+                SLURMX_TRACE("Cgroup {} now has no process inside.",
+                             cg->GetCgroupString());
+                break;
+              }
+
+              if (cnt >= 5) {
+                SLURMX_ERROR(
+                    "Couldn't kill the processes in cgroup {} after {} times. "
+                    "Skipping it.",
+                    cg->GetCgroupString(), cnt);
+                break;
+              }
+
+              cg->KillAllProcesses();
+              ++cnt;
+              std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+
+            rc = cg_mgr->Release(cg->GetCgroupString());
+            // Release cgroup for the new subprocess
+            if (!rc) {
+              SLURMX_ERROR("Failed to Release cgroup for task #{}", task_id);
+            }
+          });
+    }
+  }
+}
+
+bool TaskManager::QueryTaskInfoOfUidAsync(uid_t uid, TaskInfoOfUid* info) {
+  EvQueueQueryTaskInfoOfUid elem{.uid = uid};
+
+  std::future<TaskInfoOfUid> info_fut = elem.info_prom.get_future();
+  m_query_task_info_of_uid_queue_.enqueue(std::move(elem));
+  event_active(m_ev_query_task_info_of_uid_, 0, 0);
+
+  *info = info_fut.get();
+  return info->job_cnt > 0 && info->cgroup_exists;
+}
+
+void TaskManager::EvGrpcQueryTaskInfoOfUidCb_(int efd, short events,
+                                              void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  EvQueueQueryTaskInfoOfUid query;
+  while (this_->m_query_task_info_of_uid_queue_.try_dequeue(query)) {
+    SLURMX_DEBUG("Query task info for uid {}", query.uid);
+
+    TaskInfoOfUid info{.job_cnt = 0, .cgroup_exists = false};
+
+    auto iter = this_->m_uid_to_task_ids_map_.find(query.uid);
+    if (iter != this_->m_uid_to_task_ids_map_.end()) {
+      info.job_cnt = iter->second.size();
+      info.first_task_id = *iter->second.begin();
+
+      try {
+        util::Cgroup* cg = this_->m_task_id_to_cg_map_.at(info.first_task_id);
+        info.cgroup_path = cg->GetCgroupString();
+        info.cgroup_exists = true;
+      } catch (const std::out_of_range& e) {
+        SLURMX_ERROR("Cannot find Cgroup* for uid {}'s task #{}!", query.uid,
+                     info.first_task_id);
+      }
+    }
+
+    query.info_prom.set_value(info);
+  }
+}
+
+bool TaskManager::QueryCgOfTaskIdAsync(uint32_t task_id, util::Cgroup** cg) {
+  EvQueueQueryCgOfTaskId elem{.task_id = task_id};
+
+  std::future<util::Cgroup*> cg_fut = elem.cg_prom.get_future();
+  m_query_cg_of_task_id_queue_.enqueue(std::move(elem));
+  event_active(m_ev_query_cg_of_task_id_, 0, 0);
+
+  *cg = cg_fut.get();
+  return *cg != nullptr;
+}
+
+void TaskManager::EvGrpcQueryCgOfTaskIdCb_(int efd, short events,
+                                           void* user_data) {
+  auto* this_ = reinterpret_cast<TaskManager*>(user_data);
+
+  EvQueueQueryCgOfTaskId query;
+  while (this_->m_query_cg_of_task_id_queue_.try_dequeue(query)) {
+    SLURMX_DEBUG("Query Cgroup* task #{}", query.task_id);
+
+    auto iter = this_->m_task_id_to_cg_map_.find(query.task_id);
+    if (iter != this_->m_task_id_to_cg_map_.end()) {
+      query.cg_prom.set_value(iter->second);
+    } else {
+      query.cg_prom.set_value(nullptr);
+    }
+  }
 }
 
 }  // namespace Xd

@@ -74,6 +74,16 @@ inline const char* kCtlXdDefaultPort = "10011";
 inline const char* kXdDefaultPort = "10010";
 inline const char* kDefaultConfigPath = "/etc/slurmx/config.yaml";
 
+#define DEFAULT_SLURM_TEMP_DIR "/tmp/slurmx"
+
+inline const char* kDefaultSlurmXTempDir = DEFAULT_SLURM_TEMP_DIR;
+inline const char* kDefaultSlurmXScriptDir =
+    DEFAULT_SLURM_TEMP_DIR "/slurmxd/scripts";
+inline const char* kDefaultSlurmXdUnixSockPath =
+    DEFAULT_SLURM_TEMP_DIR "/slurmxd.sock";
+
+#undef DEFAULT_SLURM_TEMP_DIR
+
 namespace Internal {
 
 constexpr std::array<std::string_view, uint16_t(SlurmxErr::__ERR_SIZE)>

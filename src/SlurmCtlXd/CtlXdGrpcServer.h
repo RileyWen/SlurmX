@@ -57,6 +57,11 @@ class SlurmCtlXdServiceImpl final : public SlurmxGrpc::SlurmCtlXd::Service {
       const SlurmxGrpc::TaskStatusChangeRequest *request,
       SlurmxGrpc::TaskStatusChangeReply *response) override;
 
+  grpc::Status QueryNodeListFromTaskId(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::QueryNodeListFromTaskIdRequest *request,
+      SlurmxGrpc::QueryNodeListFromTaskIdReply *response) override;
+
   grpc::Status TerminateTask(grpc::ServerContext *context,
                              const SlurmxGrpc::TerminateTaskRequest *request,
                              SlurmxGrpc::TerminateTaskReply *response) override;

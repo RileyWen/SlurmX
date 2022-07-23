@@ -1,5 +1,12 @@
 #include "XdServer.h"
 
+#include <arpa/inet.h>
+#include <sys/stat.h>
+#include <yaml-cpp/yaml.h>
+
+#include <boost/algorithm/string/join.hpp>
+#include <filesystem>
+#include <fstream>
 #include <utility>
 
 #include "CtlXdClient.h"
@@ -341,17 +348,275 @@ grpc::Status SlurmXdServiceImpl::TerminateTask(
   return Status::OK;
 }
 
-XdServer::XdServer(std::string listen_address)
-    : m_listen_address_(std::move(listen_address)) {
+grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPort(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryTaskIdFromPortRequest *request,
+    SlurmxGrpc::QueryTaskIdFromPortReply *response) {
+  SLURMX_TRACE("Receive QueryTaskIdFromPort RPC from {}: port: {}",
+               context->peer(), request->port());
+
+  std::string port_hex = fmt::format("{:0>4X}", request->port());
+
+  ino_t inode;
+
+  // find inode
+  // 1._find_match_in_tcp_file
+  std::string tcp_path{"/proc/net/tcp"};
+  std::ifstream tcp_in(tcp_path, std::ios::in);
+  std::string tcp_line;
+  bool inode_found = false;
+  if (tcp_in) {
+    getline(tcp_in, tcp_line);  // Skip the header line
+    while (getline(tcp_in, tcp_line)) {
+      boost::trim(tcp_line);
+      std::vector<std::string> tcp_line_vec;
+      boost::split(tcp_line_vec, tcp_line, boost::is_any_of(" :"),
+                   boost::token_compress_on);
+      SLURMX_TRACE("Checking port {} == {}", port_hex, tcp_line_vec[2]);
+      if (port_hex == tcp_line_vec[2]) {
+        inode_found = true;
+        inode = std::stoul(tcp_line_vec[13]);
+        SLURMX_TRACE("Inode num for port {} is {}", request->port(), inode);
+        break;
+      }
+    }
+    if (!inode_found) {
+      SLURMX_TRACE("Inode num for port {} is not found.", request->port());
+      response->set_ok(false);
+      return Status::OK;
+    }
+  } else {  // can't find file
+    SLURMX_ERROR("Can't open file: {}", tcp_path);
+  }
+
+  // 2.find_pid_by_inode
+  pid_t pid_i = -1;
+  std::filesystem::path proc_path{"/proc"};
+  for (auto const &dir_entry : std::filesystem::directory_iterator(proc_path)) {
+    if (isdigit(dir_entry.path().filename().string()[0])) {
+      std::string pid_s = dir_entry.path().filename().string();
+      std::string proc_fd_path =
+          fmt::format("{}/{}/fd", proc_path.string(), pid_s);
+      if (!std::filesystem::exists(proc_fd_path)) {
+        continue;
+      }
+      for (auto const &fd_dir_entry :
+           std::filesystem::directory_iterator(proc_fd_path)) {
+        struct stat statbuf {};
+        std::string fdpath = fmt::format(
+            "{}/{}", proc_fd_path, fd_dir_entry.path().filename().string());
+        const char *fdchar = fdpath.c_str();
+        if (stat(fdchar, &statbuf) != 0) {
+          continue;
+        }
+        if (statbuf.st_ino == inode) {
+          pid_i = std::stoi(pid_s);
+          SLURMX_TRACE("Pid for the process that owns port {} is {}",
+                       request->port(), pid_i);
+          break;
+        }
+      }
+    }
+    if (pid_i != -1) {
+      break;
+    }
+  }
+  if (pid_i == -1) {
+    SLURMX_TRACE("Pid for the process that owns port {} is not found.",
+                 request->port());
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  // 3.slurm_pid2jobid
+  do {
+    std::optional<uint32_t> task_id_opt =
+        g_task_mgr->QueryTaskIdFromPidAsync(pid_i);
+    if (task_id_opt.has_value()) {
+      SLURMX_TRACE("Task id for pid {} is #{}", pid_i, task_id_opt.value());
+      response->set_ok(true);
+      response->set_task_id(task_id_opt.value());
+      return Status::OK;
+    } else {
+      std::string proc_dir = fmt::format("/proc/{}/status", pid_i);
+      YAML::Node proc_details = YAML::LoadFile(proc_dir);
+      if (proc_details["PPid"]) {
+        pid_t ppid = std::stoi(proc_details["PPid"].as<std::string>());
+        SLURMX_TRACE("Pid {} not found in TaskManager. Checking ppid {}", pid_i,
+                     ppid);
+        pid_i = ppid;
+      } else {
+        SLURMX_TRACE(
+            "Pid {} not found in TaskManager. "
+            "However ppid is 1. Break the loop.",
+            pid_i);
+        pid_i = 1;
+      }
+    }
+  } while (pid_i > 1);
+
+  response->set_ok(false);
+  return Status::OK;
+}
+
+grpc::Status SlurmXdServiceImpl::CreateCgroupForTask(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::CreateCgroupForTaskRequest *request,
+    SlurmxGrpc::CreateCgroupForTaskReply *response) {
+  bool ok = g_task_mgr->CreateCgroupAsync(request->task_id(), request->uid());
+  response->set_ok(ok);
+  return Status::OK;
+}
+
+grpc::Status SlurmXdServiceImpl::ReleaseCgroupForTask(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::ReleaseCgroupForTaskRequest *request,
+    SlurmxGrpc::ReleaseCgroupForTaskReply *response) {
+  bool ok = g_task_mgr->ReleaseCgroupAsync(request->task_id(), request->uid());
+  response->set_ok(ok);
+  return Status::OK;
+}
+
+grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPortForward(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryTaskIdFromPortForwardRequest *request,
+    SlurmxGrpc::QueryTaskIdFromPortForwardReply *response) {
+  // Check whether the remote address is in the addresses of CraneD nodes.
+  auto ip_iter =
+      g_config.Ipv4ToNodesHostname.find(request->target_xd_address());
+  if (ip_iter == g_config.Ipv4ToNodesHostname.end()) {
+    // Not in the addresses of CraneD nodes. This ssh request comes from a user.
+    // Check if the user's uid is running a task. If so, move it in to the
+    // cgroup of his first task. If not so, reject this ssh request.
+    SLURMX_TRACE(
+        "Receive QueryTaskIdFromPortForward from Pam module: "
+        "ssh_remote_port: {}, xd_address: {}, xd_port: {}. "
+        "This ssh comes from a user machine. uid: {}",
+        request->ssh_remote_port(), request->target_xd_address(),
+        request->target_xd_port(), request->uid());
+
+    response->set_from_user(true);
+
+    TaskInfoOfUid info{};
+    bool ok = g_task_mgr->QueryTaskInfoOfUidAsync(request->uid(), &info);
+    if (ok) {
+      SLURMX_TRACE(
+          "Found a task #{} belonging to uid {}. "
+          "This ssh session process is going to be moved into the task's "
+          "cgroup {}.",
+          info.first_task_id, request->uid(), info.cgroup_path);
+      response->set_task_id(info.first_task_id);
+      response->set_cgroup_path(info.cgroup_path);
+      response->set_ok(true);
+    } else {
+      SLURMX_TRACE(
+          "This ssh session can't be moved into uid {}'s tasks. "
+          "This uid has {} task(s) and cgroup found: {}. "
+          "Reject this ssh request.",
+          request->uid(), info.job_cnt, info.cgroup_exists);
+      response->set_ok(false);
+    }
+    return Status::OK;
+  }
+
+  SLURMX_TRACE(
+      "Receive QueryTaskIdFromPortForward from Pam module: "
+      "ssh_remote_port: {}, xd_address: {}, xd_port: {}. "
+      "This ssh comes from a CraneD node. uid: {}",
+      request->ssh_remote_port(), request->target_xd_address(),
+      request->target_xd_port(), request->uid());
+  // In the addresses of CraneD nodes. This ssh request comes from a CraneD
+  // node. Check if the remote port belongs to a task. If so, move it in to the
+  // cgroup of this task. If not so, reject this ssh request.
+
+  std::string target_xd = fmt::format("{}:{}", request->target_xd_address(),
+                                      request->target_xd_port());
+  std::shared_ptr<Channel> channel_of_remote_xd =
+      grpc::CreateChannel(target_xd, grpc::InsecureChannelCredentials());
+
+  std::unique_ptr<SlurmxGrpc::SlurmXd::Stub> stub_of_remote_xd =
+      SlurmxGrpc::SlurmXd::NewStub(channel_of_remote_xd);
+
+  SlurmxGrpc::QueryTaskIdFromPortRequest request_to_remote_xd;
+  SlurmxGrpc::QueryTaskIdFromPortReply reply_from_remote_xd;
+  ClientContext context_of_remote_xd;
+  Status status_remote_xd;
+
+  request_to_remote_xd.set_port(request->ssh_remote_port());
+
+  status_remote_xd = stub_of_remote_xd->QueryTaskIdFromPort(
+      &context_of_remote_xd, request_to_remote_xd, &reply_from_remote_xd);
+  if (!status_remote_xd.ok()) {
+    SLURMX_ERROR("QueryTaskIdFromPort gRPC call failed: {} | {}",
+                 status_remote_xd.error_message(),
+                 status_remote_xd.error_details());
+    response->set_ok(false);
+    return Status::OK;
+  }
+
+  if (reply_from_remote_xd.ok()) {
+    util::Cgroup *cg;
+    if (g_task_mgr->QueryCgOfTaskIdAsync(reply_from_remote_xd.task_id(), &cg)) {
+      SLURMX_TRACE(
+          "ssh client with remote port {} belongs to task #{}. "
+          "Moving this ssh session process into the task's cgroup",
+          request->ssh_remote_port(), reply_from_remote_xd.task_id());
+
+      response->set_ok(true);
+      response->set_task_id(reply_from_remote_xd.task_id());
+      response->set_cgroup_path(cg->GetCgroupString());
+    } else {
+      SLURMX_TRACE(
+          "ssh client with remote port {} belongs to task #{}. "
+          "But the task's cgroup is not found. Reject this ssh request",
+          request->ssh_remote_port(), reply_from_remote_xd.task_id());
+      response->set_ok(false);
+    }
+
+    return Status::OK;
+  } else {
+    SLURMX_TRACE("ssh client with remote port {} doesn't belong to any task",
+                 request->ssh_remote_port());
+    response->set_ok(false);
+    return Status::OK;
+  }
+}
+
+grpc::Status SlurmXdServiceImpl::MigrateSshProcToCgroup(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::MigrateSshProcToCgroupRequest *request,
+    SlurmxGrpc::MigrateSshProcToCgroupReply *response) {
+  SLURMX_TRACE("Moving pid {} to cgroup {}", request->pid(),
+               request->cgroup_path());
+  bool ok = util::CgroupManager::Instance().MigrateProcTo(
+      request->pid(), request->cgroup_path());
+
+  if (!ok) {
+    SLURMX_ERROR("GrpcMigrateSshProcToCgroup failed on pid: {}, cgroup: {}",
+                 request->pid(), request->cgroup_path());
+    response->set_ok(false);
+  } else {
+    response->set_ok(true);
+  }
+
+  return Status::OK;
+}
+
+XdServer::XdServer(std::list<std::string> listen_addresses)
+    : m_listen_addresses_(std::move(listen_addresses)) {
   m_service_impl_ = std::make_unique<SlurmXdServiceImpl>();
 
   grpc::ServerBuilder builder;
-  builder.AddListeningPort(m_listen_address_,
-                           grpc::InsecureServerCredentials());
+
+  for (auto &&address : m_listen_addresses_) {
+    builder.AddListeningPort(address, grpc::InsecureServerCredentials());
+  }
+
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
-  SLURMX_INFO("SlurmXd is listening on {}", m_listen_address_);
+  SLURMX_INFO("SlurmXd is listening on [{}]",
+              boost::join(m_listen_addresses_, ", "));
 
   g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
     p_server->Shutdown();

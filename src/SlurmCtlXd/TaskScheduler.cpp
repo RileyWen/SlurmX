@@ -116,6 +116,12 @@ void TaskScheduler::ScheduleThread_() {
         // allocated node.
         XdNodeId first_node_id{partition_id, task->node_indexes.front()};
 
+        for (auto iter : task->node_indexes) {
+          XdNodeId node_id{partition_id, iter};
+          XdNodeStub* stub = g_node_keeper->GetXdStub(node_id);
+          stub->CreateCgroupForTask(task->task_id, task->uid);
+        }
+
         // IMPORTANT: task must be put into running_task_map before any
         //  time-consuming operation, otherwise TaskStatusChange RPC will come
         //  earlier before task is put into running_task_map.
@@ -285,38 +291,43 @@ void TaskScheduler::TaskStatusChange(uint32_t task_id, uint32_t node_index,
 
   if (!task->is_completing) {
     task->is_completing = true;
-    task->end_node_set.emplace(node_index);
     if (new_status == SlurmxGrpc::Finished) {
       task->status = SlurmxGrpc::Finished;
     } else /* Failed */ {
       task->status = SlurmxGrpc::Failed;
-      TerminateTaskNoLock_(task_id);
+      TerminateTaskExcludeOneXdNoLock_(task_id, node_index);
     }
     g_db_client->UpdateJobRecordField(task->job_db_inx, "state",
                                       std::to_string(SlurmxGrpc::Completing));
   } else {
-    task->end_node_set.emplace(node_index);
     if (new_status == SlurmxGrpc::Failed &&
         task->status == SlurmxGrpc::Finished) {
       task->status = SlurmxGrpc::Failed;
-      TerminateTaskNoLock_(task_id);
+      TerminateTaskExcludeOneXdNoLock_(task_id, node_index);
     }
   }
 
-  g_meta_container->FreeResourceFromNode({task->partition_id, node_index},
-                                         task_id);
-  m_node_to_tasks_map_[node_index].erase(task_id);
+  for (auto&& task_node_index : task->node_indexes) {
+    XdNodeId task_node_id{task->partition_id, task_node_index};
+    g_meta_container->FreeResourceFromNode(task_node_id, task_id);
+    auto* stub = g_node_keeper->GetXdStub(task_node_id);
+    SlurmxErr err = stub->ReleaseCgroupForTask(task_id, task->uid);
+    if (err != SlurmxErr::kOk) {
+      SLURMX_ERROR("Failed to Release cgroup RPC for task#{} on Node {}",
+                   task_id, task_node_id);
+    }
 
-  if (task->end_node_set.size() == task->node_num) {
-    uint64_t timestamp = ToUnixSeconds(absl::Now());
-    g_db_client->UpdateJobRecordFields(
-        task->job_db_inx, {"time_end", "state"},
-        {std::to_string(timestamp), std::to_string(task->status)});
-
-    LockGuard ended_guard(m_ended_task_map_mtx_);
-    m_ended_task_map_.emplace(task_id, std::move(iter->second));
-    m_running_task_map_.erase(iter);
+    m_node_to_tasks_map_[task_node_index].erase(task_id);
   }
+
+  uint64_t timestamp = ToUnixSeconds(absl::Now());
+  g_db_client->UpdateJobRecordFields(
+      task->job_db_inx, {"time_end", "state"},
+      {std::to_string(timestamp), std::to_string(task->status)});
+
+  LockGuard ended_guard(m_ended_task_map_mtx_);
+  m_ended_task_map_.emplace(task_id, std::move(iter->second));
+  m_running_task_map_.erase(iter);
 }
 
 bool TaskScheduler::QueryXdNodeIdOfRunningTaskNoLock_(
@@ -325,12 +336,10 @@ bool TaskScheduler::QueryXdNodeIdOfRunningTaskNoLock_(
   if (iter == m_running_task_map_.end()) return false;
 
   for (auto node_index : iter->second->node_indexes) {
-    if (iter->second->end_node_set.count(node_index) == 0) {
-      XdNodeId node_id;
-      node_id.node_index = node_index;
-      node_id.partition_id = iter->second->partition_id;
-      node_ids->push_back(node_id);
-    }
+    XdNodeId node_id;
+    node_id.node_index = node_index;
+    node_id.partition_id = iter->second->partition_id;
+    node_ids->push_back(node_id);
   }
 
   return true;
@@ -348,6 +357,27 @@ bool TaskScheduler::TerminateTaskNoLock_(uint32_t task_id) {
         ok &= true;
       else
         ok &= false;
+    }
+  }
+
+  return ok;
+}
+
+bool TaskScheduler::TerminateTaskExcludeOneXdNoLock_(
+    uint32_t task_id, uint32_t excluded_node_index) {
+  std::list<XdNodeId> node_ids;
+  bool ok = QueryXdNodeIdOfRunningTaskNoLock_(task_id, &node_ids);
+
+  if (ok) {
+    for (XdNodeId xd_node_id : node_ids) {
+      if (excluded_node_index != xd_node_id.node_index) {
+        auto stub = g_node_keeper->GetXdStub(xd_node_id);
+        SlurmxErr err = stub->TerminateTask(task_id);
+        if (err == SlurmxErr::kOk)
+          ok &= true;
+        else
+          ok &= false;
+      }
     }
   }
 
@@ -410,6 +440,19 @@ void TaskScheduler::QueryTaskBriefMetaInPartition(
       *id_it = task->task_id;
     }
   }
+}
+
+std::string TaskScheduler::QueryNodeListFromTaskId(uint32_t task_id) {
+  LockGuard running_guard(m_running_task_map_mtx_);
+  auto iter = m_running_task_map_.find(task_id);
+  std::string node_list;
+  if (iter != m_running_task_map_.end()) {
+    int task_per_node = iter->second->task_per_node;
+    for (auto& node : iter->second->nodes) {
+      node_list += node + ":" + std::to_string(task_per_node) + "/n";
+    }
+  }
+  return node_list;
 }
 
 void MinLoadFirst::CalculateNodeSelectionInfo_(
@@ -579,6 +622,9 @@ bool MinLoadFirst::CalculateRunningNodesAndStartTime_(
             time_segments.emplace_back(expected_start_time, valid_duration);
             break;
           } else {
+            SLURMX_ASSERT_MSG(task_duration_it->first >= now,
+                              "The start of a duration must be greater than or "
+                              "equal to the end of it");
             SLURMX_TRACE(
                 "\t Trying duration [ now+{}s , now+{}s ) for task #{} is "
                 "valid and set as the start of a time segment.",

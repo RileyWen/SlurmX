@@ -14,7 +14,7 @@ void timer_cb2(uv_timer_t* timer, int status) {
 
 void timer_cb1(uv_timer_t* timer, int status) {
   printf("Timer 1 Status: %d\n", status);
-  //  uv_timer_stop(timer);
+  uv_timer_stop(timer);
 
   auto* timer2 = new uv_timer_t;
   uv_timer_init(loop, timer2);

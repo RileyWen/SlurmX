@@ -157,6 +157,8 @@ class TaskScheduler {
     return QueryXdNodeIdOfRunningTaskNoLock_(task_id, node_ids);
   }
 
+  std::string QueryNodeListFromTaskId(uint32_t task_id);
+
   bool TerminateTask(uint32_t task_id) {
     LockGuard running_guard(m_running_task_map_mtx_);
     return TerminateTaskNoLock_(task_id);
@@ -171,6 +173,9 @@ class TaskScheduler {
                                          std::list<XdNodeId>* node_ids);
 
   bool TerminateTaskNoLock_(uint32_t task_id);
+
+  bool TerminateTaskExcludeOneXdNoLock_(uint32_t task_id,
+                                        uint32_t excluded_node_index);
 
   std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
 

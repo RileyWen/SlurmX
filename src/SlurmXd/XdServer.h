@@ -6,6 +6,7 @@
 #include <atomic>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -52,11 +53,36 @@ class SlurmXdServiceImpl : public SlurmXd::Service {
   grpc::Status TerminateTask(grpc::ServerContext *context,
                              const SlurmxGrpc::TerminateTaskRequest *request,
                              SlurmxGrpc::TerminateTaskReply *response) override;
+
+  grpc::Status QueryTaskIdFromPort(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::QueryTaskIdFromPortRequest *request,
+      SlurmxGrpc::QueryTaskIdFromPortReply *response) override;
+
+  grpc::Status QueryTaskIdFromPortForward(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::QueryTaskIdFromPortForwardRequest *request,
+      SlurmxGrpc::QueryTaskIdFromPortForwardReply *response) override;
+
+  grpc::Status MigrateSshProcToCgroup(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::MigrateSshProcToCgroupRequest *request,
+      SlurmxGrpc::MigrateSshProcToCgroupReply *response) override;
+
+  grpc::Status CreateCgroupForTask(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::CreateCgroupForTaskRequest *request,
+      SlurmxGrpc::CreateCgroupForTaskReply *response) override;
+
+  grpc::Status ReleaseCgroupForTask(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::ReleaseCgroupForTaskRequest *request,
+      SlurmxGrpc::ReleaseCgroupForTaskReply *response) override;
 };
 
 class XdServer {
  public:
-  explicit XdServer(std::string listen_address);
+  explicit XdServer(std::list<std::string> listen_addresses);
 
   inline void Shutdown() { m_server_->Shutdown(); }
 
@@ -86,7 +112,7 @@ class XdServer {
 
   Mutex m_mtx_;
 
-  const std::string m_listen_address_;
+  const std::list<std::string> m_listen_addresses_;
 
   std::unique_ptr<SlurmXdServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;

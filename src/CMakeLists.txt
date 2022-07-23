@@ -1,3 +1,4 @@
 add_subdirectory(SlurmCtlXd)
 add_subdirectory(SlurmXd)
 add_subdirectory(Utilities)
+add_subdirectory(Misc)

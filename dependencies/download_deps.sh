@@ -102,5 +102,6 @@ pushd $LIB_DIR/fmt-8.0.1 &&
 # spdlog
 pushd $LIB_DIR/spdlog-1.8.5 &&
   mkdir -p build && cd build &&
-  cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/spdlog "${CMAKE_DEFS[@]}" .. && ninja install &&
+  cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/spdlog -DCMAKE_POSITION_INDEPENDENT_CODE=ON "${CMAKE_DEFS[@]}" .. &&
+  ninja install &&
   popd
