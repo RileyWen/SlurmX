@@ -16,5 +16,6 @@ TEST(String, ParseNodeList) {
   if (ok) {
     std::string parsed_list_str = absl::StrJoin(parsed_list, " ");
     GTEST_LOG_(INFO) << "Parsed List: " << parsed_list_str;
+    EXPECT_EQ(parsed_list_str, "aaa1 aaa2 aaa3 bbb");
   }
 }

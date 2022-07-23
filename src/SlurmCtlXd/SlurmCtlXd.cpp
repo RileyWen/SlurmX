@@ -247,14 +247,9 @@ int main(int argc, char** argv) {
           std::list<std::string> name_list;
 
           if (node["name"]) {
-            std::list<std::string> str_list =
-                absl::StrSplit(node["name"].Scalar(), ',');
-            for (auto&& str : str_list) {
-              std::string str_s{absl::StripAsciiWhitespace(str)};
-              if (!util::ParseHostList(str_s, &name_list)) {
-                SLURMX_ERROR("Illegal node name string format.");
-                std::exit(1);
-              }
+            if (!util::ParseHostList(node["name"].Scalar(), &name_list)) {
+              SLURMX_ERROR("Illegal node name string format.");
+              std::exit(1);
             }
 
             SLURMX_TRACE("node name list parsed: {}",
