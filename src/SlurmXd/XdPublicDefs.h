@@ -88,6 +88,8 @@ struct Config {
   bool SlurmXdForeground{};
 
   std::string Hostname;
+  XdNodeId NodeId;
+
   std::unordered_map<std::string, std::string> Ipv4ToNodesHostname;
   std::unordered_map<std::string, std::shared_ptr<Node>> Nodes;
   std::unordered_map<std::string, Partition> Partitions;

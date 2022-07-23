@@ -1,4 +1,4 @@
-add_executable(utility_test TimerSet_test.cpp cgroup_limit_test.cpp network_function_test.cpp)
+add_executable(utility_test TimerSet_test.cpp cgroup_limit_test.cpp network_function_test.cpp PublicHeader_test.cpp)
 target_link_libraries(utility_test
         GTest::gtest
         GTest::gtest_main

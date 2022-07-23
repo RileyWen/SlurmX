@@ -95,8 +95,14 @@ void InitializeCtlXdGlobalVariables() {
   for (auto& kv : g_config.Nodes) {
     XdNodeAddrAndId addr_and_id;
     addr_and_id.node_addr = kv.first;
-    SLURMX_ASSERT(g_meta_container->GetNodeId(kv.first, &addr_and_id.node_id));
-    addr_and_id_list.emplace_back(std::move(addr_and_id));
+    if (g_meta_container->GetNodeId(kv.first, &addr_and_id.node_id))
+      addr_and_id_list.emplace_back(std::move(addr_and_id));
+    else {
+      SLURMX_TRACE(
+          "Node {} doesn't belong to any partition. It will not be "
+          "registered.",
+          kv.first);
+    }
   }
   g_node_keeper->RegisterXdNodes(std::move(addr_and_id_list));
 
@@ -133,7 +139,7 @@ int StartServer() {
   return 0;
 }
 
-void StartDeamon() {
+void StartDaemon() {
   /* Our process ID and Session ID */
   pid_t pid, sid;
 
@@ -370,7 +376,7 @@ int main(int argc, char** argv) {
   if (g_config.SlurmCtlXdForeground)
     StartServer();
   else
-    StartDeamon();
+    StartDaemon();
 
   return 0;
 }

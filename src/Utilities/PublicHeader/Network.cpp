@@ -1,6 +1,7 @@
 #include "slurmx/Network.h"
 
 #include <cstring>
+#include <regex>
 
 #include "slurmx/PublicHeader.h"
 
@@ -66,8 +67,8 @@ bool ResolveIpv4FromHostname(const std::string& hostname, std::string* addr) {
 
   int ret = getaddrinfo(hostname.c_str(), nullptr, &hints, &res);
   if (ret != 0) {
-    SLURMX_TRACE("Error in getaddrinfo when resolving hostname {}",
-                 hostname.c_str(), gai_strerror(ret));
+    SLURMX_WARN("Error in getaddrinfo when resolving hostname {}: {}",
+                hostname.c_str(), gai_strerror(ret));
     return false;
   }
 
@@ -78,6 +79,15 @@ bool ResolveIpv4FromHostname(const std::string& hostname, std::string* addr) {
   }
 
   freeaddrinfo(res);
+  return true;
+}
+
+bool IsAValidIpv4Address(const std::string& ipv4) {
+  std::regex ipv4_re(R"(^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)(\.(?!$)|$)){4}$)");
+  std::smatch ipv4_group;
+  if (!std::regex_match(ipv4, ipv4_group, ipv4_re)) {
+    return false;
+  }
   return true;
 }
 

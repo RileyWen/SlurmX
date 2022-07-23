@@ -2,6 +2,8 @@
 #include <gtest/gtest.h>
 #include <netdb.h>
 
+#include "slurmx/Network.h"
+
 TEST(NetworkFunc, ResolveHostName) {
   struct sockaddr_in sa; /* input */
   socklen_t len;         /* input */
@@ -20,4 +22,27 @@ TEST(NetworkFunc, ResolveHostName) {
   } else {
     printf("host=%s\n", hbuf);
   }
+}
+
+TEST(NetworkFunc, ResolveIpv4FromHostname) {
+  using slurmx::ResolveIpv4FromHostname;
+
+  std::string hostname{"123.123.123.123"};
+  std::string ipv4;
+  bool ok = ResolveIpv4FromHostname(hostname, &ipv4);
+  GTEST_LOG_(INFO) << "Resolve succeeded: " << ok;
+
+  if (ok) {
+    GTEST_LOG_(INFO) << "Resolved hostname " << hostname << " to " << ipv4;
+  }
+}
+
+TEST(NetworkFunc, IsAValidIpv4Address) {
+  using slurmx::IsAValidIpv4Address;
+
+  std::string ip1{"1.2.3.4"};
+  std::string ip2{"2.3.4.777"};
+
+  EXPECT_TRUE(IsAValidIpv4Address(ip1));
+  EXPECT_FALSE(IsAValidIpv4Address(ip2));
 }
