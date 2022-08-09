@@ -344,6 +344,7 @@ grpc::Status SlurmXdServiceImpl::TerminateTask(
     const SlurmxGrpc::TerminateTaskRequest *request,
     SlurmxGrpc::TerminateTaskReply *response) {
   g_task_mgr->TerminateTaskAsync(request->task_id());
+  response->set_ok(true);
 
   return Status::OK;
 }

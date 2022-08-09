@@ -151,15 +151,14 @@ class TaskScheduler {
       const QueryBriefTaskMetaFieldControl& field_control,
       SlurmxGrpc::QueryJobsInPartitionReply* response);
 
-  bool QueryXdNodeIdOfRunningTask(uint32_t task_id,
-                                  std::list<XdNodeId>* node_ids) {
+  bool QueryXdNodeIdOfRunningTask(uint32_t task_id, XdNodeId* node_id) {
     LockGuard running_guard(m_running_task_map_mtx_);
-    return QueryXdNodeIdOfRunningTaskNoLock_(task_id, node_ids);
+    return QueryXdNodeIdOfRunningTaskNoLock_(task_id, node_id);
   }
 
   std::string QueryNodeListFromTaskId(uint32_t task_id);
 
-  bool TerminateTask(uint32_t task_id) {
+  SlurmxErr TerminateTask(uint32_t task_id) {
     LockGuard running_guard(m_running_task_map_mtx_);
     return TerminateTaskNoLock_(task_id);
   }
@@ -169,10 +168,9 @@ class TaskScheduler {
 
   void CleanEndedTaskThread_();
 
-  bool QueryXdNodeIdOfRunningTaskNoLock_(uint32_t task_id,
-                                         std::list<XdNodeId>* node_ids);
+  bool QueryXdNodeIdOfRunningTaskNoLock_(uint32_t task_id, XdNodeId* node_id);
 
-  bool TerminateTaskNoLock_(uint32_t task_id);
+  SlurmxErr TerminateTaskNoLock_(uint32_t task_id);
 
   bool TerminateTaskExcludeOneXdNoLock_(uint32_t task_id,
                                         uint32_t excluded_node_index);

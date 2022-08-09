@@ -90,6 +90,8 @@ message TaskToXd {
 
   string env = 12;
   string cwd = 13;
+
+  repeated string allocated_nodes = 14;
 }
 
 message BatchTaskAdditionalMeta {

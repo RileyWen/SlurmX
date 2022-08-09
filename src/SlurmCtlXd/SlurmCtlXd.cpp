@@ -305,15 +305,11 @@ int main(int argc, char** argv) {
             std::exit(1);
 
           part.nodelist_str = nodes;
-          std::vector<absl::string_view> split = absl::StrSplit(nodes, ',');
           std::list<std::string> name_list;
-
-          for (auto&& str : split) {
-            std::string str_s{absl::StripAsciiWhitespace(str)};
-            if (!util::ParseHostList(str_s, &name_list)) {
-              SLURMX_ERROR("Illegal node name string format.");
-              std::exit(1);
-            }
+          if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
+                                   &name_list)) {
+            SLURMX_ERROR("Illegal node name string format.");
+            std::exit(1);
           }
 
           for (auto&& node : name_list) {

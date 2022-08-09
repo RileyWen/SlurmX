@@ -153,9 +153,17 @@ grpc::Status SlurmCtlXdServiceImpl::TerminateTask(
     SlurmxGrpc::TerminateTaskReply *response) {
   uint32_t task_id = request->task_id();
 
-  bool ok = g_task_scheduler->TerminateTask(task_id);
+  SlurmxErr err = g_task_scheduler->TerminateTask(task_id);
   // Todo: make the reason be set here!
-  response->set_ok(ok);
+  if (err == SlurmxErr::kOk)
+    response->set_ok(true);
+  else {
+    response->set_ok(false);
+    if (err == SlurmxErr::kNonExistent)
+      response->set_reason("Task id doesn't exist!");
+    else
+      response->set_reason(SlurmxErrStr(err).data());
+  }
   return grpc::Status::OK;
 }
 

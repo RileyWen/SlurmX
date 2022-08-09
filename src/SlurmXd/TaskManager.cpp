@@ -1,5 +1,6 @@
 #include "TaskManager.h"
 
+#include <absl/strings/str_join.h>
 #include <absl/strings/str_split.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
@@ -583,14 +584,30 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!msg.ok()) std::abort();
 
+    dup2(fd, 1);  // stdout -> pipe
+    dup2(fd, 2);  // stderr -> pipe
+    close(fd);
+
+    // If these file descriptors are not closed, a program like mpirun may
+    // keep waiting for the input from stdin or other fds and will never end.
+    close(0);  // close stdin
+    util::CloseFdFrom(3);
+
     // Set pgid to the pid of task root process.
     setpgid(0, 0);
 
     std::vector<std::string> env_vec =
         absl::StrSplit(instance->task.env(), "||");
-    for (auto str : env_vec) {
-      if (putenv(str.data())) {
-        SLURMX_ERROR("set environ {} failed!", str);
+
+    std::string nodelist = absl::StrJoin(instance->task.allocated_nodes(), ";");
+    std::string nodelist_env = fmt::format("CRANE_JOB_NODELIST={}", nodelist);
+
+    env_vec.emplace_back(nodelist_env);
+
+    for (const auto& str : env_vec) {
+      std::vector<std::string> env_split = absl::StrSplit(str, "=");
+      if (setenv(env_split[0].c_str(), env_split[1].c_str(), 1)) {
+        // fmt::print("set environ failed!\n");
       }
     }
 
@@ -601,19 +618,6 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
       argv.push_back(arg.c_str());
     }
     argv.push_back(nullptr);
-
-    SLURMX_TRACE("execv being called subprocess: {} {}", process->GetExecPath(),
-                 boost::algorithm::join(process->GetArgList(), " "));
-
-    dup2(fd, 1);  // stdout -> pipe
-    dup2(fd, 2);  // stderr -> pipe
-
-    close(fd);
-
-    // If these file descriptors are not closed, a program like mpirun may
-    // keep waiting for the input from stdin or other fds and will never end.
-    close(0);  // close stdin
-    util::CloseFdFrom(3);
 
     execv(process->GetExecPath().c_str(),
           const_cast<char* const*>(argv.data()));
@@ -952,6 +956,11 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
 
   EvQueueTaskTerminate elem;  // NOLINT(cppcoreguidelines-pro-type-member-init)
   while (this_->m_task_terminate_queue_.try_dequeue(elem)) {
+    SLURMX_TRACE(
+        "Receive TerminateTask Request from internal queue. "
+        "Task id: {}",
+        elem.task_id);
+
     auto iter = this_->m_task_map_.find(elem.task_id);
     if (iter == this_->m_task_map_.end()) {
       SLURMX_ERROR("Trying terminating unknown task #{}", elem.task_id);

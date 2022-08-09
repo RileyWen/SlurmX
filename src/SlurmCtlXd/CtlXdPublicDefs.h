@@ -138,6 +138,8 @@ struct TaskInCtlXd {
   uint32_t nodes_alloc;
   std::list<std::string> nodes;
   std::list<uint32_t> node_indexes;
+  XdNodeId executing_node_id;  // The root process of the task started on this
+                               // node id.
   std::string allocated_nodes_regex;
 
   // If this task is PENDING, start_time is either not set (default constructed)

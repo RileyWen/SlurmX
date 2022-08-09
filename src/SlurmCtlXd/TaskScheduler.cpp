@@ -115,6 +115,7 @@ void TaskScheduler::ScheduleThread_() {
         // For the task whose --node > 1, only execute the command at the first
         // allocated node.
         XdNodeId first_node_id{partition_id, task->node_indexes.front()};
+        task->executing_node_id = first_node_id;
 
         for (auto iter : task->node_indexes) {
           XdNodeId node_id{partition_id, iter};
@@ -330,54 +331,40 @@ void TaskScheduler::TaskStatusChange(uint32_t task_id, uint32_t node_index,
   m_running_task_map_.erase(iter);
 }
 
-bool TaskScheduler::QueryXdNodeIdOfRunningTaskNoLock_(
-    uint32_t task_id, std::list<XdNodeId>* node_ids) {
+bool TaskScheduler::QueryXdNodeIdOfRunningTaskNoLock_(uint32_t task_id,
+                                                      XdNodeId* node_id) {
   auto iter = m_running_task_map_.find(task_id);
   if (iter == m_running_task_map_.end()) return false;
 
-  for (auto node_index : iter->second->node_indexes) {
-    XdNodeId node_id;
-    node_id.node_index = node_index;
-    node_id.partition_id = iter->second->partition_id;
-    node_ids->push_back(node_id);
-  }
+  *node_id = iter->second->executing_node_id;
 
   return true;
 }
 
-bool TaskScheduler::TerminateTaskNoLock_(uint32_t task_id) {
-  std::list<XdNodeId> node_ids;
-  bool ok = QueryXdNodeIdOfRunningTaskNoLock_(task_id, &node_ids);
+SlurmxErr TaskScheduler::TerminateTaskNoLock_(uint32_t task_id) {
+  XdNodeId node_id;
+  bool ok = QueryXdNodeIdOfRunningTaskNoLock_(task_id, &node_id);
 
   if (ok) {
-    for (XdNodeId xd_node_id : node_ids) {
-      auto stub = g_node_keeper->GetXdStub(xd_node_id);
+    auto stub = g_node_keeper->GetXdStub(node_id);
+    return stub->TerminateTask(task_id);
+  } else
+    return SlurmxErr::kNonExistent;
+}
+
+bool TaskScheduler::TerminateTaskExcludeOneXdNoLock_(
+    uint32_t task_id, uint32_t excluded_node_index) {
+  XdNodeId node_id;
+  bool ok = QueryXdNodeIdOfRunningTaskNoLock_(task_id, &node_id);
+
+  if (ok) {
+    if (excluded_node_index != node_id.node_index) {
+      auto stub = g_node_keeper->GetXdStub(node_id);
       SlurmxErr err = stub->TerminateTask(task_id);
       if (err == SlurmxErr::kOk)
         ok &= true;
       else
         ok &= false;
-    }
-  }
-
-  return ok;
-}
-
-bool TaskScheduler::TerminateTaskExcludeOneXdNoLock_(
-    uint32_t task_id, uint32_t excluded_node_index) {
-  std::list<XdNodeId> node_ids;
-  bool ok = QueryXdNodeIdOfRunningTaskNoLock_(task_id, &node_ids);
-
-  if (ok) {
-    for (XdNodeId xd_node_id : node_ids) {
-      if (excluded_node_index != xd_node_id.node_index) {
-        auto stub = g_node_keeper->GetXdStub(xd_node_id);
-        SlurmxErr err = stub->TerminateTask(task_id);
-        if (err == SlurmxErr::kOk)
-          ok &= true;
-        else
-          ok &= false;
-      }
     }
   }
 
