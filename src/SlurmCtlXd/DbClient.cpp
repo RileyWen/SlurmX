@@ -2,6 +2,8 @@
 
 #include <absl/strings/str_join.h>
 
+#include <utility>
+
 namespace CtlXd {
 
 MariadbClient::~MariadbClient() {
@@ -298,6 +300,726 @@ bool MariadbClient::InsertJob(
   }
   *job_db_inx = last_id;
 
+  return true;
+}
+
+MongodbClient::~MongodbClient() {
+  delete m_dbInstance;
+  delete m_client;
+}
+
+bool MongodbClient::Connect() {
+  // default port 27017
+  mongocxx::uri uri{"mongodb://localhost:27017"};
+  m_dbInstance = new (std::nothrow) mongocxx::instance();
+  m_client = new (std::nothrow) mongocxx::client(uri);
+
+  if (!m_client) {
+    SLURMX_ERROR("Mongodb error: can't connect to localhost:27017");
+    return false;
+  }
+  return true;
+}
+
+void MongodbClient::Init() {
+  m_database = new mongocxx::database(m_client->database(m_db_name));
+
+  if (!m_database->has_collection(m_account_collection_name)) {
+    m_database->create_collection(m_account_collection_name);
+  }
+  m_account_collection = new mongocxx::collection(
+      m_database->collection(m_account_collection_name));
+
+  if (!m_database->has_collection(m_user_collection_name)) {
+    m_database->create_collection(m_user_collection_name);
+  }
+  m_user_collection =
+      new mongocxx::collection(m_database->collection(m_user_collection_name));
+
+  if (!m_database->has_collection(m_qos_collection_name)) {
+    m_database->create_collection(m_qos_collection_name);
+  }
+  m_qos_collection =
+      new mongocxx::collection(m_database->collection(m_qos_collection_name));
+
+  if (!m_account_collection || !m_user_collection || !m_qos_collection) {
+    SLURMX_ERROR("Mongodb Error: can't get instance of slurmx_db tables");
+    std::exit(1);
+  }
+}
+
+MongodbClient::MongodbResult MongodbClient::AddUser(
+    const CtlXd::User& new_user) {
+  // Avoid duplicate insertion
+  bsoncxx::stdx::optional<bsoncxx::document::value> find_result =
+      m_user_collection->find_one(document{}
+                                  << "uid" << std::to_string(new_user.uid)
+                                  << bsoncxx::builder::stream::finalize);
+  if (find_result) {
+    if (!find_result->view()["deleted"].get_bool()) {
+      return MongodbClient::MongodbResult{
+          false, fmt::format("The user {} already exists in the database",
+                             new_user.name)};
+    }
+  }
+
+  if (!new_user.account.empty()) {
+    // update the user's account's users_list
+    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+        m_account_collection->update_one(
+            document{} << "name" << new_user.account
+                       << bsoncxx::builder::stream::finalize,
+            document{} << "$addToSet" << bsoncxx::builder::stream::open_document
+                       << "users" << new_user.name
+                       << bsoncxx::builder::stream::close_document
+                       << bsoncxx::builder::stream::finalize);
+
+    if (!update_result || !update_result->modified_count()) {
+      return MongodbClient::MongodbResult{
+          false, fmt::format("The account {} doesn't exist in the database",
+                             new_user.account)};
+    }
+  } else {
+    return MongodbClient::MongodbResult{
+        false, fmt::format("Please specify the user's account")};
+  }
+
+  // When there is no indefinite list of objects in the class, the flow based
+  // method can be used, which is the most efficient More methods are shown on
+  // the web https://www.nuomiphp.com/eplan/2742.html
+  auto builder = bsoncxx::builder::stream::document{};
+  auto array_context =
+      builder << "deleted" << false << "uid" << std::to_string(new_user.uid)
+              << "account" << new_user.account << "name" << new_user.name
+              << "admin_level" << new_user.admin_level << "allowed_partition"
+              << bsoncxx::builder::stream::open_array;
+
+  for (const auto& partition : new_user.allowed_partition) {
+    array_context << partition;
+  }
+  bsoncxx::document::value doc_value =
+      array_context
+      << bsoncxx::builder::stream::close_array
+      << bsoncxx::builder::stream::
+             finalize;  // Use bsoncxx::builder::stream::finalize to
+                        // obtain a bsoncxx::document::value instance.
+
+  if (m_dbInstance && m_client) {
+    if (find_result && find_result->view()["deleted"].get_bool()) {
+      stdx::optional<result::update> ret = m_user_collection->update_one(
+          document{} << "name" << new_user.name
+                     << bsoncxx::builder::stream::finalize,
+          document{} << "$set" << doc_value.view()
+                     << bsoncxx::builder::stream::finalize);
+
+      if (ret != stdx::nullopt)
+        return MongodbClient::MongodbResult{true};
+      else
+        return MongodbClient::MongodbResult{
+            false, "can't update the deleted user to database"};
+    } else {
+      stdx::optional<result::insert_one> ret;
+      ret = m_user_collection->insert_one(doc_value.view());
+
+      if (ret != stdx::nullopt)
+        return MongodbClient::MongodbResult{true};
+      else
+        return MongodbClient::MongodbResult{
+            false, "can't insert the user to database"};
+    }
+  } else {
+    return MongodbClient::MongodbResult{false, "database init failed"};
+  }
+}
+
+MongodbClient::MongodbResult MongodbClient::AddAccount(
+    const CtlXd::Account& new_account) {
+  // Avoid duplicate insertion
+  bsoncxx::stdx::optional<bsoncxx::document::value> find_result =
+      m_account_collection->find_one(document{}
+                                     << "name" << new_account.name
+                                     << bsoncxx::builder::stream::finalize);
+  if (find_result) {
+    if (!find_result->view()["deleted"].get_bool()) {
+      return MongodbClient::MongodbResult{
+          false, fmt::format("The account {} already exists in the database",
+                             new_account.name)};
+    }
+  }
+
+  if (!new_account.parent_account.empty()) {
+    // update the parent account's child_account_list
+    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+        m_account_collection->update_one(
+            document{} << "name" << new_account.parent_account
+                       << bsoncxx::builder::stream::finalize,
+            document{} << "$addToSet" << bsoncxx::builder::stream::open_document
+                       << "child_account" << new_account.name
+                       << bsoncxx::builder::stream::close_document
+                       << bsoncxx::builder::stream::finalize);
+
+    if (!update_result || !update_result->modified_count()) {
+      return MongodbClient::MongodbResult{
+          false,
+          fmt::format("The parent account {} doesn't exist in the database",
+                      new_account.parent_account)};
+    }
+  }
+
+  auto builder = bsoncxx::builder::stream::document{};
+  auto array_context =
+      builder
+      << "deleted" << false << "name" << new_account.name << "description"
+      << new_account.description
+      // Use Empty list to seize a seat, not support to initial this member
+      << "users" << bsoncxx::builder::stream::open_array
+      << bsoncxx::builder::stream::close_array
+      // Use Empty list to seize a seat, not support to initial this member
+      << "child_account" << bsoncxx::builder::stream::open_array
+      << bsoncxx::builder::stream::close_array << "parent_account"
+      << new_account.parent_account << "qos" << new_account.qos
+      << "allowed_partition" << bsoncxx::builder::stream::open_array;
+
+  for (const auto& partition : new_account.allowed_partition) {
+    array_context << partition;
+  }
+  bsoncxx::document::value doc_value = array_context
+                                       << bsoncxx::builder::stream::close_array
+                                       << bsoncxx::builder::stream::finalize;
+
+  if (m_dbInstance && m_client) {
+    if (find_result && find_result->view()["deleted"].get_bool()) {
+      stdx::optional<result::update> ret = m_account_collection->update_one(
+          document{} << "name" << new_account.name
+                     << bsoncxx::builder::stream::finalize,
+          document{} << "$set" << doc_value.view()
+                     << bsoncxx::builder::stream::finalize);
+
+      if (ret != stdx::nullopt)
+        return MongodbClient::MongodbResult{true};
+      else
+        return MongodbClient::MongodbResult{
+            false, "can't update the deleted account to database"};
+    } else {
+      stdx::optional<result::insert_one> ret;
+      ret = m_account_collection->insert_one(doc_value.view());
+      if (ret != stdx::nullopt)
+        return MongodbClient::MongodbResult{true};
+      else
+        return MongodbClient::MongodbResult{
+            false, "can't insert the account to database"};
+    }
+  } else {
+    return MongodbClient::MongodbResult{false, "database init failed"};
+  }
+}
+
+MongodbClient::MongodbResult MongodbClient::AddQos(const CtlXd::Qos& new_qos) {
+  auto builder = bsoncxx::builder::stream::document{};
+  bsoncxx::document::value doc_value =
+      builder << "name" << new_qos.name << "description" << new_qos.description
+              << "priority" << new_qos.priority << "max_jobs_per_user"
+              << new_qos.max_jobs_per_user
+              << bsoncxx::builder::stream::
+                     finalize;  // Use bsoncxx::builder::stream::finalize to
+                                // obtain a bsoncxx::document::value instance.
+  stdx::optional<result::insert_one> ret;
+  if (m_dbInstance && m_client) {
+    ret = m_user_collection->insert_one(doc_value.view());
+  }
+
+  return MongodbClient::MongodbResult{ret != stdx::nullopt};
+}
+
+MongodbClient::MongodbResult MongodbClient::DeleteEntity(
+    MongodbClient::EntityType type, const std::string& name) {
+  mongocxx::collection* coll;
+  CtlXd::Account account;
+  CtlXd::User user;
+  std::string parent_name, child_attribute_name;
+  switch (type) {
+    case MongodbClient::Account:
+      coll = m_account_collection;
+      child_attribute_name = "child_account";
+      // check whether the account has child
+      if (GetAccountInfo(name, &account)) {
+        if (!account.child_account.empty() || !account.users.empty()) {
+          return MongodbClient::MongodbResult{
+              false, "This account has child account or users"};
+        }
+        parent_name = account.parent_account;
+      }
+      break;
+    case MongodbClient::User:
+      coll = m_user_collection;
+      child_attribute_name = "users";
+      if (GetUserInfo(name, &user)) {
+        parent_name = user.account;
+      }
+      break;
+    case MongodbClient::Qos:
+      coll = m_qos_collection;
+      break;
+  }
+
+  if (!parent_name.empty()) {
+    // delete form the parent account's child_account_list
+    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+        m_account_collection->update_one(
+            document{} << "name" << parent_name
+                       << bsoncxx::builder::stream::finalize,
+            document{} << "$pull" << bsoncxx::builder::stream::open_document
+                       << child_attribute_name << name
+                       << bsoncxx::builder::stream::close_document
+                       << bsoncxx::builder::stream::finalize);
+
+    if (!update_result || !update_result->modified_count()) {
+      return MongodbClient::MongodbResult{
+          false,
+          fmt::format(
+              "Can't delete {} form the parent account's child_account_list",
+              name)};
+    }
+  }
+
+  bsoncxx::stdx::optional<mongocxx::result::update> result = coll->update_one(
+      document{} << "name" << name << bsoncxx::builder::stream::finalize,
+      document{} << "$set" << bsoncxx::builder::stream::open_document
+                 << "deleted" << true
+                 << bsoncxx::builder::stream::close_document
+                 << bsoncxx::builder::stream::finalize);
+
+  if (!result) {
+    return MongodbResult{false, "can't update the value of this Entities"};
+  } else if (!result->modified_count()) {
+    if (result->matched_count()) {
+      return MongodbClient::MongodbResult{false, "Entities has been deleted"};
+    } else {
+      return MongodbClient::MongodbResult{
+          false, "Entities doesn't exist in the database"};
+    }
+  } else {
+    return MongodbClient::MongodbResult{true};
+  }
+}
+
+bool MongodbClient::GetUserInfo(const std::string& name, CtlXd::User* user) {
+  bsoncxx::stdx::optional<bsoncxx::document::value> result =
+      m_user_collection->find_one(
+          document{} << "name" << name << bsoncxx::builder::stream::finalize);
+  if (result) {
+    bsoncxx::document::view user_view = result->view();
+    user->deleted = user_view["deleted"].get_bool();
+    user->uid = std::stoi(user_view["uid"].get_utf8().value.to_string());
+    user->name = user_view["name"].get_utf8().value.to_string();
+    user->account = user_view["account"].get_utf8().value.to_string();
+    user->admin_level =
+        (CtlXd::User::AdminLevel)user_view["admin_level"].get_int32().value;
+    for (auto&& partition : user_view["allowed_partition"].get_array().value) {
+      user->allowed_partition.emplace_back(
+          partition.get_utf8().value.to_string());
+    }
+    return true;
+  }
+  return false;
+}
+
+bool MongodbClient::GetAllUserInfo(std::list<CtlXd::User>& user_list) {
+  mongocxx::cursor cursor = m_user_collection->find({});
+  for (auto view : cursor) {
+    CtlXd::User user;
+    user.deleted = view["deleted"].get_bool();
+    user.uid = std::stoi(view["uid"].get_utf8().value.to_string());
+    user.name = view["name"].get_utf8().value.to_string();
+    user.account = view["account"].get_utf8().value.to_string();
+    user.admin_level =
+        (CtlXd::User::AdminLevel)view["admin_level"].get_int32().value;
+    for (auto&& partition : view["allowed_partition"].get_array().value) {
+      user.allowed_partition.emplace_back(
+          partition.get_utf8().value.to_string());
+    }
+    user_list.emplace_back(user);
+  }
+  return true;
+}
+
+bool MongodbClient::GetAccountInfo(const std::string& name,
+                                   CtlXd::Account* account) {
+  bsoncxx::stdx::optional<bsoncxx::document::value> result =
+      m_account_collection->find_one(
+          document{} << "name" << name << bsoncxx::builder::stream::finalize);
+  if (result) {
+    bsoncxx::document::view account_view = result->view();
+    account->deleted = account_view["deleted"].get_bool().value;
+    if (account->deleted) return false;
+    account->name = account_view["name"].get_utf8().value.to_string();
+    account->description =
+        account_view["description"].get_utf8().value.to_string();
+    for (auto&& user : account_view["users"].get_array().value) {
+      account->users.push_back(user.get_utf8().value.to_string());
+    }
+    for (auto&& acct : account_view["child_account"].get_array().value) {
+      account->child_account.emplace_back(acct.get_utf8().value.to_string());
+    }
+    for (auto&& partition :
+         account_view["allowed_partition"].get_array().value) {
+      account->allowed_partition.emplace_back(
+          partition.get_utf8().value.to_string());
+    }
+    account->parent_account =
+        account_view["parent_account"].get_utf8().value.to_string();
+    account->qos = account_view["qos"].get_utf8().value.to_string();
+    return true;
+  }
+  return false;
+}
+
+bool MongodbClient::GetAllAccountInfo(std::list<CtlXd::Account>& account_list) {
+  mongocxx::cursor cursor = m_account_collection->find({});
+  for (auto view : cursor) {
+    CtlXd::Account account;
+    account.deleted = view["deleted"].get_bool().value;
+    account.name = view["name"].get_utf8().value.to_string();
+    account.description = view["description"].get_utf8().value.to_string();
+    for (auto&& user : view["users"].get_array().value) {
+      account.users.push_back(user.get_utf8().value.to_string());
+    }
+    for (auto&& acct : view["child_account"].get_array().value) {
+      account.child_account.emplace_back(acct.get_utf8().value.to_string());
+    }
+    for (auto&& partition : view["allowed_partition"].get_array().value) {
+      account.allowed_partition.emplace_back(
+          partition.get_utf8().value.to_string());
+    }
+    account.parent_account =
+        view["parent_account"].get_utf8().value.to_string();
+    account.qos = view["qos"].get_utf8().value.to_string();
+    account_list.emplace_back(account);
+  }
+  return true;
+}
+
+bool MongodbClient::GetQosInfo(const std::string& name, CtlXd::Qos* qos) {
+  bsoncxx::stdx::optional<bsoncxx::document::value> result =
+      m_qos_collection->find_one(
+          document{} << "name" << name << bsoncxx::builder::stream::finalize);
+  if (result) {
+    bsoncxx::document::view user_view = result->view();
+    qos->name = user_view["name"].get_utf8().value.to_string();
+    qos->description = user_view["description"].get_utf8().value.to_string();
+    qos->priority = user_view["priority"].get_int32();
+    qos->max_jobs_per_user = user_view["max_jobs_per_user"].get_int32();
+    std::cout << bsoncxx::to_json(*result) << "\n";
+    return true;
+  }
+  return false;
+}
+
+MongodbClient::MongodbResult MongodbClient::SetUser(
+    const CtlXd::User& new_user) {
+  CtlXd::User last_user;
+  if (!GetUserInfo(new_user.name, &last_user) || last_user.deleted) {
+    return MongodbClient::MongodbResult{
+        false, fmt::format("user {} not exist", new_user.name)};
+  }
+  auto builder = bsoncxx::builder::stream::document{};
+  auto array_context = builder << "$set"
+                               << bsoncxx::builder::stream::open_document;
+
+  bool toChange = false;
+  if (new_user.admin_level != last_user.admin_level) {
+    array_context << "admin_level" << new_user.admin_level;
+    toChange = true;
+  }
+  if (!new_user.account.empty() && new_user.account != last_user.account) {
+    // update the user's account's users_list
+    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+        m_account_collection->update_one(
+            document{} << "name" << new_user.account
+                       << bsoncxx::builder::stream::finalize,
+            document{} << "$addToSet" << bsoncxx::builder::stream::open_document
+                       << "users" << new_user.name
+                       << bsoncxx::builder::stream::close_document
+                       << bsoncxx::builder::stream::finalize);
+
+    if (!update_result || !update_result->modified_count()) {
+      return MongodbClient::MongodbResult{
+          false, fmt::format("The account {} doesn't exist in the database",
+                             new_user.account)};
+    }
+
+    if (!last_user.account.empty()) {
+      // delete form the parent account's child_user_list
+      update_result = m_account_collection->update_one(
+          document{} << "name" << last_user.account
+                     << bsoncxx::builder::stream::finalize,
+          document{} << "$pull" << bsoncxx::builder::stream::open_document
+                     << "users" << last_user.name
+                     << bsoncxx::builder::stream::close_document
+                     << bsoncxx::builder::stream::finalize);
+
+      if (!update_result || !update_result->modified_count()) {
+        return MongodbClient::MongodbResult{
+            false,
+            fmt::format(
+                "Can't delete {} form the parent account's child_user_list",
+                last_user.name)};
+      }
+    }
+
+    array_context << "account" << new_user.account;
+    toChange = true;
+  }
+  if (toChange) {
+    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+        m_user_collection->update_one(
+            document{} << "name" << new_user.name
+                       << bsoncxx::builder::stream::finalize,
+            array_context << bsoncxx::builder::stream::close_document
+                          << bsoncxx::builder::stream::finalize);
+
+    if (!update_result || !update_result->modified_count()) {
+      return MongodbClient::MongodbResult{
+          false,
+          fmt::format("Can't update user {}'s information", new_user.name)};
+    }
+  }
+  return MongodbClient::MongodbResult{true};
+}
+
+MongodbClient::MongodbResult MongodbClient::SetAccount(
+    const CtlXd::Account& new_account) {
+  CtlXd::Account last_account;
+  if (!GetAccountInfo(new_account.name, &last_account) ||
+      last_account.deleted) {
+    return MongodbClient::MongodbResult{
+        false, fmt::format("account {} not exist", new_account.name)};
+  }
+  auto builder = bsoncxx::builder::stream::document{};
+  auto array_context = builder << "$set"
+                               << bsoncxx::builder::stream::open_document;
+  bool toChange = false;
+  if (!new_account.description.empty() &&
+      new_account.description != last_account.description) {
+    array_context << "description" << new_account.description;
+    toChange = true;
+  }
+  if (!new_account.qos.empty() && new_account.qos != last_account.qos) {
+    array_context << "qos" << new_account.qos;
+    toChange = true;
+  }
+  if (new_account.parent_account != last_account.parent_account) {
+    if (!new_account.parent_account.empty()) {
+      // update the parent account's child_account_list
+      bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+          m_account_collection->update_one(
+              document{} << "name" << new_account.parent_account
+                         << bsoncxx::builder::stream::finalize,
+              document{} << "$addToSet"
+                         << bsoncxx::builder::stream::open_document
+                         << "child_account" << new_account.name
+                         << bsoncxx::builder::stream::close_document
+                         << bsoncxx::builder::stream::finalize);
+
+      if (!update_result || !update_result->modified_count()) {
+        return MongodbClient::MongodbResult{
+            false,
+            fmt::format("The parent account {} doesn't exist in the database",
+                        new_account.parent_account)};
+      }
+    }
+
+    if (!last_account.parent_account.empty()) {
+      // delete form the parent account's child_account_list
+      bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+          m_account_collection->update_one(
+              document{} << "name" << last_account.parent_account
+                         << bsoncxx::builder::stream::finalize,
+              document{} << "$pull" << bsoncxx::builder::stream::open_document
+                         << "child_account" << last_account.name
+                         << bsoncxx::builder::stream::close_document
+                         << bsoncxx::builder::stream::finalize);
+
+      if (!update_result || !update_result->modified_count()) {
+        return MongodbClient::MongodbResult{
+            false,
+            fmt::format(
+                "Can't delete {} form the parent account's child_account_list",
+                last_account.name)};
+      }
+    }
+
+    array_context << "parent_account" << new_account.parent_account;
+    toChange = true;
+  }
+  if (toChange) {
+    bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+        m_account_collection->update_one(
+            document{} << "name" << new_account.name
+                       << bsoncxx::builder::stream::finalize,
+            array_context << bsoncxx::builder::stream::close_document
+                          << bsoncxx::builder::stream::finalize);
+
+    if (!update_result || !update_result->modified_count()) {
+      return MongodbClient::MongodbResult{
+          false, fmt::format("Can't update account {}'s information",
+                             new_account.name)};
+    }
+  }
+  return MongodbClient::MongodbResult{true};
+}
+
+std::list<std::string> MongodbClient::GetUserAllowedPartition(
+    const std::string& name) {
+  bsoncxx::stdx::optional<bsoncxx::document::value> result =
+      m_user_collection->find_one(
+          document{} << "name" << name << bsoncxx::builder::stream::finalize);
+  std::list<std::string> allowed_partition;
+  if (result) {
+    bsoncxx::document::view user_view = result->view();
+    for (auto&& partition : user_view["allowed_partition"].get_array().value) {
+      allowed_partition.emplace_back(partition.get_utf8().value.to_string());
+    }
+    if (allowed_partition.empty()) {
+      std::string parent = user_view["account"].get_utf8().value.to_string();
+      if (!parent.empty()) {
+        allowed_partition = GetAccountAllowedPartition(parent);
+      }
+    }
+  }
+  return allowed_partition;
+}
+
+std::list<std::string> MongodbClient::GetAccountAllowedPartition(
+    const std::string& name) {
+  std::list<std::string> allowed_partition;
+  std::string parent = name;
+  while (allowed_partition.empty() && !parent.empty()) {
+    CtlXd::Account account;
+    GetAccountInfo(parent, &account);
+    allowed_partition = account.allowed_partition;
+    parent = account.parent_account;
+  }
+  return allowed_partition;
+}
+
+bool MongodbClient::SetUserAllowedPartition(
+    const std::string& name, const std::list<std::string>& partitions,
+    SlurmxGrpc::ModifyEntityRequest::Type type) {
+  if (!GetUserInfo(name, new CtlXd::User)) {
+    return false;
+  }
+
+  std::list<std::string> change_partitions = GetUserAllowedPartition(name);
+  switch (type) {
+    case SlurmxGrpc::ModifyEntityRequest_Type_Add:
+      for (auto&& partition : partitions) {
+        auto it = std::find(change_partitions.begin(), change_partitions.end(),
+                            partition);
+        if (it == change_partitions.end()) {
+          change_partitions.emplace_back(partition);
+        }
+      }
+      break;
+    case SlurmxGrpc::ModifyEntityRequest_Type_Delete:
+      for (auto&& partition : partitions) {
+        auto it = std::find(change_partitions.begin(), change_partitions.end(),
+                            partition);
+        if (it != change_partitions.end()) {
+          change_partitions.erase(it);  // delete the partition
+        }
+      }
+      break;
+    case SlurmxGrpc::ModifyEntityRequest_Type_Overwrite:
+      change_partitions.assign(partitions.begin(), partitions.end());
+      break;
+    default:
+      break;
+  }
+
+  // clear all
+  m_user_collection->update_one(
+      document{} << "name" << name << bsoncxx::builder::stream::finalize,
+      document{} << "$set" << bsoncxx::builder::stream::open_document
+                 << "allowed_partition" << bsoncxx::builder::stream::open_array
+                 << bsoncxx::builder::stream::close_array
+                 << bsoncxx::builder::stream::close_document
+                 << bsoncxx::builder::stream::finalize);
+
+  // insert the new list
+  for (auto&& partition : change_partitions) {
+    bsoncxx::stdx::optional<mongocxx::result::update> result =
+        m_user_collection->update_one(
+            document{} << "name" << name << bsoncxx::builder::stream::finalize,
+            document{} << "$addToSet" << bsoncxx::builder::stream::open_document
+                       << "allowed_partition" << partition
+                       << bsoncxx::builder::stream::close_document
+                       << bsoncxx::builder::stream::finalize);
+
+    if (!result || !result->modified_count()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool MongodbClient::SetAccountAllowedPartition(
+    const std::string& name, const std::list<std::string>& partitions,
+    SlurmxGrpc::ModifyEntityRequest::Type type) {
+  if (!GetAccountInfo(name, new CtlXd::Account)) {
+    return false;
+  }
+
+  std::list<std::string> change_partitions = GetAccountAllowedPartition(name);
+  switch (type) {
+    case SlurmxGrpc::ModifyEntityRequest_Type_Add:
+      for (auto&& partition : partitions) {
+        auto it = std::find(change_partitions.begin(), change_partitions.end(),
+                            partition);
+        if (it == change_partitions.end()) {
+          change_partitions.emplace_back(partition);
+        }
+      }
+      break;
+    case SlurmxGrpc::ModifyEntityRequest_Type_Delete:
+      for (auto&& partition : partitions) {
+        auto it = std::find(change_partitions.begin(), change_partitions.end(),
+                            partition);
+        if (it != change_partitions.end()) {
+          change_partitions.erase(it);  // delete the partition
+        }
+      }
+      break;
+    case SlurmxGrpc::ModifyEntityRequest_Type_Overwrite:
+      change_partitions.assign(partitions.begin(), partitions.end());
+      break;
+    default:
+      break;
+  }
+
+  // clear all
+  m_account_collection->update_one(
+      document{} << "name" << name << bsoncxx::builder::stream::finalize,
+      document{} << "$set" << bsoncxx::builder::stream::open_document
+                 << "allowed_partition" << bsoncxx::builder::stream::open_array
+                 << bsoncxx::builder::stream::close_array
+                 << bsoncxx::builder::stream::close_document
+                 << bsoncxx::builder::stream::finalize);
+
+  // insert the new list
+  for (auto&& partition : change_partitions) {
+    bsoncxx::stdx::optional<mongocxx::result::update> result =
+        m_account_collection->update_one(
+            document{} << "name" << name << bsoncxx::builder::stream::finalize,
+            document{} << "$addToSet" << bsoncxx::builder::stream::open_document
+                       << "allowed_partition" << partition
+                       << bsoncxx::builder::stream::close_document
+                       << bsoncxx::builder::stream::finalize);
+
+    if (!result || !result->modified_count()) {
+      return false;
+    }
+  }
   return true;
 }
 

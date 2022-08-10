@@ -3,7 +3,7 @@
 ## 环境准备
 
 安装ntp ntpdate同步时钟
-```shell script
+```shell
 yum install ntp ntpdate
 systemctl start ntpd
 systemctl enable ntpd
@@ -13,7 +13,8 @@ timedatectl set-timezone Asia/Shanghai
 ```
 
 关闭防火墙，不允许关闭防火墙则考虑开放10011、10010、873端口
-```shell script
+
+```shell
 systemctl stop firewalld
 systemctl disable firewalld
 
@@ -27,7 +28,8 @@ firewall-cmd --reload
 ```
 ## 安装工具链
 安装C++11
-```shell script
+
+```shell
 # Install CentOS SCLo RH repository:
 yum install centos-release-scl-rh
 # Install devtoolset-11 rpm package:
@@ -36,7 +38,8 @@ yum install devtoolset-11
 scl enable devtoolset-11 bash
 ```
 这时用gcc --version查询，可以看到版本已经是11.2系列了
-```shell script
+
+```shell
 $ gcc --version
 gcc (GCC) 11.2.1 20210728 (Red Hat 11.2.1-1)
 Copyright (C) 2021 Free Software Foundation, Inc.
@@ -45,31 +48,36 @@ warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 ```
 
 为了避免每次手动生效，可以在.bashrc中设置：
-```shell script
+
+```shell
 $ source /opt/rh/devtoolset-11/enable
 or
 $ source scl_source enable devtoolset-11
 ```
 
 给系统安装个下载命令器
-```shell script
+
+```shell
 yum install wget -y
 ```
 安装cmake和ninja
 由于需要源码安装，首先选择合适的源码存放位置，可以放在自己账号的目录下。
-```shell script
+
+```shell
 su - liulinxing # 用户名
 mkdir download
 cd download
 ```
 从github下载源码
-```shell script
+
+```shell
 wget https://github.com/ninja-build/ninja/releases/download/v1.10.2/ninja-linux.zip
 wget https://github.com/Kitware/CMake/releases/download/v3.21.3/cmake-3.21.3.tar.gz
 ```
 
 解压编译安装
-```shell script
+
+```shell
 unzip ninja-linux.zip
 cp ninja /usr/bin/
 
@@ -83,20 +91,23 @@ gmake install
 ```
 
 检查安装是否成功
-```shell script
+
+```shell
 cmake --version
 #cmake version 3.21.3
 #
 #CMake suite maintained and supported by Kitware (kitware.com/cmake).
 ```
 
+wget
 ## 安装C++库
 
 复制相关源码压缩包到一个目录下
 
 
 解压所有源码压缩包
-```shell script
+
+```shell
 tar xzf boost_1_78_0.tar.gz
 tar xzf fmt-8.0.1.tar.gz
 tar xzf libevent-2.1.12.tar.gz
@@ -107,9 +118,11 @@ tar xzf spdlog-1.8.5.tar.gz
 ```
 
 安装第三方库
-```shell script
+
+```shell
 yum install libcgroup-devel
 yum install libcurl-devel
+yum install pam-devel
 
  cd boost_1_78_0
 ./bootstrap.sh
@@ -119,7 +132,7 @@ cd ..
 cd libuv-1.42.0
 mkdir build
 cd build/
-cmake -DCMAKE_INSTALL_PREFIX=/nfs/home/testSlurm/SlurmX/dependencies/online/libuv -DCMAKE_CXX_STANDARD=17 -G Ninja ..
+cmake -DCMAKE_INSTALL_PREFIX=/nfs/home/testSlurmX/SlurmX/dependencies/online/libuv -DCMAKE_CXX_STANDARD=17 -G Ninja ..
 ninja install
 
 # 运行安装脚本
@@ -129,7 +142,8 @@ bash ./download_deps.sh
 ## 安装mariadb
 
 通过yum安装就行了，安装mariadb-server，默认依赖安装mariadb，一个是服务端、一个是客户端。
-```shell script
+
+```shell
 wget https://downloads.mariadb.com/MariaDB/mariadb_repo_setup
 chmod +x mariadb_repo_setup
 ./mariadb_repo_setup
@@ -142,7 +156,8 @@ systemctl enable mariadb  # 设置为开机自启动服务
 mariadb-secure-installation  # 首次安装需要进行数据库的配置
 ```
 配置时出现的各个选项
-```shell script
+
+```shell
 Enter current password for root (enter for none):  # 输入数据库超级管理员root的密码(注意不是系统root的密码)，第一次进入还没有设置密码则直接回车
 
 Set root password? [Y/n]  # 设置密码，y
@@ -162,15 +177,18 @@ Reload privilege tables now? [Y/n]  # 重新加载权限表，y。或者重启�
 安装过程中遇到Table doesn’t exist报错：
 ERROR 1146 (42S02) at line 1: Table ‘mysql.global_priv’ doesn’t exist … Failed!
 执行下面的命令后，重启mysql
-```shell script
+
+```shell
 mysql_upgrade -uroot -p --force
 ```
 重启数据库
-```shell script
+
+```shell
 systemctl restart mariadb
 ```
 登陆数据库
-```shell script
+
+```shell
 mysql -uroot -p
 Enter password:
 Welcome to the MariaDB monitor.  Commands end with ; or \g.
@@ -178,26 +196,122 @@ Your MariaDB connection id is 9
 Server version: 10.4.8-MariaDB MariaDB Server
 ```
 进入mysql数据库
-```shell script
+
+```shell
 use mysql
 ```
 查询user表，可看到多条数据
-```shell script
+
+```shell
 select host,user,password from user;
 ```
+
 删除localhost以外数据
-```shell script
+
+```shell
 delete from user where host !='localhost';
 ```
+
 配置完毕，退出
-```shell script
+
+```shell
 exit;
 systemctl restart mariadb
 ```
 
+## 安装mongobd
+
+```shell
+# 下载并解压安装包
+wget https://fastdl.mongodb.org/linux/mongodb-linux-x86_64-rhel70-5.0.9.tgz
+tar -zxvf mongodb-linux-x86_64-rhel70-5.0.9.tgz
+# 重命名
+mv mongodb-linux-x86_64-rhel70-5.0.9  /opt/mongodb
+# 添加环境变量  
+vim /etc/profile
+```
+
+在配置文件中添加如下内容（路径应对应mongodb安装路径）
+
+```shell
+export MONGODB_HOME=/opt/mongodb
+export PATH=$PATH:${MONGODB_HOME}/bin
+```
+
+```shell
+# 使环境变量生效
+source /etc/profile 
+# 创建db目录和log目录
+cd /opt/mongodb-linux-x86_64-rhel70-5.0.3
+mkdir -p ./data/db
+mkdir -p ./logs
+touch ./logs/mongodb.log
+```
+
+创建mongodb.conf配置文件，内容如下（路径应对应之前创建的db/log目录）：
+
+```shell
+#端口号
+port=27017
+#db目录
+dbpath=/opt/mongodb/data/db
+#日志目录
+logpath=/opt/mongodb/logs/mongodb.log
+#后台
+fork=true
+#日志输出
+logappend=true
+#允许远程IP连接
+bind_ip=0.0.0.0
+```
+
+启动测试
+
+```shell
+mongod --config /opt/mongodb/mongodb.conf
+mongo
+```
+
+编辑开机启动
+
+```shell
+vi /etc/rc.local
+# 加入如下语句，以便启动时执行：
+mongod --config /opt/mongodb/mongodb.conf
+```
+
+## 安装mongodb C++驱动
+
+参考 http://mongocxx.org/mongocxx-v3/installation/linux/
+
+安装mongo-c-driver
+
+```shell
+wget https://github.com/mongodb/mongo-c-driver/releases/download/1.21.1/mongo-c-driver-1.21.1.tar.gz
+tar xzf mongo-c-driver-1.21.1.tar.gz
+cd mongo-c-driver-1.21.1
+mkdir cmake-build
+cd cmake-build
+cmake -DENABLE_AUTOMATIC_INIT_AND_CLEANUP=OFF -DCMAKE_INSTALL_PREFIX=/nfs/home/liulinxing/SlurmX/dependencies/online/mongo-c-driver ..
+sudo make && make install
+```
+
+安装mongo-cxx-driver
+
+```shell
+curl -OL https://github.com/mongodb/mongo-cxx-driver/archive/r3.6.5.tar.gz
+cd mongo-cxx-driver-r3.6.5/build/
+cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/nfs/home/liulinxing/SlurmX/dependencies/online/mongo-driver ..
+sudo make EP_mnmlstc_core
+make
+sudo make install
+```
+
 ## 编译程序
+
 首先进入到项目目录下
-```shell script
+
+```shell
 mkdir build
 cd build/
 
@@ -209,7 +323,8 @@ cmake --build .
 ## 配置前端go语言环境
 
 安装go语言
-```shell script
+
+```shell
 cd download/
 wget https://golang.google.cn/dl/go1.17.3.linux-amd64.tar.gz
 tar -C /usr/local -xzf go1.17.3.linux-amd64.tar.gz
@@ -233,7 +348,8 @@ cp /root/go/bin/protoc-gen-go /usr/local/bin/
 
 ```
 安装protuc
-```shell script
+
+```shell
 https://github.com/protocolbuffers/protobuf/releases/download/v3.19.4/protobuf-all-3.19.4.tar.gz
 tar -xzf protobuf-all-3.19.4.tar.gz
 cd protobuf-3.19.4
@@ -244,7 +360,8 @@ protoc --version
 ```
 
 拉取项目
-```shell script
+
+```shell
 git clone https://github.com/RileyWen/SlurmX-FrontEnd.git # 克隆项目代码
 
 mkdir SlurmX-FrontEnd/out
@@ -252,7 +369,8 @@ mkdir SlurmX-FrontEnd/generated/protos
 ```
 
 编译项目
-```shell script
+
+```shell
 # 在SlurmX-FrontEnd/protos目录下
 protoc --go_out=../generated --go-grpc_out=../generated ./*
 
@@ -261,13 +379,15 @@ go build Slurmx-FrontEnd/cmd/sbatchx/sbatchx.go
 ```
 
 部署前端命令
-```shell script
-ln -s /nfs/home/testSlurmX/SlurmX-FrontEnd/out/sbatchx /usr/bin/sbatchx
-ls -s /nfs/home/testSlurmX/SlurmX-FrontEnd/out/scontrol /usr/bin/scontrol
+
+```shell
+ln -s /nfs/home/testSlurmX/SlurmX-FrontEnd/out/sbatchx /usr/local/bin/sbatchx
+ln -s /nfs/home/testSlurmX/SlurmX-FrontEnd/out/scontrol /usr/local/bin/scontrol
 ```
 
 ## 编写系统服务
-```shell script
+
+```shell
 vim /etc/systemd/system/slurmctlxd.service
 
 #####内容如下######
@@ -298,20 +418,23 @@ systemctl start slurmxd
 ### 部署文件同步
 
 在所有节点安装rsync
-```shell script
+
+```shell
 yum -y install rsync
 
 # 安装完成后，使用rsync –-help命令可查看 rsync 相关信息
 ```
 
 在SlurmCtlxd安装inotify
-```shell script
+
+```shell
 yum install -y epel-release
 yum --enablerepo=epel install inotify-tools
 ```
 
 编写监听脚本，并在后台自动运行
-```shell script
+
+```shell
  vim /etc/slurmx/inotifyrsync.sh
 
 #####

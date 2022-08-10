@@ -40,6 +40,7 @@ target_link_libraries(slurmctlxd
 
         yaml-cpp
         mariadbclient
+        mongo::mongocxx_shared
         )
 
 # Linker flag for c++ 17 filesystem library

@@ -1,12 +1,16 @@
 #pragma once
 
+#include <absl/strings/ascii.h>
 #include <spdlog/fmt/fmt.h>
 
 #include <boost/algorithm/string.hpp>
 #include <list>
+#include <queue>
 #include <regex>
 #include <string>
 #include <vector>
+
+#include "slurmx/PublicHeader.h"
 
 namespace util {
 

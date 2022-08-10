@@ -3,12 +3,21 @@
 #include <mysql.h>
 #include <spdlog/fmt/fmt.h>
 
+#include <algorithm>
+#include <bsoncxx/builder/stream/document.hpp>
+#include <bsoncxx/json.hpp>
 #include <list>
 #include <memory>
+#include <mongocxx/client.hpp>
+#include <mongocxx/cursor.hpp>
+#include <mongocxx/instance.hpp>
 #include <string>
 
 #include "CtlXdPublicDefs.h"
 #include "slurmx/PublicHeader.h"
+
+using namespace mongocxx;
+using bsoncxx::builder::stream::document;
 
 namespace CtlXd {
 
@@ -67,6 +76,76 @@ class MariadbClient {
   std::string m_psw;
 };
 
+class MongodbClient {
+ public:
+  enum EntityType {
+    Account = 0,
+    User = 1,
+    Qos = 2,
+  };
+  struct MongodbResult {
+    bool ok{false};
+    std::optional<std::string> reason;
+  };
+  struct MongodbFilter {
+    enum RelationalOperator {
+      Equal,
+      Greater,
+      Less,
+      GreaterOrEqual,
+      LessOrEqual
+    };
+    std::string object;
+    RelationalOperator relateOperator;
+    std::string value;
+  };
+  MongodbClient() = default;
+
+  ~MongodbClient();
+
+  bool Connect();
+
+  void Init();
+
+  MongodbResult AddUser(const CtlXd::User& new_user);
+  MongodbResult AddAccount(const CtlXd::Account& new_account);
+  MongodbResult AddQos(const CtlXd::Qos& new_qos);
+
+  MongodbResult DeleteEntity(EntityType type, const std::string& name);
+
+  bool GetUserInfo(const std::string& name, CtlXd::User* user);
+  bool GetAllUserInfo(std::list<CtlXd::User>& user_list);
+  bool GetAccountInfo(const std::string& name, CtlXd::Account* account);
+  bool GetAllAccountInfo(std::list<CtlXd::Account>& account_list);
+  bool GetQosInfo(const std::string& name, CtlXd::Qos* qos);
+
+  MongodbResult SetUser(const CtlXd::User& new_user);
+  MongodbResult SetAccount(const CtlXd::Account& new_account);
+
+  std::list<std::string> GetUserAllowedPartition(const std::string& name);
+  std::list<std::string> GetAccountAllowedPartition(const std::string& name);
+
+  bool SetUserAllowedPartition(const std::string& name,
+                               const std::list<std::string>& partitions,
+                               SlurmxGrpc::ModifyEntityRequest::Type type);
+  bool SetAccountAllowedPartition(const std::string& name,
+                                  const std::list<std::string>& partitions,
+                                  SlurmxGrpc::ModifyEntityRequest::Type type);
+
+ private:
+  const std::string m_db_name{"slurmx_db"};
+  const std::string m_account_collection_name{"acct_table"};
+  const std::string m_user_collection_name{"user_table"};
+  const std::string m_qos_collection_name{"qos_table"};
+
+  mongocxx::instance* m_dbInstance{nullptr};
+  mongocxx::client* m_client = {nullptr};
+  mongocxx::database* m_database = {nullptr};
+  mongocxx::collection *m_account_collection{nullptr},
+      *m_user_collection{nullptr}, *m_qos_collection{nullptr};
+};
+
 }  // namespace CtlXd
 
 inline std::unique_ptr<CtlXd::MariadbClient> g_db_client;
+inline std::unique_ptr<CtlXd::MongodbClient> g_mongodb_client;

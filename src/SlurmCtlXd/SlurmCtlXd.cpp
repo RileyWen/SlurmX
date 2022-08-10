@@ -89,6 +89,13 @@ void InitializeCtlXdGlobalVariables() {
     std::exit(1);
   }
 
+  g_mongodb_client = std::make_unique<MongodbClient>();
+  if (!g_mongodb_client->Connect()) {
+    SLURMX_ERROR("Error: MongoDb client connect fail");
+    std::exit(1);
+  }
+  g_mongodb_client->Init();
+
   g_meta_container = std::make_unique<XdNodeMetaContainerSimpleImpl>();
   g_meta_container->InitFromConfig(g_config);
 

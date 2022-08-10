@@ -145,3 +145,32 @@ message NodeInfo {
   string partition_name = 9;
   uint32 running_task_num = 10;
 }
+
+enum EntityType {
+  Account = 0;
+  User = 1;
+  Qos = 2;
+}
+
+message AccountInfo {
+  string name = 1;
+  string description = 2;
+  repeated string users = 3;
+  repeated string child_account = 4;
+  string parent_account = 5;
+  repeated string allowed_partition = 6;
+  string qos = 7;
+}
+
+message UserInfo {
+  enum AdminLevel{
+    None = 0;
+    Operator = 1;
+    Admin = 2;
+  };
+  uint32 uid = 1;
+  string name = 2;
+  string account = 3;
+  repeated string allowed_partition = 4;
+  AdminLevel admin_level = 5;
+}

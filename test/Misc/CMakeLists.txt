@@ -4,6 +4,7 @@ add_executable(misc_test
         libuv_test.cpp
         mariadb_connector_c_test.cpp
         Misc_test.cpp
+        mongodb_test.cpp
         yaml_cpp_test.cpp
         )
 
@@ -29,7 +30,7 @@ target_link_libraries(misc_test
         Threads::Threads
 
         mariadbclient
-
+        mongo::mongocxx_shared
         yaml-cpp
         )
 

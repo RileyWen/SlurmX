@@ -253,6 +253,63 @@ message QueryPartitionInfoReply {
   repeated PartitionInfo partition_info = 1;
 }
 
+message AddAccountRequest {
+  AccountInfo account = 1;
+}
+
+message AddAccountReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message AddUserRequest {
+  UserInfo user = 1;
+}
+
+message AddUserReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message DeleteEntityRequest {
+  EntityType entity_type = 1;
+  string name = 2;
+}
+
+message DeleteEntityReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message ModifyEntityRequest {
+  enum Type {
+    Overwrite = 0;
+    Add = 1;
+    Delete = 2;
+  }
+  oneof NewEntity{
+    AccountInfo new_account = 1;
+    UserInfo new_user = 2;
+  }
+  Type type = 3;
+}
+
+message ModifyEntityReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
+message QueryEntityInfoRequest {
+  EntityType entity_type = 1;
+  string name = 2;
+}
+
+message QueryEntityInfoReply {
+  bool ok = 1;
+  repeated UserInfo user_list = 2;
+  repeated AccountInfo account_list = 3;
+}
+
 message MigrateSshProcToCgroupRequest {
   int32 pid = 1;
   string cgroup_path = 2;
@@ -290,6 +347,15 @@ service SlurmCtlXd {
 
   rpc QueryNodeInfo(QueryNodeInfoRequest) returns (QueryNodeInfoReply);
   rpc QueryPartitionInfo(QueryPartitionInfoRequest) returns (QueryPartitionInfoReply);
+
+  /* RPCs called from Sacctmgr */
+  rpc AddAccount(AddAccountRequest) returns (AddAccountReply);
+  rpc AddUser(AddUserRequest) returns (AddUserReply);
+
+  rpc DeleteEntity(DeleteEntityRequest) returns (DeleteEntityReply);
+
+  rpc QueryEntityInfo(QueryEntityInfoRequest) returns (QueryEntityInfoReply);
+  rpc ModifyEntity(ModifyEntityRequest) returns (ModifyEntityReply);
 }
 
 service SlurmXd {
