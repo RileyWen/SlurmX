@@ -218,6 +218,8 @@ struct Config {
 
   std::string DbUser;
   std::string DbPassword;
+  std::string MongodbUser;
+  std::string MongodbPassword;
 };
 
 }  // namespace CtlXd

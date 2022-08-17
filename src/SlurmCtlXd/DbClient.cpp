@@ -310,7 +310,9 @@ MongodbClient::~MongodbClient() {
 
 bool MongodbClient::Connect() {
   // default port 27017
-  mongocxx::uri uri{"mongodb://localhost:27017"};
+  mongocxx::uri uri{fmt::format("mongodb://{}:{}@localhost:27017/slurmx_db",
+                                g_config.MongodbUser,
+                                g_config.MongodbPassword)};
   m_dbInstance = new (std::nothrow) mongocxx::instance();
   m_client = new (std::nothrow) mongocxx::client(uri);
 

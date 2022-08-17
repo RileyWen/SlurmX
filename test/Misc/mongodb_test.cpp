@@ -83,7 +83,7 @@ MongodbClient::~MongodbClient() {
 
 bool MongodbClient::Connect() {
   // default port 27017
-  mongocxx::uri uri{"mongodb://localhost:27017"};
+  mongocxx::uri uri{"mongodb://crane:123456!!@localhost:27017"};
   m_dbInstance = new (std::nothrow) mongocxx::instance();
   m_client = new (std::nothrow) mongocxx::client(uri);
 

@@ -263,6 +263,8 @@ fork=true
 logappend=true
 #允许远程IP连接
 bind_ip=0.0.0.0
+#开启权限验证
+auth=true
 ```
 
 启动测试
@@ -270,6 +272,33 @@ bind_ip=0.0.0.0
 ```shell
 mongod --config /opt/mongodb/mongodb.conf
 mongo
+```
+
+创建用户
+
+```shell
+use admin
+db.createUser({
+  user:'admin',//用户名
+  pwd:'123456',//密码
+  roles:[{ role:'root',db:'admin'}]//root 代表超級管理员权限 admin代表给admin数据库加的超级管理员
+})
+
+use slurmx_db
+
+db.createUser({
+  user:"crane",
+  pwd:"123456",
+  roles:[{role:"dbOwner",db:"slurmx_db"}]
+})
+
+db.shutdownServer() //重启前先关闭服务器
+```
+
+重新启动mongodb数据库
+
+```shell
+mongod --config /opt/mongodb/mongodb.conf
 ```
 
 编辑开机启动
@@ -319,6 +348,17 @@ cmake -DCMAKE_CXX_STANDARD=17 -G Ninja ..
 cmake --build .
 ```
 
+## Pam模块
+
+首次编译完成后需要将pam模块动态链接库放入系统指定位置
+
+```shell
+cp SlurmX/build/src/Misc/Pam/pam_slurmx.so /usr/lib64/security/
+```
+
+同时计算节点“/etc/security/access.conf”文件禁止非root用户登录
+
+Required pam_access.so
 
 ## 配置前端go语言环境
 

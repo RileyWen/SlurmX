@@ -285,6 +285,16 @@ int main(int argc, char** argv) {
       else
         std::exit(1);
 
+      if (config["MongodbUser"])
+        g_config.MongodbUser = config["MongodbUser"].as<std::string>();
+      else
+        std::exit(1);
+
+      if (config["MongodbPassword"])
+        g_config.MongodbPassword = config["MongodbPassword"].as<std::string>();
+      else
+        std::exit(1);
+
       if (config["SlurmCtlXdForeground"]) {
         auto val = config["SlurmCtlXdForeground"].as<std::string>();
         if (val == "true")
