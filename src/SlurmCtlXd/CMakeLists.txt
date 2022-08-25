@@ -24,6 +24,7 @@ target_link_libraries(slurmctlxd
 
         Boost::boost
         Boost::thread
+        Boost::filesystem
 
         libevent::core
         libevent::pthreads

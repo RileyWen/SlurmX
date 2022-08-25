@@ -22,6 +22,7 @@ target_link_libraries(slurmxd
 
         proto
         Boost::boost
+        Boost::filesystem
 
         libevent::core
         libevent::pthreads

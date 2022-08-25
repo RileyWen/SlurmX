@@ -5,36 +5,47 @@
 namespace CtlXd {
 
 MariadbClient::~MariadbClient() {
-  if (conn) {
-    mysql_close(conn);
+  if (m_conn) {
+    mysql_close(m_conn);
   }
 }
 
 bool MariadbClient::Init() {
-  conn = mysql_init(nullptr);
-  return conn != nullptr;
+  m_conn = mysql_init(nullptr);
+  if (m_conn == nullptr) return false;
+
+  // Reconnect when Mariadb closes connection after a long idle time (8 hours).
+  my_bool reconnect = 1;
+  mysql_options(m_conn, MYSQL_OPT_RECONNECT, &reconnect);
+
+  return true;
 }
 
-bool MariadbClient::Connect(const std::string& username,
-                            const std::string& password) {
-  if (mysql_real_connect(conn, "127.0.0.1", username.c_str(), password.c_str(),
+void MariadbClient::SetUserAndPwd(const std::string& username,
+                                  const std::string& password) {
+  m_user = username;
+  m_psw = password;
+}
+
+bool MariadbClient::Connect() {
+  if (mysql_real_connect(m_conn, "127.0.0.1", m_user.c_str(), m_psw.c_str(),
                          nullptr, 3306, nullptr, 0) == nullptr) {
     PrintError_("Cannot connect to database");
     return false;
   }
 
-  if (mysql_query(conn, "CREATE DATABASE IF NOT EXISTS slurmx_db;")) {
+  if (mysql_query(m_conn, "CREATE DATABASE IF NOT EXISTS slurmx_db;")) {
     PrintError_("Cannot check the existence of slurmx_db");
     return false;
   }
 
-  if (mysql_select_db(conn, m_db_name.c_str()) != 0) {
+  if (mysql_select_db(m_conn, m_db_name.c_str()) != 0) {
     PrintError_("Cannot select slurmx_db");
     return false;
   }
 
   if (mysql_query(
-          conn,
+          m_conn,
           "CREATE TABLE IF NOT EXISTS job_table("
           "job_db_inx    bigint unsigned not null auto_increment primary key,"
           "mod_time        bigint unsigned default 0 not null,"
@@ -72,13 +83,13 @@ bool MariadbClient::Connect(const std::string& username,
 }
 
 bool MariadbClient::GetMaxExistingJobId(uint64_t* job_id) {
-  if (mysql_query(conn,
+  if (mysql_query(m_conn,
                   "SELECT COALESCE(MAX(job_db_inx), 0) FROM job_table;")) {
     PrintError_("Cannot get the max id");
     return false;
   }
 
-  MYSQL_RES* result = mysql_store_result(conn);
+  MYSQL_RES* result = mysql_store_result(m_conn);
   if (result == nullptr) {
     PrintError_("Error in getting the max job id result");
     return false;
@@ -100,12 +111,12 @@ bool MariadbClient::GetMaxExistingJobId(uint64_t* job_id) {
 }
 
 bool MariadbClient::GetLastInsertId(uint64_t* id) {
-  if (mysql_query(conn, "SELECT LAST_INSERT_ID();")) {
+  if (mysql_query(m_conn, "SELECT LAST_INSERT_ID();")) {
     PrintError_("Cannot get last insert id");
     return false;
   }
 
-  MYSQL_RES* result = mysql_store_result(conn);
+  MYSQL_RES* result = mysql_store_result(m_conn);
   if (result == nullptr) {
     PrintError_("Error in getting the max job id result");
     return false;
@@ -134,7 +145,7 @@ bool MariadbClient::UpdateJobRecordField(uint64_t job_db_inx,
       "job_db_inx = {};",
       field_name, val, job_db_inx);
 
-  if (mysql_query(conn, query.c_str())) {
+  if (mysql_query(m_conn, query.c_str())) {
     PrintError_("Failed to update job record");
     return false;
   }
@@ -161,7 +172,7 @@ bool MariadbClient::UpdateJobRecordFields(
       "WHERE job_db_inx = {};",
       formatter, job_db_inx);
 
-  if (mysql_query(conn, query.c_str())) {
+  if (mysql_query(m_conn, query.c_str())) {
     PrintError_("Failed to update job record");
     return false;
   }
@@ -181,12 +192,12 @@ bool MariadbClient::FetchJobRecordsWithStates(
   std::string query =
       fmt::format("SELECT * FROM job_table WHERE {};", state_str);
 
-  if (mysql_query(conn, query.c_str())) {
+  if (mysql_query(m_conn, query.c_str())) {
     PrintError_("Failed to fetch job record");
     return false;
   }
 
-  MYSQL_RES* result = mysql_store_result(conn);
+  MYSQL_RES* result = mysql_store_result(m_conn);
   if (result == nullptr) {
     PrintError_("Error in getting `fetch job` result");
     return false;
@@ -268,14 +279,14 @@ bool MariadbClient::InsertJob(
   char* query_ptr = std::copy(query_head.c_str(),
                               query_head.c_str() + query_head.size(), query);
   size_t escaped_size =
-      mysql_real_escape_string(conn, query_ptr, blob, blob_size);
+      mysql_real_escape_string(m_conn, query_ptr, blob, blob_size);
   query_ptr += escaped_size;
 
   const char query_end[] = "')";
   query_ptr =
       std::copy(query_end, query_end + sizeof(query_end) - 1, query_ptr);
 
-  if (mysql_real_query(conn, query, query_ptr - query)) {
+  if (mysql_real_query(m_conn, query, query_ptr - query)) {
     PrintError_("Failed to insert job record");
     return false;
   }

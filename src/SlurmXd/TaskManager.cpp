@@ -605,9 +605,13 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     env_vec.emplace_back(nodelist_env);
 
     for (const auto& str : env_vec) {
-      std::vector<std::string> env_split = absl::StrSplit(str, "=");
-      if (setenv(env_split[0].c_str(), env_split[1].c_str(), 1)) {
-        // fmt::print("set environ failed!\n");
+      auto pos = str.find_first_of('=');
+      if (std::string::npos != pos) {
+        std::string name = str.substr(0, pos);
+        std::string value = str.substr(pos + 1);
+        if (setenv(name.c_str(), value.c_str(), 1)) {
+          // fmt::print("set environ failed!\n");
+        }
       }
     }
 

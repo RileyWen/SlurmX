@@ -93,7 +93,7 @@ class CtlXdServer {
    * User must make sure that this constructor is called only once!
    * @param listen_address The "[Address]:[Port]" of SlurmCtlXd.
    */
-  explicit CtlXdServer(std::string listen_address);
+  explicit CtlXdServer(const Config::SlurmCtlXdListenConf &listen_conf);
 
   inline void Wait() { m_server_->Wait(); }
 
@@ -112,8 +112,6 @@ class CtlXdServer {
 
   void XdNodeIsUpCb_(XdNodeId node_id);
   void XdNodeIsDownCb_(XdNodeId node_id);
-
-  const std::string m_listen_address_;
 
   std::unique_ptr<SlurmCtlXdServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;

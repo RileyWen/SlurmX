@@ -120,6 +120,7 @@ void TaskScheduler::ScheduleThread_() {
         for (auto iter : task->node_indexes) {
           XdNodeId node_id{partition_id, iter};
           XdNodeStub* stub = g_node_keeper->GetXdStub(node_id);
+          SLURMX_TRACE("Send CreateCgroupForTask to {}: ", node_id);
           stub->CreateCgroupForTask(task->task_id, task->uid);
         }
 
@@ -342,6 +343,23 @@ bool TaskScheduler::QueryXdNodeIdOfRunningTaskNoLock_(uint32_t task_id,
 }
 
 SlurmxErr TaskScheduler::TerminateTaskNoLock_(uint32_t task_id) {
+  auto pending_iter = m_pending_task_map_.find(task_id);
+  if (pending_iter != m_pending_task_map_.end()) {
+    auto node = m_pending_task_map_.extract(task_id);
+    auto task = std::move(node.mapped());
+
+    task->status = SlurmxGrpc::Cancelled;
+
+    uint64_t timestamp = ToUnixSeconds(absl::Now());
+    g_db_client->UpdateJobRecordFields(
+        task->job_db_inx, {"time_end", "state"},
+        {std::to_string(timestamp), std::to_string(task->status)});
+
+    m_ended_task_map_.emplace(task_id, std::move(task));
+
+    return SlurmxErr::kOk;
+  }
+
   XdNodeId node_id;
   bool ok = QueryXdNodeIdOfRunningTaskNoLock_(task_id, &node_id);
 
@@ -434,7 +452,7 @@ std::string TaskScheduler::QueryNodeListFromTaskId(uint32_t task_id) {
   auto iter = m_running_task_map_.find(task_id);
   std::string node_list;
   if (iter != m_running_task_map_.end()) {
-    int task_per_node = iter->second->task_per_node;
+    int task_per_node = iter->second->ntasks_per_node;
     for (auto& node : iter->second->nodes) {
       node_list += node + ":" + std::to_string(task_per_node) + "/n";
     }

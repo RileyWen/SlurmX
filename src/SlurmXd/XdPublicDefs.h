@@ -80,7 +80,21 @@ struct Partition {
 };
 
 struct Config {
-  std::string SlurmXdListen;
+  struct SlurmXdListenConf {
+    std::string SlurmXdListenAddr;
+    std::string SlurmXdListenPort;
+
+    bool UseTls{false};
+    std::string CertFilePath;
+    std::string CertContent;
+    std::string KeyFilePath;
+    std::string KeyContent;
+
+    std::string UnixSocketListenAddr;
+  };
+
+  SlurmXdListenConf ListenConf;
+
   std::string ControlMachine;
   std::string SlurmXdDebugLevel;
   std::string SlurmXdLogFile;

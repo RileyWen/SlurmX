@@ -464,6 +464,8 @@ grpc::Status SlurmXdServiceImpl::CreateCgroupForTask(
     grpc::ServerContext *context,
     const SlurmxGrpc::CreateCgroupForTaskRequest *request,
     SlurmxGrpc::CreateCgroupForTaskReply *response) {
+  SLURMX_TRACE("Receive CreateCgroup for task #{}, uid {}", request->task_id(),
+               request->uid());
   bool ok = g_task_mgr->CreateCgroupAsync(request->task_id(), request->uid());
   response->set_ok(ok);
   return Status::OK;
@@ -528,7 +530,7 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPortForward(
       request->target_xd_port(), request->uid());
   // In the addresses of CraneD nodes. This ssh request comes from a CraneD
   // node. Check if the remote port belongs to a task. If so, move it in to the
-  // cgroup of this task. If not so, reject this ssh request.
+  // cgroup of this task. If not so, check uid again or reject this ssh request.
 
   std::string target_xd = fmt::format("{}:{}", request->target_xd_address(),
                                       request->target_xd_port());
@@ -576,9 +578,25 @@ grpc::Status SlurmXdServiceImpl::QueryTaskIdFromPortForward(
 
     return Status::OK;
   } else {
-    SLURMX_TRACE("ssh client with remote port {} doesn't belong to any task",
-                 request->ssh_remote_port());
-    response->set_ok(false);
+    TaskInfoOfUid info{};
+    bool ok = g_task_mgr->QueryTaskInfoOfUidAsync(request->uid(), &info);
+    if (ok) {
+      SLURMX_TRACE(
+          "Found a task #{} belonging to uid {}. "
+          "This ssh session process is going to be moved into the task's "
+          "cgroup {}.",
+          info.first_task_id, request->uid(), info.cgroup_path);
+      response->set_task_id(info.first_task_id);
+      response->set_cgroup_path(info.cgroup_path);
+      response->set_ok(true);
+    } else {
+      SLURMX_TRACE(
+          "This ssh session can't be moved into uid {}'s tasks. "
+          "This uid has {} task(s) and cgroup found: {}. "
+          "Reject this ssh request.",
+          request->uid(), info.job_cnt, info.cgroup_exists);
+      response->set_ok(false);
+    }
     return Status::OK;
   }
 }
@@ -603,21 +621,39 @@ grpc::Status SlurmXdServiceImpl::MigrateSshProcToCgroup(
   return Status::OK;
 }
 
-XdServer::XdServer(std::list<std::string> listen_addresses)
-    : m_listen_addresses_(std::move(listen_addresses)) {
+XdServer::XdServer(const Config::SlurmXdListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<SlurmXdServiceImpl>();
 
   grpc::ServerBuilder builder;
+  builder.AddListeningPort(listen_conf.UnixSocketListenAddr,
+                           grpc::InsecureServerCredentials());
 
-  for (auto &&address : m_listen_addresses_) {
-    builder.AddListeningPort(address, grpc::InsecureServerCredentials());
+  std::string listen_addr_port = fmt::format(
+      "{}:{}", listen_conf.SlurmXdListenAddr, listen_conf.SlurmXdListenPort);
+  if (listen_conf.UseTls) {
+    grpc::SslServerCredentialsOptions::PemKeyCertPair pem_key_cert_pair;
+    pem_key_cert_pair.cert_chain = listen_conf.CertContent;
+    pem_key_cert_pair.private_key = listen_conf.KeyContent;
+
+    grpc::SslServerCredentialsOptions ssl_opts;
+    ssl_opts.pem_root_certs = listen_conf.CertContent;
+    ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
+    ssl_opts.force_client_auth = true;
+    ssl_opts.client_certificate_request =
+        GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
+
+    builder.AddListeningPort(listen_addr_port,
+                             grpc::SslServerCredentials(ssl_opts));
+  } else {
+    builder.AddListeningPort(listen_addr_port,
+                             grpc::InsecureServerCredentials());
   }
 
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
-  SLURMX_INFO("SlurmXd is listening on [{}]",
-              boost::join(m_listen_addresses_, ", "));
+  SLURMX_INFO("SlurmXd is listening on [{}, {}]",
+              listen_conf.UnixSocketListenAddr, listen_addr_port);
 
   g_task_mgr->SetSigintCallback([p_server = m_server_.get()] {
     p_server->Shutdown();

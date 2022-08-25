@@ -66,7 +66,8 @@ grpc::Status SlurmCtlXdServiceImpl::SubmitBatchTask(
   task->type = SlurmxGrpc::Batch;
 
   task->node_num = request->task().node_num();
-  task->task_per_node = request->task().task_per_node();
+  task->ntasks_per_node = request->task().ntasks_per_node();
+  task->cpus_per_task = request->task().cpus_per_task();
 
   task->uid = request->task().uid();
   task->name = request->task().name();
@@ -235,17 +236,43 @@ grpc::Status SlurmCtlXdServiceImpl::QueryNodeListFromTaskId(
   return grpc::Status::OK;
 }
 
-CtlXdServer::CtlXdServer(std::string listen_address)
-    : m_listen_address_(std::move(listen_address)) {
+CtlXdServer::CtlXdServer(const Config::SlurmCtlXdListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<SlurmCtlXdServiceImpl>(this);
 
+  std::string listen_addr_port =
+      fmt::format("{}:{}", listen_conf.SlurmCtlXdListenAddr,
+                  listen_conf.SlurmCtlXdListenPort);
+
   grpc::ServerBuilder builder;
-  builder.AddListeningPort(m_listen_address_,
-                           grpc::InsecureServerCredentials());
+  if (listen_conf.UseTls) {
+    grpc::SslServerCredentialsOptions::PemKeyCertPair pem_key_cert_pair;
+    pem_key_cert_pair.cert_chain = listen_conf.CertContent;
+    pem_key_cert_pair.private_key = listen_conf.KeyContent;
+
+    grpc::SslServerCredentialsOptions ssl_opts;
+    ssl_opts.pem_root_certs = listen_conf.CertContent;
+    ssl_opts.pem_key_cert_pairs.emplace_back(std::move(pem_key_cert_pair));
+    ssl_opts.force_client_auth = true;
+    ssl_opts.client_certificate_request =
+        GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
+
+    builder.AddListeningPort(listen_addr_port,
+                             grpc::SslServerCredentials(ssl_opts));
+  } else {
+    builder.AddListeningPort(listen_addr_port,
+                             grpc::InsecureServerCredentials());
+  }
+
   builder.RegisterService(m_service_impl_.get());
 
   m_server_ = builder.BuildAndStart();
-  SLURMX_INFO("SlurmCtlXd is listening on {}", m_listen_address_);
+  if (!m_server_) {
+    SLURMX_ERROR("Cannot start gRPC server!");
+    std::exit(1);
+  }
+
+  SLURMX_INFO("SlurmCtlXd is listening on {} and Tls is {}", listen_addr_port,
+              listen_conf.UseTls);
 
   // Avoid the potential deadlock error in underlying absl::mutex
   std::thread sigint_waiting_thread([p_server = m_server_.get()] {
