@@ -2,6 +2,7 @@
 
 #include <absl/strings/str_join.h>
 #include <absl/strings/str_split.h>
+#include <fcntl.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/stat.h>
@@ -453,6 +454,7 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
   using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
 
   using SlurmxGrpc::Xd::CanStartMessage;
+  using SlurmxGrpc::Xd::ChildProcessReady;
 
   int socket_pair[2];
 
@@ -498,8 +500,10 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     setgroups(0, nullptr);
     chdir(saved_priv.cwd.c_str());
 
+    FileInputStream istream(fd);
     FileOutputStream ostream(fd);
     CanStartMessage msg;
+    ChildProcessReady child_process_ready;
 
     SLURMX_DEBUG("Subprocess was created for task #{} pid: {}",
                  instance->task.task_id(), child_pid);
@@ -550,6 +554,13 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
       return SlurmxErr::kProtobufError;
     }
 
+    ParseDelimitedFromZeroCopyStream(&child_process_ready, &istream, nullptr);
+    if (!msg.ok()) {
+      SLURMX_ERROR("Failed to read protobuf from subprocess {} of task #{}",
+                   child_pid, instance->task.task_id());
+      return SlurmxErr::kProtobufError;
+    }
+
     // Add indexes from pid to TaskInstance*, ProcessInstance*
     m_pid_task_map_.emplace(child_pid, instance);
     m_pid_proc_map_.emplace(child_pid, process.get());
@@ -575,26 +586,44 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid());
     setregid(instance->pwd_entry.Gid(), instance->pwd_entry.Gid());
 
+    // Set pgid to the pid of task root process.
+    setpgid(0, 0);
+
     close(socket_pair[0]);
     int fd = socket_pair[1];
 
     FileInputStream istream(fd);
+    FileOutputStream ostream(fd);
     CanStartMessage msg;
+    ChildProcessReady child_process_ready;
+    bool ok;
 
     ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!msg.ok()) std::abort();
 
-    dup2(fd, 1);  // stdout -> pipe
-    dup2(fd, 2);  // stderr -> pipe
+    int out_fd = open(process->batch_meta.parsed_output_file_pattern.c_str(),
+                      O_RDWR | O_CREAT | O_APPEND, 0644);
+    if (out_fd == -1) {
+      std::abort();
+    }
+
+    child_process_ready.set_ok(true);
+    ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
+    ok &= ostream.Flush();
+    if (!ok) {
+      std::abort();
+    }
+
     close(fd);
+
+    dup2(out_fd, 1);  // stdout -> output file
+    dup2(out_fd, 2);  // stderr -> output file
+    close(out_fd);
 
     // If these file descriptors are not closed, a program like mpirun may
     // keep waiting for the input from stdin or other fds and will never end.
     close(0);  // close stdin
     util::CloseFdFrom(3);
-
-    // Set pgid to the pid of task root process.
-    setpgid(0, 0);
 
     std::vector<std::string> env_vec =
         absl::StrSplit(instance->task.env(), "||");
@@ -766,20 +795,10 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         process->batch_meta.parsed_output_file_pattern += ".out";
       }
 
-      auto* file_logger = new slurmx::FileLogger(
-          fmt::format("{}", instance->task.task_id()),
-          process->batch_meta.parsed_output_file_pattern);
-
-      auto clean_cb = [](void* data) {
-        delete reinterpret_cast<slurmx::FileLogger*>(data);
-      };
-
       auto output_cb = [](std::string&& buf, void* data) {
-        auto* file_logger = reinterpret_cast<slurmx::FileLogger*>(data);
-        file_logger->Output(buf);
+        SLURMX_TRACE("Read output from subprocess: {}", buf);
       };
 
-      process->SetUserDataAndCleanCb(file_logger, std::move(clean_cb));
       process->SetOutputCb(std::move(output_cb));
 
       err = this_->SpawnProcessInInstance_(instance, std::move(process));

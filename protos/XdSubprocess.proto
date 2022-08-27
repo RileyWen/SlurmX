@@ -6,3 +6,7 @@ option go_package = "/protos/xd";
 message CanStartMessage {
   bool ok = 1;
 }
+
+message ChildProcessReady {
+  bool ok = 1;
+}
