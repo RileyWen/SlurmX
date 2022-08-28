@@ -133,11 +133,13 @@ grpc::Status SlurmCtlXdServiceImpl::TaskStatusChange(
     status = SlurmxGrpc::Finished;
   else if (request->new_status() == SlurmxGrpc::Failed)
     status = SlurmxGrpc::Failed;
+  else if (request->new_status() == SlurmxGrpc::Cancelled)
+    status = SlurmxGrpc::Cancelled;
   else
     SLURMX_ERROR(
         "Task #{}: When TaskStatusChange RPC is called, the task should either "
-        "be Finished or Failed.",
-        request->task_id());
+        "be Finished, Failed or Cancelled. new_status = {}",
+        request->task_id(), request->new_status());
 
   std::optional<std::string> reason;
   if (!request->reason().empty()) reason = request->reason();
@@ -148,13 +150,12 @@ grpc::Status SlurmCtlXdServiceImpl::TaskStatusChange(
   return grpc::Status::OK;
 }
 
-grpc::Status SlurmCtlXdServiceImpl::TerminateTask(
-    grpc::ServerContext *context,
-    const SlurmxGrpc::TerminateTaskRequest *request,
-    SlurmxGrpc::TerminateTaskReply *response) {
+grpc::Status SlurmCtlXdServiceImpl::CancelTask(
+    grpc::ServerContext *context, const SlurmxGrpc::CancelTaskRequest *request,
+    SlurmxGrpc::CancelTaskReply *response) {
   uint32_t task_id = request->task_id();
 
-  SlurmxErr err = g_task_scheduler->TerminateTask(task_id);
+  SlurmxErr err = g_task_scheduler->CancelPendingOrRunningTask(task_id);
   // Todo: make the reason be set here!
   if (err == SlurmxErr::kOk)
     response->set_ok(true);

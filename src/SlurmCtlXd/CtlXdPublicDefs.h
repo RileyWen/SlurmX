@@ -134,7 +134,6 @@ struct TaskInCtlXd {
 
   /* ----- Fields that may change at run time. ----------- */
   SlurmxGrpc::TaskStatus status;
-  bool is_completing{false};
 
   uint32_t nodes_alloc;
   std::list<std::string> nodes;

@@ -290,22 +290,27 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
         } else {
           instance->processes.erase(pr_it);
 
-          if (sigchld_info.is_terminated_by_signal) {
-            instance->already_failed = true;
-            this_->TerminateTaskAsync(task_id);
-          }
-
           // Remove indexes from pid to ProcessInstance*
           this_->m_pid_proc_map_.erase(proc_iter);
 
-          if (instance->processes.empty()) {
+          if (!instance->processes.empty()) {
+            if (sigchld_info.is_terminated_by_signal &&
+                !instance->already_failed) {
+              instance->already_failed = true;
+              this_->TerminateTaskAsync(task_id);
+            }
+          } else {  // ProcessInstance has no process left.
             // See the comment of EvActivateTaskStatusChange_.
             if (instance->task.type() == SlurmxGrpc::Batch) {
               // For a Batch task, the end of the process means it is done.
-              if (instance->already_failed)
-                this_->EvActivateTaskStatusChange_(
-                    task_id, SlurmxGrpc::TaskStatus::Failed, std::nullopt);
-              else
+              if (sigchld_info.is_terminated_by_signal) {
+                if (instance->cancelled_by_user)
+                  this_->EvActivateTaskStatusChange_(
+                      task_id, SlurmxGrpc::TaskStatus::Cancelled, std::nullopt);
+                else
+                  this_->EvActivateTaskStatusChange_(
+                      task_id, SlurmxGrpc::TaskStatus::Failed, std::nullopt);
+              } else
                 this_->EvActivateTaskStatusChange_(
                     task_id, SlurmxGrpc::TaskStatus::Finished, std::nullopt);
             } else {
@@ -824,27 +829,32 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
 
   TaskStatusChange status_change;
   while (this_->m_task_status_change_queue_.try_dequeue(status_change)) {
-    if (status_change.new_status == SlurmxGrpc::TaskStatus::Finished ||
-        status_change.new_status == SlurmxGrpc::TaskStatus::Failed) {
-      SLURMX_DEBUG(R"(Destroying Task structure for "{}".)"
-                   R"(Task new status: {})",
-                   status_change.task_id, status_change.new_status);
+    SLURMX_ASSERT_MSG_VA(
+        status_change.new_status == SlurmxGrpc::TaskStatus::Finished ||
+            status_change.new_status == SlurmxGrpc::TaskStatus::Failed ||
+            status_change.new_status == SlurmxGrpc::TaskStatus::Cancelled,
+        "Task #{}: When TaskStatusChange event is triggered, the task should "
+        "either be Finished, Failed or Cancelled. new_status = {}",
+        status_change.task_id, status_change.new_status);
 
-      auto iter = this_->m_task_map_.find(status_change.task_id);
-      SLURMX_ASSERT_MSG(iter != this_->m_task_map_.end(),
-                        "Task should be found here.");
+    SLURMX_DEBUG(R"(Destroying Task structure for "{}".)"
+                 R"(Task new status: {})",
+                 status_change.task_id, status_change.new_status);
 
-      TaskInstance* task_instance = iter->second.get();
-      uid_t uid = task_instance->task.uid();
+    auto iter = this_->m_task_map_.find(status_change.task_id);
+    SLURMX_ASSERT_MSG(iter != this_->m_task_map_.end(),
+                      "Task should be found here.");
 
-      if (task_instance->termination_timer) {
-        event_del(task_instance->termination_timer);
-        event_free(task_instance->termination_timer);
-      }
+    TaskInstance* task_instance = iter->second.get();
+    uid_t uid = task_instance->task.uid();
 
-      // Free the TaskInstance structure
-      this_->m_task_map_.erase(status_change.task_id);
+    if (task_instance->termination_timer) {
+      event_del(task_instance->termination_timer);
+      event_free(task_instance->termination_timer);
     }
+
+    // Free the TaskInstance structure
+    this_->m_task_map_.erase(status_change.task_id);
 
     SLURMX_TRACE("Put TaskStatusChange for task #{} into queue.",
                  status_change.task_id);
@@ -980,7 +990,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
   EvQueueTaskTerminate elem;  // NOLINT(cppcoreguidelines-pro-type-member-init)
   while (this_->m_task_terminate_queue_.try_dequeue(elem)) {
     SLURMX_TRACE(
-        "Receive TerminateTask Request from internal queue. "
+        "Receive TerminateRunningTask Request from internal queue. "
         "Task id: {}",
         elem.task_id);
 
@@ -991,6 +1001,8 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
     }
 
     const auto& task_instance = iter->second;
+
+    if (elem.comes_from_grpc) task_instance->cancelled_by_user = true;
 
     int sig = SIGTERM;  // For BatchTask
     if (task_instance->task.type() == SlurmxGrpc::Interactive) sig = SIGHUP;
@@ -1009,7 +1021,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
 }
 
 void TaskManager::TerminateTaskAsync(uint32_t task_id) {
-  EvQueueTaskTerminate elem{task_id};
+  EvQueueTaskTerminate elem{.task_id = task_id, .comes_from_grpc = true};
   m_task_terminate_queue_.enqueue(elem);
   event_active(m_ev_task_terminate_, 0, 0);
 }

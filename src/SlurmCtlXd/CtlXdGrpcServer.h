@@ -62,9 +62,9 @@ class SlurmCtlXdServiceImpl final : public SlurmxGrpc::SlurmCtlXd::Service {
       const SlurmxGrpc::QueryNodeListFromTaskIdRequest *request,
       SlurmxGrpc::QueryNodeListFromTaskIdReply *response) override;
 
-  grpc::Status TerminateTask(grpc::ServerContext *context,
-                             const SlurmxGrpc::TerminateTaskRequest *request,
-                             SlurmxGrpc::TerminateTaskReply *response) override;
+  grpc::Status CancelTask(grpc::ServerContext *context,
+                          const SlurmxGrpc::CancelTaskRequest *request,
+                          SlurmxGrpc::CancelTaskReply *response) override;
 
   grpc::Status QueryJobsInPartition(
       grpc::ServerContext *context,

@@ -21,6 +21,15 @@
 #define SLURMX_CRITICAL(...) SPDLOG_CRITICAL(__VA_ARGS__)
 
 #ifndef NDEBUG
+#define SLURMX_ASSERT_MSG_VA(condition, message, ...)                    \
+  do {                                                                   \
+    if (!(condition)) {                                                  \
+      SLURMX_CRITICAL("Assertion failed: \"" #condition "\": " #message, \
+                      __VA_ARGS__);                                      \
+      std::terminate();                                                  \
+    }                                                                    \
+  } while (false)
+
 #define SLURMX_ASSERT_MSG(condition, message)                             \
   do {                                                                    \
     if (!(condition)) {                                                   \

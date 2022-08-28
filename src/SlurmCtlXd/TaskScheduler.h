@@ -158,11 +158,12 @@ class TaskScheduler {
 
   std::string QueryNodeListFromTaskId(uint32_t task_id);
 
-  SlurmxErr TerminateTask(uint32_t task_id) {
-    LockGuard pending_guard(m_pending_task_map_mtx_);
+  SlurmxErr CancelPendingOrRunningTask(uint32_t task_id);
+
+  SlurmxErr TerminateRunningTask(uint32_t task_id) {
     LockGuard running_guard(m_running_task_map_mtx_);
     LockGuard ended_guard(m_ended_task_map_mtx_);
-    return TerminateTaskNoLock_(task_id);
+    return TerminateRunningTaskNoLock_(task_id);
   }
 
  private:
@@ -172,10 +173,7 @@ class TaskScheduler {
 
   bool QueryXdNodeIdOfRunningTaskNoLock_(uint32_t task_id, XdNodeId* node_id);
 
-  SlurmxErr TerminateTaskNoLock_(uint32_t task_id);
-
-  bool TerminateTaskExcludeOneXdNoLock_(uint32_t task_id,
-                                        uint32_t excluded_node_index);
+  SlurmxErr TerminateRunningTaskNoLock_(uint32_t task_id);
 
   std::unique_ptr<INodeSelectionAlgo> m_node_selection_algo_;
 

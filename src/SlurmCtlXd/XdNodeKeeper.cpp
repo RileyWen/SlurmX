@@ -104,7 +104,7 @@ SlurmxErr XdNodeStub::TerminateTask(uint32_t task_id) {
   status = m_stub_->TerminateTask(&context, request, &reply);
   if (!status.ok()) {
     SLURMX_DEBUG(
-        "TerminateTask RPC for Node {} returned with status not ok: {}",
+        "TerminateRunningTask RPC for Node {} returned with status not ok: {}",
         m_addr_and_id_.node_id, status.error_message());
     return SlurmxErr::kRpcFailure;
   }

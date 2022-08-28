@@ -64,25 +64,7 @@ void CtlXdClient::AsyncSendThread_() {
 
         request.set_node_index(m_node_id_.node_index);
         request.set_task_id(status_change.task_id);
-        switch (status_change.new_status) {
-          case SlurmxGrpc::Pending:
-            request.set_new_status(SlurmxGrpc::TaskStatus::Pending);
-            break;
-          case SlurmxGrpc::Running:
-            request.set_new_status(SlurmxGrpc::TaskStatus::Running);
-            break;
-          case SlurmxGrpc::Finished:
-            request.set_new_status(SlurmxGrpc::TaskStatus::Finished);
-            break;
-          case SlurmxGrpc::Failed:
-            request.set_new_status(SlurmxGrpc::TaskStatus::Failed);
-            break;
-          case SlurmxGrpc::Completing:
-            request.set_new_status(SlurmxGrpc::TaskStatus::Completing);
-            break;
-          default:
-            break;
-        }
+        request.set_new_status(status_change.new_status);
         if (status_change.reason.has_value())
           request.set_reason(status_change.reason.value());
 

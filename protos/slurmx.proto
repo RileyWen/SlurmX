@@ -194,6 +194,15 @@ message TerminateTaskReply {
   string reason = 2;
 }
 
+message CancelTaskRequest {
+  uint32 task_id = 1;
+}
+
+message CancelTaskReply {
+  bool ok = 1;
+  string reason = 2;
+}
+
 message QueryTaskIdFromPortRequest{
   uint32 port = 1;
 }
@@ -269,7 +278,7 @@ service SlurmCtlXd {
   rpc AllocateInteractiveTask(InteractiveTaskAllocRequest) returns (InteractiveTaskAllocReply);
   rpc QueryInteractiveTaskAllocDetail(QueryInteractiveTaskAllocDetailRequest) returns (QueryInteractiveTaskAllocDetailReply);
 
-  rpc TerminateTask(TerminateTaskRequest) returns (TerminateTaskReply);
+  rpc CancelTask(CancelTaskRequest) returns (CancelTaskReply);
 
 
   /* RPCs called from sbatch */
