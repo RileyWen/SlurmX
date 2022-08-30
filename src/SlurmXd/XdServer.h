@@ -82,7 +82,7 @@ class SlurmXdServiceImpl : public SlurmXd::Service {
 
 class XdServer {
  public:
-  explicit XdServer(std::list<std::string> listen_addresses);
+  explicit XdServer(const Config::SlurmXdListenConf &listen_conf);
 
   inline void Shutdown() { m_server_->Shutdown(); }
 
@@ -111,8 +111,6 @@ class XdServer {
       m_resource_uuid_map_ GUARDED_BY(m_mtx_);
 
   Mutex m_mtx_;
-
-  const std::list<std::string> m_listen_addresses_;
 
   std::unique_ptr<SlurmXdServiceImpl> m_service_impl_;
   std::unique_ptr<Server> m_server_;

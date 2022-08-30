@@ -115,10 +115,12 @@ void TaskScheduler::ScheduleThread_() {
         // For the task whose --node > 1, only execute the command at the first
         // allocated node.
         XdNodeId first_node_id{partition_id, task->node_indexes.front()};
+        task->executing_node_id = first_node_id;
 
         for (auto iter : task->node_indexes) {
           XdNodeId node_id{partition_id, iter};
           XdNodeStub* stub = g_node_keeper->GetXdStub(node_id);
+          SLURMX_TRACE("Send CreateCgroupForTask to {}: ", node_id);
           stub->CreateCgroupForTask(task->task_id, task->uid);
         }
 
@@ -289,22 +291,12 @@ void TaskScheduler::TaskStatusChange(uint32_t task_id, uint32_t node_index,
   SLURMX_DEBUG("TaskStatusChange: Task #{} {}->{} In Node #{}", task_id,
                task->status, new_status, node_index);
 
-  if (!task->is_completing) {
-    task->is_completing = true;
-    if (new_status == SlurmxGrpc::Finished) {
-      task->status = SlurmxGrpc::Finished;
-    } else /* Failed */ {
-      task->status = SlurmxGrpc::Failed;
-      TerminateTaskExcludeOneXdNoLock_(task_id, node_index);
-    }
-    g_db_client->UpdateJobRecordField(task->job_db_inx, "state",
-                                      std::to_string(SlurmxGrpc::Completing));
+  if (new_status == SlurmxGrpc::Finished) {
+    task->status = SlurmxGrpc::Finished;
+  } else if (new_status == SlurmxGrpc::Cancelled) {
+    task->status = SlurmxGrpc::Cancelled;
   } else {
-    if (new_status == SlurmxGrpc::Failed &&
-        task->status == SlurmxGrpc::Finished) {
-      task->status = SlurmxGrpc::Failed;
-      TerminateTaskExcludeOneXdNoLock_(task_id, node_index);
-    }
+    task->status = SlurmxGrpc::Failed;
   }
 
   for (auto&& task_node_index : task->node_indexes) {
@@ -330,58 +322,50 @@ void TaskScheduler::TaskStatusChange(uint32_t task_id, uint32_t node_index,
   m_running_task_map_.erase(iter);
 }
 
-bool TaskScheduler::QueryXdNodeIdOfRunningTaskNoLock_(
-    uint32_t task_id, std::list<XdNodeId>* node_ids) {
+bool TaskScheduler::QueryXdNodeIdOfRunningTaskNoLock_(uint32_t task_id,
+                                                      XdNodeId* node_id) {
   auto iter = m_running_task_map_.find(task_id);
   if (iter == m_running_task_map_.end()) return false;
 
-  for (auto node_index : iter->second->node_indexes) {
-    XdNodeId node_id;
-    node_id.node_index = node_index;
-    node_id.partition_id = iter->second->partition_id;
-    node_ids->push_back(node_id);
-  }
+  *node_id = iter->second->executing_node_id;
 
   return true;
 }
 
-bool TaskScheduler::TerminateTaskNoLock_(uint32_t task_id) {
-  std::list<XdNodeId> node_ids;
-  bool ok = QueryXdNodeIdOfRunningTaskNoLock_(task_id, &node_ids);
+SlurmxErr TaskScheduler::TerminateRunningTaskNoLock_(uint32_t task_id) {
+  XdNodeId node_id;
+  bool ok = QueryXdNodeIdOfRunningTaskNoLock_(task_id, &node_id);
 
   if (ok) {
-    for (XdNodeId xd_node_id : node_ids) {
-      auto stub = g_node_keeper->GetXdStub(xd_node_id);
-      SlurmxErr err = stub->TerminateTask(task_id);
-      if (err == SlurmxErr::kOk)
-        ok &= true;
-      else
-        ok &= false;
-    }
-  }
-
-  return ok;
+    auto stub = g_node_keeper->GetXdStub(node_id);
+    return stub->TerminateTask(task_id);
+  } else
+    return SlurmxErr::kNonExistent;
 }
 
-bool TaskScheduler::TerminateTaskExcludeOneXdNoLock_(
-    uint32_t task_id, uint32_t excluded_node_index) {
-  std::list<XdNodeId> node_ids;
-  bool ok = QueryXdNodeIdOfRunningTaskNoLock_(task_id, &node_ids);
+SlurmxErr TaskScheduler::CancelPendingOrRunningTask(uint32_t task_id) {
+  LockGuard pending_guard(m_pending_task_map_mtx_);
+  LockGuard running_guard(m_running_task_map_mtx_);
+  LockGuard ended_guard(m_ended_task_map_mtx_);
 
-  if (ok) {
-    for (XdNodeId xd_node_id : node_ids) {
-      if (excluded_node_index != xd_node_id.node_index) {
-        auto stub = g_node_keeper->GetXdStub(xd_node_id);
-        SlurmxErr err = stub->TerminateTask(task_id);
-        if (err == SlurmxErr::kOk)
-          ok &= true;
-        else
-          ok &= false;
-      }
-    }
+  auto pending_iter = m_pending_task_map_.find(task_id);
+  if (pending_iter != m_pending_task_map_.end()) {
+    auto node = m_pending_task_map_.extract(task_id);
+    auto task = std::move(node.mapped());
+
+    task->status = SlurmxGrpc::Cancelled;
+
+    uint64_t timestamp = ToUnixSeconds(absl::Now());
+    g_db_client->UpdateJobRecordFields(
+        task->job_db_inx, {"time_end", "state"},
+        {std::to_string(timestamp), std::to_string(task->status)});
+
+    m_ended_task_map_.emplace(task_id, std::move(task));
+
+    return SlurmxErr::kOk;
   }
 
-  return ok;
+  return TerminateRunningTaskNoLock_(task_id);
 }
 
 void TaskScheduler::QueryTaskBriefMetaInPartition(
@@ -447,7 +431,7 @@ std::string TaskScheduler::QueryNodeListFromTaskId(uint32_t task_id) {
   auto iter = m_running_task_map_.find(task_id);
   std::string node_list;
   if (iter != m_running_task_map_.end()) {
-    int task_per_node = iter->second->task_per_node;
+    int task_per_node = iter->second->ntasks_per_node;
     for (auto& node : iter->second->nodes) {
       node_list += node + ":" + std::to_string(task_per_node) + "/n";
     }

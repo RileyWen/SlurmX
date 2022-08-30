@@ -20,7 +20,9 @@ class MariadbClient {
 
   bool Init();
 
-  bool Connect(const std::string& username, const std::string& password);
+  void SetUserAndPwd(const std::string& username, const std::string& password);
+
+  bool Connect();
 
   bool GetMaxExistingJobId(uint64_t* job_id);
 
@@ -51,15 +53,18 @@ class MariadbClient {
 
  private:
   void PrintError_(const std::string& msg) {
-    SLURMX_ERROR("{}: {}\n", msg, mysql_error(conn));
+    SLURMX_ERROR("{}: {}\n", msg, mysql_error(m_conn));
   }
 
   void PrintError_(const char* msg) {
-    SLURMX_ERROR("{}: {}\n", msg, mysql_error(conn));
+    SLURMX_ERROR("{}: {}\n", msg, mysql_error(m_conn));
   }
 
-  MYSQL* conn{nullptr};
+  MYSQL* m_conn{nullptr};
   const std::string m_db_name{"slurmx_db"};
+
+  std::string m_user;
+  std::string m_psw;
 };
 
 }  // namespace CtlXd

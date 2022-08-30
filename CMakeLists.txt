@@ -54,7 +54,7 @@ find_package(Threads REQUIRED)
 find_package(fmt 7.1.3 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/fmt)
 
 set(Boost_USE_STATIC_LIBS ON)
-find_package(Boost 1.67 REQUIRED COMPONENTS thread fiber)
+find_package(Boost 1.67 REQUIRED COMPONENTS thread fiber system filesystem)
 add_definitions(-DBoost_MINOR_VERSION=${Boost_MINOR_VERSION})
 
 find_package(GTest CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/google-test)

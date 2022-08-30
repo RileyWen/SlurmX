@@ -52,11 +52,15 @@ SlurmxErr XdNodeStub::ExecuteTask(const TaskInCtlXd *task) {
   mutable_task->set_partition_id(task->partition_id);
 
   mutable_task->set_node_num(task->node_num);
-  mutable_task->set_task_per_node(task->task_per_node);
+  mutable_task->set_ntasks_per_node(task->ntasks_per_node);
+  mutable_task->set_cpus_per_task(task->cpus_per_task);
 
   mutable_task->set_uid(task->uid);
   mutable_task->set_env(task->env);
   mutable_task->set_cwd(task->cwd);
+
+  for (auto &&hostname : task->nodes)
+    mutable_task->mutable_allocated_nodes()->Add()->assign(hostname);
 
   mutable_task->mutable_start_time()->set_seconds(
       ToUnixSeconds(task->start_time));
@@ -100,7 +104,7 @@ SlurmxErr XdNodeStub::TerminateTask(uint32_t task_id) {
   status = m_stub_->TerminateTask(&context, request, &reply);
   if (!status.ok()) {
     SLURMX_DEBUG(
-        "TerminateTask RPC for Node {} returned with status not ok: {}",
+        "TerminateRunningTask RPC for Node {} returned with status not ok: {}",
         m_addr_and_id_.node_id, status.error_message());
     return SlurmxErr::kRpcFailure;
   }
@@ -616,8 +620,20 @@ void XdNodeKeeper::ConnectXdNode_(XdNodeAddrAndId addr_info) {
 
   std::string addr_port =
       fmt::format("{}:{}", addr_info.node_addr, kXdDefaultPort);
-  cq_tag_data->xd->m_channel_ = grpc::CreateCustomChannel(
-      addr_port, grpc::InsecureChannelCredentials(), channel_args);
+
+  if (g_config.ListenConf.UseTls) {
+    grpc::SslCredentialsOptions ssl_opts;
+    ssl_opts.pem_root_certs = g_config.ListenConf.CertContent;
+    ssl_opts.pem_cert_chain = g_config.ListenConf.CertContent;
+    ssl_opts.pem_private_key = g_config.ListenConf.KeyContent;
+
+    cq_tag_data->xd->m_channel_ = grpc::CreateCustomChannel(
+        addr_port, grpc::SslCredentials(ssl_opts), channel_args);
+  } else {
+    cq_tag_data->xd->m_channel_ = grpc::CreateCustomChannel(
+        addr_port, grpc::InsecureChannelCredentials(), channel_args);
+  }
+
   cq_tag_data->xd->m_prev_channel_state_ =
       cq_tag_data->xd->m_channel_->GetState(true);
   cq_tag_data->xd->m_stub_ =

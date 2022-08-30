@@ -113,7 +113,8 @@ struct TaskInCtlXd {
   SlurmxGrpc::TaskType type;
 
   uint32_t node_num{0};
-  uint32_t task_per_node{0};
+  uint32_t ntasks_per_node{0};
+  uint32_t cpus_per_task{0};
 
   std::string account;
   std::string name;
@@ -133,11 +134,12 @@ struct TaskInCtlXd {
 
   /* ----- Fields that may change at run time. ----------- */
   SlurmxGrpc::TaskStatus status;
-  bool is_completing{false};
 
   uint32_t nodes_alloc;
   std::list<std::string> nodes;
   std::list<uint32_t> node_indexes;
+  XdNodeId executing_node_id;  // The root process of the task started on this
+                               // node id.
   std::string allocated_nodes_regex;
 
   // If this task is PENDING, start_time is either not set (default constructed)
@@ -164,8 +166,19 @@ struct Config {
     std::unordered_set<std::string> AllowAccounts;
   };
 
-  std::string SlurmCtlXdListenAddr;
-  std::string SlurmCtlXdListenPort;
+  struct SlurmCtlXdListenConf {
+    std::string SlurmCtlXdListenAddr;
+    std::string SlurmCtlXdListenPort;
+
+    bool UseTls{false};
+    std::string CertFilePath;
+    std::string CertContent;
+    std::string KeyFilePath;
+    std::string KeyContent;
+  };
+
+  SlurmCtlXdListenConf ListenConf;
+
   std::string SlurmCtlXdDebugLevel;
   std::string SlurmCtlXdLogFile;
   bool SlurmCtlXdForeground{};

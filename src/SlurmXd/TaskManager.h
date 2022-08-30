@@ -136,11 +136,16 @@ struct TaskInstance {
 
   PasswordEntry pwd_entry;
   BatchMetaInTaskInstance batch_meta;
-  bool already_failed;
+
+  // Todo: If batch task runs only on first allocated node, this field is
+  //  useless.
+  bool already_failed{false};
+
+  bool cancelled_by_user{false};
 
   // The cgroup name that restrains the TaskInstance.
   std::string cg_path;
-  struct event* termination_timer;
+  struct event* termination_timer{nullptr};
 
   std::unordered_map<pid_t, std::unique_ptr<ProcessInstance>> processes;
 };
@@ -233,7 +238,9 @@ class TaskManager {
   };
 
   struct EvQueueTaskTerminate {
-    uint32_t task_id;
+    uint32_t task_id{0};
+    // If it comes from a grpc, task->status=Cancelled
+    bool comes_from_grpc{false};
   };
 
   struct EvQueueQueryTaskInfoOfUid {

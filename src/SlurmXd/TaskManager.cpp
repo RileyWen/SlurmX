@@ -1,6 +1,8 @@
 #include "TaskManager.h"
 
+#include <absl/strings/str_join.h>
 #include <absl/strings/str_split.h>
+#include <fcntl.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/util/delimited_message_util.h>
 #include <sys/stat.h>
@@ -288,22 +290,27 @@ void TaskManager::EvSigchldCb_(evutil_socket_t sig, short events,
         } else {
           instance->processes.erase(pr_it);
 
-          if (sigchld_info.is_terminated_by_signal) {
-            instance->already_failed = true;
-            this_->TerminateTaskAsync(task_id);
-          }
-
           // Remove indexes from pid to ProcessInstance*
           this_->m_pid_proc_map_.erase(proc_iter);
 
-          if (instance->processes.empty()) {
+          if (!instance->processes.empty()) {
+            if (sigchld_info.is_terminated_by_signal &&
+                !instance->already_failed) {
+              instance->already_failed = true;
+              this_->TerminateTaskAsync(task_id);
+            }
+          } else {  // ProcessInstance has no process left.
             // See the comment of EvActivateTaskStatusChange_.
             if (instance->task.type() == SlurmxGrpc::Batch) {
               // For a Batch task, the end of the process means it is done.
-              if (instance->already_failed)
-                this_->EvActivateTaskStatusChange_(
-                    task_id, SlurmxGrpc::TaskStatus::Failed, std::nullopt);
-              else
+              if (sigchld_info.is_terminated_by_signal) {
+                if (instance->cancelled_by_user)
+                  this_->EvActivateTaskStatusChange_(
+                      task_id, SlurmxGrpc::TaskStatus::Cancelled, std::nullopt);
+                else
+                  this_->EvActivateTaskStatusChange_(
+                      task_id, SlurmxGrpc::TaskStatus::Failed, std::nullopt);
+              } else
                 this_->EvActivateTaskStatusChange_(
                     task_id, SlurmxGrpc::TaskStatus::Finished, std::nullopt);
             } else {
@@ -452,6 +459,7 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
   using google::protobuf::util::SerializeDelimitedToZeroCopyStream;
 
   using SlurmxGrpc::Xd::CanStartMessage;
+  using SlurmxGrpc::Xd::ChildProcessReady;
 
   int socket_pair[2];
 
@@ -497,8 +505,10 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     setgroups(0, nullptr);
     chdir(saved_priv.cwd.c_str());
 
+    FileInputStream istream(fd);
     FileOutputStream ostream(fd);
     CanStartMessage msg;
+    ChildProcessReady child_process_ready;
 
     SLURMX_DEBUG("Subprocess was created for task #{} pid: {}",
                  instance->task.task_id(), child_pid);
@@ -549,6 +559,13 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
       return SlurmxErr::kProtobufError;
     }
 
+    ParseDelimitedFromZeroCopyStream(&child_process_ready, &istream, nullptr);
+    if (!msg.ok()) {
+      SLURMX_ERROR("Failed to read protobuf from subprocess {} of task #{}",
+                   child_pid, instance->task.task_id());
+      return SlurmxErr::kProtobufError;
+    }
+
     // Add indexes from pid to TaskInstance*, ProcessInstance*
     m_pid_task_map_.emplace(child_pid, instance);
     m_pid_proc_map_.emplace(child_pid, process.get());
@@ -574,23 +591,61 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
     setreuid(instance->pwd_entry.Uid(), instance->pwd_entry.Uid());
     setregid(instance->pwd_entry.Gid(), instance->pwd_entry.Gid());
 
+    // Set pgid to the pid of task root process.
+    setpgid(0, 0);
+
     close(socket_pair[0]);
     int fd = socket_pair[1];
 
     FileInputStream istream(fd);
+    FileOutputStream ostream(fd);
     CanStartMessage msg;
+    ChildProcessReady child_process_ready;
+    bool ok;
 
     ParseDelimitedFromZeroCopyStream(&msg, &istream, nullptr);
     if (!msg.ok()) std::abort();
 
-    // Set pgid to the pid of task root process.
-    setpgid(0, 0);
+    int out_fd = open(process->batch_meta.parsed_output_file_pattern.c_str(),
+                      O_RDWR | O_CREAT | O_APPEND, 0644);
+    if (out_fd == -1) {
+      std::abort();
+    }
+
+    child_process_ready.set_ok(true);
+    ok = SerializeDelimitedToZeroCopyStream(child_process_ready, &ostream);
+    ok &= ostream.Flush();
+    if (!ok) {
+      std::abort();
+    }
+
+    close(fd);
+
+    dup2(out_fd, 1);  // stdout -> output file
+    dup2(out_fd, 2);  // stderr -> output file
+    close(out_fd);
+
+    // If these file descriptors are not closed, a program like mpirun may
+    // keep waiting for the input from stdin or other fds and will never end.
+    close(0);  // close stdin
+    util::CloseFdFrom(3);
 
     std::vector<std::string> env_vec =
         absl::StrSplit(instance->task.env(), "||");
-    for (auto str : env_vec) {
-      if (putenv(str.data())) {
-        SLURMX_ERROR("set environ {} failed!", str);
+
+    std::string nodelist = absl::StrJoin(instance->task.allocated_nodes(), ";");
+    std::string nodelist_env = fmt::format("CRANE_JOB_NODELIST={}", nodelist);
+
+    env_vec.emplace_back(nodelist_env);
+
+    for (const auto& str : env_vec) {
+      auto pos = str.find_first_of('=');
+      if (std::string::npos != pos) {
+        std::string name = str.substr(0, pos);
+        std::string value = str.substr(pos + 1);
+        if (setenv(name.c_str(), value.c_str(), 1)) {
+          // fmt::print("set environ failed!\n");
+        }
       }
     }
 
@@ -601,19 +656,6 @@ SlurmxErr TaskManager::SpawnProcessInInstance_(
       argv.push_back(arg.c_str());
     }
     argv.push_back(nullptr);
-
-    SLURMX_TRACE("execv being called subprocess: {} {}", process->GetExecPath(),
-                 boost::algorithm::join(process->GetArgList(), " "));
-
-    dup2(fd, 1);  // stdout -> pipe
-    dup2(fd, 2);  // stderr -> pipe
-
-    close(fd);
-
-    // If these file descriptors are not closed, a program like mpirun may
-    // keep waiting for the input from stdin or other fds and will never end.
-    close(0);  // close stdin
-    util::CloseFdFrom(3);
 
     execv(process->GetExecPath().c_str(),
           const_cast<char* const*>(argv.data()));
@@ -758,20 +800,10 @@ void TaskManager::EvGrpcExecuteTaskCb_(int, short events, void* user_data) {
         process->batch_meta.parsed_output_file_pattern += ".out";
       }
 
-      auto* file_logger = new slurmx::FileLogger(
-          fmt::format("{}", instance->task.task_id()),
-          process->batch_meta.parsed_output_file_pattern);
-
-      auto clean_cb = [](void* data) {
-        delete reinterpret_cast<slurmx::FileLogger*>(data);
-      };
-
       auto output_cb = [](std::string&& buf, void* data) {
-        auto* file_logger = reinterpret_cast<slurmx::FileLogger*>(data);
-        file_logger->Output(buf);
+        SLURMX_TRACE("Read output from subprocess: {}", buf);
       };
 
-      process->SetUserDataAndCleanCb(file_logger, std::move(clean_cb));
       process->SetOutputCb(std::move(output_cb));
 
       err = this_->SpawnProcessInInstance_(instance, std::move(process));
@@ -797,27 +829,32 @@ void TaskManager::EvTaskStatusChangeCb_(int efd, short events,
 
   TaskStatusChange status_change;
   while (this_->m_task_status_change_queue_.try_dequeue(status_change)) {
-    if (status_change.new_status == SlurmxGrpc::TaskStatus::Finished ||
-        status_change.new_status == SlurmxGrpc::TaskStatus::Failed) {
-      SLURMX_DEBUG(R"(Destroying Task structure for "{}".)"
-                   R"(Task new status: {})",
-                   status_change.task_id, status_change.new_status);
+    SLURMX_ASSERT_MSG_VA(
+        status_change.new_status == SlurmxGrpc::TaskStatus::Finished ||
+            status_change.new_status == SlurmxGrpc::TaskStatus::Failed ||
+            status_change.new_status == SlurmxGrpc::TaskStatus::Cancelled,
+        "Task #{}: When TaskStatusChange event is triggered, the task should "
+        "either be Finished, Failed or Cancelled. new_status = {}",
+        status_change.task_id, status_change.new_status);
 
-      auto iter = this_->m_task_map_.find(status_change.task_id);
-      SLURMX_ASSERT_MSG(iter != this_->m_task_map_.end(),
-                        "Task should be found here.");
+    SLURMX_DEBUG(R"(Destroying Task structure for "{}".)"
+                 R"(Task new status: {})",
+                 status_change.task_id, status_change.new_status);
 
-      TaskInstance* task_instance = iter->second.get();
-      uid_t uid = task_instance->task.uid();
+    auto iter = this_->m_task_map_.find(status_change.task_id);
+    SLURMX_ASSERT_MSG(iter != this_->m_task_map_.end(),
+                      "Task should be found here.");
 
-      if (task_instance->termination_timer) {
-        event_del(task_instance->termination_timer);
-        event_free(task_instance->termination_timer);
-      }
+    TaskInstance* task_instance = iter->second.get();
+    uid_t uid = task_instance->task.uid();
 
-      // Free the TaskInstance structure
-      this_->m_task_map_.erase(status_change.task_id);
+    if (task_instance->termination_timer) {
+      event_del(task_instance->termination_timer);
+      event_free(task_instance->termination_timer);
     }
+
+    // Free the TaskInstance structure
+    this_->m_task_map_.erase(status_change.task_id);
 
     SLURMX_TRACE("Put TaskStatusChange for task #{} into queue.",
                  status_change.task_id);
@@ -952,6 +989,11 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
 
   EvQueueTaskTerminate elem;  // NOLINT(cppcoreguidelines-pro-type-member-init)
   while (this_->m_task_terminate_queue_.try_dequeue(elem)) {
+    SLURMX_TRACE(
+        "Receive TerminateRunningTask Request from internal queue. "
+        "Task id: {}",
+        elem.task_id);
+
     auto iter = this_->m_task_map_.find(elem.task_id);
     if (iter == this_->m_task_map_.end()) {
       SLURMX_ERROR("Trying terminating unknown task #{}", elem.task_id);
@@ -959,6 +1001,8 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
     }
 
     const auto& task_instance = iter->second;
+
+    if (elem.comes_from_grpc) task_instance->cancelled_by_user = true;
 
     int sig = SIGTERM;  // For BatchTask
     if (task_instance->task.type() == SlurmxGrpc::Interactive) sig = SIGHUP;
@@ -977,7 +1021,7 @@ void TaskManager::EvTerminateTaskCb_(int efd, short events, void* user_data) {
 }
 
 void TaskManager::TerminateTaskAsync(uint32_t task_id) {
-  EvQueueTaskTerminate elem{task_id};
+  EvQueueTaskTerminate elem{.task_id = task_id, .comes_from_grpc = true};
   m_task_terminate_queue_.enqueue(elem);
   event_active(m_ev_task_terminate_, 0, 0);
 }

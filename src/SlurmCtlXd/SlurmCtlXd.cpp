@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
 
+#include <boost/filesystem/string_file.hpp>
 #include <condition_variable>
 #include <cxxopts.hpp>
 #include <filesystem>
@@ -82,7 +83,8 @@ void InitializeCtlXdGlobalVariables() {
     std::exit(1);
   }
 
-  if (!g_db_client->Connect(g_config.DbUser, g_config.DbPassword)) {
+  g_db_client->SetUserAndPwd(g_config.DbUser, g_config.DbPassword);
+  if (!g_db_client->Connect()) {
     SLURMX_ERROR("Error: Db client connect");
     std::exit(1);
   }
@@ -128,9 +130,7 @@ int StartServer() {
 
   InitializeCtlXdGlobalVariables();
 
-  std::string server_address{fmt::format("{}:{}", g_config.SlurmCtlXdListenAddr,
-                                         g_config.SlurmCtlXdListenPort)};
-  g_ctlxd_server = std::make_unique<CtlXd::CtlXdServer>(server_address);
+  g_ctlxd_server = std::make_unique<CtlXd::CtlXdServer>(g_config.ListenConf);
 
   g_ctlxd_server->Wait();
 
@@ -198,16 +198,63 @@ int main(int argc, char** argv) {
       YAML::Node config = YAML::LoadFile(kDefaultConfigPath);
 
       if (config["SlurmCtlXdListenAddr"])
-        g_config.SlurmCtlXdListenAddr =
+        g_config.ListenConf.SlurmCtlXdListenAddr =
             config["SlurmCtlXdListenAddr"].as<std::string>();
       else
-        g_config.SlurmCtlXdListenAddr = "0.0.0.0";
+        g_config.ListenConf.SlurmCtlXdListenAddr = "0.0.0.0";
 
       if (config["SlurmCtlXdListenPort"])
-        g_config.SlurmCtlXdListenPort =
+        g_config.ListenConf.SlurmCtlXdListenPort =
             config["SlurmCtlXdListenPort"].as<std::string>();
       else
-        g_config.SlurmCtlXdListenPort = kCtlXdDefaultPort;
+        g_config.ListenConf.SlurmCtlXdListenPort = kCtlXdDefaultPort;
+
+      if (config["UseTls"] && config["UseTls"].as<bool>()) {
+        g_config.ListenConf.UseTls = true;
+        if (config["CertFilePath"]) {
+          g_config.ListenConf.CertFilePath =
+              config["CertFilePath"].as<std::string>();
+
+          try {
+            boost::filesystem::load_string_file(
+                g_config.ListenConf.CertFilePath,
+                g_config.ListenConf.CertContent);
+          } catch (const std::exception& e) {
+            SLURMX_ERROR("Read cert file error: {}", e.what());
+            std::exit(1);
+          }
+          if (g_config.ListenConf.CertContent.empty()) {
+            SLURMX_ERROR(
+                "UseTls is true, but the file specified by CertFilePath is "
+                "empty");
+          }
+        } else {
+          SLURMX_ERROR("UseTls is true, but CertFilePath is empty");
+          std::exit(1);
+        }
+        if (config["KeyFilePath"]) {
+          g_config.ListenConf.KeyFilePath =
+              config["KeyFilePath"].as<std::string>();
+
+          try {
+            boost::filesystem::load_string_file(g_config.ListenConf.KeyFilePath,
+                                                g_config.ListenConf.KeyContent);
+          } catch (const std::exception& e) {
+            SLURMX_ERROR("Read cert file error: {}", e.what());
+            std::exit(1);
+          }
+          if (g_config.ListenConf.KeyContent.empty()) {
+            SLURMX_ERROR(
+                "UseTls is true, but the file specified by KeyFilePath is "
+                "empty");
+          }
+        } else {
+          SLURMX_ERROR("UseTls is true, but KeyFilePath is empty");
+          std::exit(1);
+        }
+      } else {
+        g_config.ListenConf.UseTls = false;
+      }
 
       if (config["SlurmCtlXdDebugLevel"])
         g_config.SlurmCtlXdDebugLevel =
@@ -305,15 +352,11 @@ int main(int argc, char** argv) {
             std::exit(1);
 
           part.nodelist_str = nodes;
-          std::vector<absl::string_view> split = absl::StrSplit(nodes, ',');
           std::list<std::string> name_list;
-
-          for (auto&& str : split) {
-            std::string str_s{absl::StripAsciiWhitespace(str)};
-            if (!util::ParseHostList(str_s, &name_list)) {
-              SLURMX_ERROR("Illegal node name string format.");
-              std::exit(1);
-            }
+          if (!util::ParseHostList(absl::StripAsciiWhitespace(nodes).data(),
+                                   &name_list)) {
+            SLURMX_ERROR("Illegal node name string format.");
+            std::exit(1);
           }
 
           for (auto&& node : name_list) {
@@ -348,8 +391,10 @@ int main(int argc, char** argv) {
 
     auto parsed_args = options.parse(argc, argv);
 
-    g_config.SlurmCtlXdListenAddr = parsed_args["listen"].as<std::string>();
-    g_config.SlurmCtlXdListenPort = parsed_args["port"].as<std::string>();
+    g_config.ListenConf.SlurmCtlXdListenAddr =
+        parsed_args["listen"].as<std::string>();
+    g_config.ListenConf.SlurmCtlXdListenPort =
+        parsed_args["port"].as<std::string>();
   }
 
   std::regex regex_addr(
@@ -358,12 +403,12 @@ int main(int argc, char** argv) {
   std::regex regex_port(R"(^([0-9]{1,4}|[1-5][0-9]{4}|6[0-4][0-9]{3}|)"
                         R"(65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])$)");
 
-  if (!std::regex_match(g_config.SlurmCtlXdListenAddr, regex_addr)) {
+  if (!std::regex_match(g_config.ListenConf.SlurmCtlXdListenAddr, regex_addr)) {
     fmt::print("Listening address is invalid.\n");
     std::exit(1);
   }
 
-  if (!std::regex_match(g_config.SlurmCtlXdListenPort, regex_port)) {
+  if (!std::regex_match(g_config.ListenConf.SlurmCtlXdListenPort, regex_port)) {
     fmt::print("Listening port is invalid.\n");
     std::exit(1);
   }

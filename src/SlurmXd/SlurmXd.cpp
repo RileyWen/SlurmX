@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <yaml-cpp/yaml.h>
 
+#include <boost/filesystem/string_file.hpp>
 #include <cxxopts.hpp>
 #include <filesystem>
 #include <regex>
@@ -28,9 +29,65 @@ void ParseConfig(int argc, char** argv) {
       YAML::Node config = YAML::LoadFile(kDefaultConfigPath);
 
       if (config["SlurmXdListen"])
-        g_config.SlurmXdListen = config["listen"].as<std::string>();
+        g_config.ListenConf.SlurmXdListenAddr =
+            config["listen"].as<std::string>();
       else
-        g_config.SlurmXdListen = fmt::format("0.0.0.0:{}", kXdDefaultPort);
+        g_config.ListenConf.SlurmXdListenAddr = "0.0.0.0";
+
+      // Todo: Add corresponding configuration field.
+
+      g_config.ListenConf.SlurmXdListenPort = kXdDefaultPort;
+
+      g_config.ListenConf.UnixSocketListenAddr =
+          fmt::format("unix://{}", kDefaultSlurmXdUnixSockPath);
+
+      if (config["UseTls"] && config["UseTls"].as<bool>()) {
+        g_config.ListenConf.UseTls = true;
+        if (config["CertFilePath"]) {
+          g_config.ListenConf.CertFilePath =
+              config["CertFilePath"].as<std::string>();
+
+          try {
+            boost::filesystem::load_string_file(
+                g_config.ListenConf.CertFilePath,
+                g_config.ListenConf.CertContent);
+          } catch (const std::exception& e) {
+            SLURMX_ERROR("Read cert file error: {}", e.what());
+            std::exit(1);
+          }
+          if (g_config.ListenConf.CertContent.empty()) {
+            SLURMX_ERROR(
+                "UseTls is true, but the file specified by CertFilePath is "
+                "empty");
+          }
+        } else {
+          SLURMX_ERROR("UseTls is true, but CertFilePath is empty");
+          std::exit(1);
+        }
+        if (config["KeyFilePath"]) {
+          g_config.ListenConf.KeyFilePath =
+              config["KeyFilePath"].as<std::string>();
+
+          try {
+            boost::filesystem::load_string_file(g_config.ListenConf.KeyFilePath,
+                                                g_config.ListenConf.KeyContent);
+          } catch (const std::exception& e) {
+            SLURMX_ERROR("Read key file error: {}", e.what());
+            std::exit(1);
+          }
+          if (g_config.ListenConf.KeyContent.empty()) {
+            SLURMX_ERROR(
+                "UseTls is true, but the file specified by KeyFilePath is "
+                "empty");
+            std::exit(1);
+          }
+        } else {
+          SLURMX_ERROR("UseTls is true, but KeyFilePath is empty");
+          std::exit(1);
+        }
+      } else {
+        g_config.ListenConf.UseTls = false;
+      }
 
       if (config["ControlMachine"]) {
         std::string addr;
@@ -202,7 +259,9 @@ void ParseConfig(int argc, char** argv) {
       std::exit(1);
     }
 
-    g_config.SlurmXdListen = parsed_args["listen"].as<std::string>();
+    g_config.ListenConf.SlurmXdListenAddr =
+        parsed_args["listen"].as<std::string>();
+    g_config.ListenConf.SlurmXdListenPort = kXdDefaultPort;
 
     if (parsed_args.count("server-address") == 0) {
       fmt::print("SlurmCtlXd address must be specified.\n{}\n", options.help());
@@ -212,9 +271,10 @@ void ParseConfig(int argc, char** argv) {
   }
 
   // Check the format of SlurmXdListen
-  std::regex addr_port_re(R"(^.*:(\d+)$)");
-  std::smatch port_group;
-  if (!std::regex_match(g_config.SlurmXdListen, port_group, addr_port_re)) {
+  std::regex ipv4_re(R"(^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}$)");
+  std::smatch ivp4_match;
+  if (!std::regex_match(g_config.ListenConf.SlurmXdListenAddr, ivp4_match,
+                        ipv4_re)) {
     SLURMX_ERROR("Illegal CtlXd address format.");
     std::exit(1);
   }
@@ -355,9 +415,7 @@ void StartServer() {
   // Set FD_CLOEXEC on stdin, stdout, stderr
   util::SetCloseOnExecOnFdRange(STDIN_FILENO, STDERR_FILENO + 1);
 
-  g_server = std::make_unique<Xd::XdServer>(std::list<std::string>{
-      g_config.SlurmXdListen,
-      fmt::format("unix://{}", kDefaultSlurmXdUnixSockPath)});
+  g_server = std::make_unique<Xd::XdServer>(g_config.ListenConf);
 
   g_server->Wait();
 
