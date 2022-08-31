@@ -101,6 +101,11 @@ class SlurmCtlXdServiceImpl final : public SlurmxGrpc::SlurmCtlXd::Service {
                             const SlurmxGrpc::DeleteEntityRequest *request,
                             SlurmxGrpc::DeleteEntityReply *response) override;
 
+  grpc::Status QueryClusterInfo(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::QueryClusterInfoRequest *request,
+      SlurmxGrpc::QueryClusterInfoReply *response) override;
+
  private:
   CtlXdServer *m_ctlxd_server_;
 };

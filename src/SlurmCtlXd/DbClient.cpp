@@ -544,7 +544,7 @@ MongodbClient::MongodbResult MongodbClient::DeleteEntity(
       coll = m_account_collection;
       child_attribute_name = "child_account";
       // check whether the account has child
-      if (GetAccountInfo(name, &account)) {
+      if (GetExistedAccountInfo(name, &account)) {
         if (!account.child_account.empty() || !account.users.empty()) {
           return MongodbClient::MongodbResult{
               false, "This account has child account or users"};
@@ -555,7 +555,7 @@ MongodbClient::MongodbResult MongodbClient::DeleteEntity(
     case MongodbClient::User:
       coll = m_user_collection;
       child_attribute_name = "users";
-      if (GetUserInfo(name, &user)) {
+      if (GetExistedUserInfo(name, &user)) {
         parent_name = user.account;
       }
       break;
@@ -626,6 +626,18 @@ bool MongodbClient::GetUserInfo(const std::string& name, CtlXd::User* user) {
   return false;
 }
 
+/*
+ * Get the user info form mongodb and deletion flag marked false
+ */
+bool MongodbClient::GetExistedUserInfo(const std::string& name,
+                                       CtlXd::User* user) {
+  if (GetUserInfo(name, user) && !user->deleted) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
 bool MongodbClient::GetAllUserInfo(std::list<CtlXd::User>& user_list) {
   mongocxx::cursor cursor = m_user_collection->find({});
   for (auto view : cursor) {
@@ -676,6 +688,15 @@ bool MongodbClient::GetAccountInfo(const std::string& name,
   return false;
 }
 
+bool MongodbClient::GetExistedAccountInfo(const std::string& name,
+                                          CtlXd::Account* account) {
+  if (GetAccountInfo(name, account) && !account->deleted) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
 bool MongodbClient::GetAllAccountInfo(std::list<CtlXd::Account>& account_list) {
   mongocxx::cursor cursor = m_account_collection->find({});
   for (auto view : cursor) {
@@ -720,7 +741,7 @@ bool MongodbClient::GetQosInfo(const std::string& name, CtlXd::Qos* qos) {
 MongodbClient::MongodbResult MongodbClient::SetUser(
     const CtlXd::User& new_user) {
   CtlXd::User last_user;
-  if (!GetUserInfo(new_user.name, &last_user) || last_user.deleted) {
+  if (!GetExistedUserInfo(new_user.name, &last_user)) {
     return MongodbClient::MongodbResult{
         false, fmt::format("user {} not exist", new_user.name)};
   }
@@ -792,8 +813,7 @@ MongodbClient::MongodbResult MongodbClient::SetUser(
 MongodbClient::MongodbResult MongodbClient::SetAccount(
     const CtlXd::Account& new_account) {
   CtlXd::Account last_account;
-  if (!GetAccountInfo(new_account.name, &last_account) ||
-      last_account.deleted) {
+  if (!GetExistedAccountInfo(new_account.name, &last_account)) {
     return MongodbClient::MongodbResult{
         false, fmt::format("account {} not exist", new_account.name)};
   }
@@ -898,7 +918,7 @@ std::list<std::string> MongodbClient::GetAccountAllowedPartition(
   std::string parent = name;
   while (allowed_partition.empty() && !parent.empty()) {
     CtlXd::Account account;
-    GetAccountInfo(parent, &account);
+    GetExistedAccountInfo(parent, &account);
     allowed_partition = account.allowed_partition;
     parent = account.parent_account;
   }
@@ -908,7 +928,7 @@ std::list<std::string> MongodbClient::GetAccountAllowedPartition(
 bool MongodbClient::SetUserAllowedPartition(
     const std::string& name, const std::list<std::string>& partitions,
     SlurmxGrpc::ModifyEntityRequest::Type type) {
-  if (!GetUserInfo(name, new CtlXd::User)) {
+  if (!GetExistedUserInfo(name, new CtlXd::User)) {
     return false;
   }
 
@@ -968,7 +988,7 @@ bool MongodbClient::SetUserAllowedPartition(
 bool MongodbClient::SetAccountAllowedPartition(
     const std::string& name, const std::list<std::string>& partitions,
     SlurmxGrpc::ModifyEntityRequest::Type type) {
-  if (!GetAccountInfo(name, new CtlXd::Account)) {
+  if (!GetExistedAccountInfo(name, new CtlXd::Account)) {
     return false;
   }
 

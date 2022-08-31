@@ -319,6 +319,15 @@ message MigrateSshProcToCgroupReply {
   bool ok = 1;
 }
 
+message QueryClusterInfoRequest {
+
+}
+
+message QueryClusterInfoReply {
+  bool ok = 1;
+  repeated PartitionNodeInfo partition_node = 2;
+}
+
 // Todo: Divide service into two parts: one for SlurmXd and one for SrunX
 //  We need to distinguish the message sender
 //  and have some kind of authentication
@@ -356,6 +365,9 @@ service SlurmCtlXd {
 
   rpc QueryEntityInfo(QueryEntityInfoRequest) returns (QueryEntityInfoReply);
   rpc ModifyEntity(ModifyEntityRequest) returns (ModifyEntityReply);
+
+  /* RPCs called from Cinfo */
+  rpc QueryClusterInfo(QueryClusterInfoRequest) returns (QueryClusterInfoReply);
 }
 
 service SlurmXd {

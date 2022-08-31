@@ -481,6 +481,18 @@ grpc::Status SlurmCtlXdServiceImpl::DeleteEntity(
   return grpc::Status::OK;
 }
 
+grpc::Status SlurmCtlXdServiceImpl::QueryClusterInfo(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryClusterInfoRequest *request,
+    SlurmxGrpc::QueryClusterInfoReply *response) {
+  SlurmxGrpc::QueryClusterInfoReply *reply;
+  reply = g_meta_container->QueryClusterInfo();
+  response->Swap(reply);
+  delete reply;
+
+  return grpc::Status::OK;
+}
+
 CtlXdServer::CtlXdServer(const Config::SlurmCtlXdListenConf &listen_conf) {
   m_service_impl_ = std::make_unique<SlurmCtlXdServiceImpl>(this);
 

@@ -146,6 +146,17 @@ message NodeInfo {
   uint32 running_task_num = 10;
 }
 
+message PartitionNodeInfo {
+  message CommonNodeStateList {
+    string state = 1;
+    uint32 nodes_num = 2;
+    string nodes_list = 3;
+  }
+  string name = 1;
+  PartitionInfo.PartitionState state = 2;
+  repeated CommonNodeStateList common_node_state_list = 3;
+}
+
 enum EntityType {
   Account = 0;
   User = 1;

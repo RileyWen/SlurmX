@@ -114,8 +114,10 @@ class MongodbClient {
   MongodbResult DeleteEntity(EntityType type, const std::string& name);
 
   bool GetUserInfo(const std::string& name, CtlXd::User* user);
+  bool GetExistedUserInfo(const std::string& name, CtlXd::User* user);
   bool GetAllUserInfo(std::list<CtlXd::User>& user_list);
   bool GetAccountInfo(const std::string& name, CtlXd::Account* account);
+  bool GetExistedAccountInfo(const std::string& name, CtlXd::Account* account);
   bool GetAllAccountInfo(std::list<CtlXd::Account>& account_list);
   bool GetQosInfo(const std::string& name, CtlXd::Qos* qos);
 

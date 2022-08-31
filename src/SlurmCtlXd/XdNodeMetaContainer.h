@@ -51,6 +51,8 @@ class XdNodeMetaContainerInterface {
   virtual SlurmxGrpc::QueryPartitionInfoReply* QueryPartitionInfo(
       const std::string& partition_name) = 0;
 
+  virtual SlurmxGrpc::QueryClusterInfoReply* QueryClusterInfo() = 0;
+
   virtual bool GetNodeId(const std::string& hostname, XdNodeId* node_id) = 0;
 
   /**
@@ -98,6 +100,8 @@ class XdNodeMetaContainerSimpleImpl final
 
   SlurmxGrpc::QueryPartitionInfoReply* QueryPartitionInfo(
       const std::string& partition_name) override;
+
+  SlurmxGrpc::QueryClusterInfoReply* QueryClusterInfo() override;
 
   bool GetNodeId(const std::string& hostname, XdNodeId* node_id) override;
 
