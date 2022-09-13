@@ -90,6 +90,10 @@ void InitializeCtlXdGlobalVariables() {
   }
 
   g_mongodb_client = std::make_unique<MongodbClient>();
+  if (!g_mongodb_client) {
+    SLURMX_ERROR("Error: MongoDb client Init failed");
+    std::exit(1);
+  }
   if (!g_mongodb_client->Connect()) {
     SLURMX_ERROR("Error: MongoDb client connect fail");
     std::exit(1);

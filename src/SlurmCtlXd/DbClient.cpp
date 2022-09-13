@@ -309,8 +309,9 @@ MongodbClient::~MongodbClient() {
 }
 
 bool MongodbClient::Connect() {
+#warning "Do not hardcode port and db name!"
   // default port 27017
-  mongocxx::uri uri{fmt::format("mongodb://{}:{}@localhost:27017/slurmx_db",
+  mongocxx::uri uri{fmt::format("mongodb://{}:{}@localhost:27017/Crane_db",
                                 g_config.MongodbUser,
                                 g_config.MongodbPassword)};
   m_dbInstance = new (std::nothrow) mongocxx::instance();
@@ -612,14 +613,16 @@ bool MongodbClient::GetUserInfo(const std::string& name, CtlXd::User* user) {
   if (result) {
     bsoncxx::document::view user_view = result->view();
     user->deleted = user_view["deleted"].get_bool();
-    user->uid = std::stoi(user_view["uid"].get_utf8().value.to_string());
-    user->name = user_view["name"].get_utf8().value.to_string();
-    user->account = user_view["account"].get_utf8().value.to_string();
+
+#warning Fix This!
+    user->uid = std::stoi(std::string(user_view["uid"].get_utf8().value));
+
+    user->name = user_view["name"].get_utf8().value;
+    user->account = user_view["account"].get_utf8().value;
     user->admin_level =
         (CtlXd::User::AdminLevel)user_view["admin_level"].get_int32().value;
     for (auto&& partition : user_view["allowed_partition"].get_array().value) {
-      user->allowed_partition.emplace_back(
-          partition.get_utf8().value.to_string());
+      user->allowed_partition.emplace_back(partition.get_utf8().value);
     }
     return true;
   }
@@ -643,14 +646,16 @@ bool MongodbClient::GetAllUserInfo(std::list<CtlXd::User>& user_list) {
   for (auto view : cursor) {
     CtlXd::User user;
     user.deleted = view["deleted"].get_bool();
-    user.uid = std::stoi(view["uid"].get_utf8().value.to_string());
-    user.name = view["name"].get_utf8().value.to_string();
-    user.account = view["account"].get_utf8().value.to_string();
+
+#warning Fix This!
+    user.uid = std::stoi(std::string(view["uid"].get_utf8().value));
+
+    user.name = view["name"].get_utf8().value;
+    user.account = view["account"].get_utf8().value;
     user.admin_level =
         (CtlXd::User::AdminLevel)view["admin_level"].get_int32().value;
     for (auto&& partition : view["allowed_partition"].get_array().value) {
-      user.allowed_partition.emplace_back(
-          partition.get_utf8().value.to_string());
+      user.allowed_partition.emplace_back(partition.get_utf8().value);
     }
     user_list.emplace_back(user);
   }
@@ -666,23 +671,20 @@ bool MongodbClient::GetAccountInfo(const std::string& name,
     bsoncxx::document::view account_view = result->view();
     account->deleted = account_view["deleted"].get_bool().value;
     if (account->deleted) return false;
-    account->name = account_view["name"].get_utf8().value.to_string();
-    account->description =
-        account_view["description"].get_utf8().value.to_string();
+    account->name = account_view["name"].get_utf8().value;
+    account->description = account_view["description"].get_utf8().value;
     for (auto&& user : account_view["users"].get_array().value) {
-      account->users.push_back(user.get_utf8().value.to_string());
+      account->users.emplace_back(user.get_utf8().value);
     }
     for (auto&& acct : account_view["child_account"].get_array().value) {
-      account->child_account.emplace_back(acct.get_utf8().value.to_string());
+      account->child_account.emplace_back(acct.get_utf8().value);
     }
     for (auto&& partition :
          account_view["allowed_partition"].get_array().value) {
-      account->allowed_partition.emplace_back(
-          partition.get_utf8().value.to_string());
+      account->allowed_partition.emplace_back(partition.get_utf8().value);
     }
-    account->parent_account =
-        account_view["parent_account"].get_utf8().value.to_string();
-    account->qos = account_view["qos"].get_utf8().value.to_string();
+    account->parent_account = account_view["parent_account"].get_utf8().value;
+    account->qos = account_view["qos"].get_utf8().value;
     return true;
   }
   return false;
@@ -702,21 +704,19 @@ bool MongodbClient::GetAllAccountInfo(std::list<CtlXd::Account>& account_list) {
   for (auto view : cursor) {
     CtlXd::Account account;
     account.deleted = view["deleted"].get_bool().value;
-    account.name = view["name"].get_utf8().value.to_string();
-    account.description = view["description"].get_utf8().value.to_string();
+    account.name = view["name"].get_utf8().value;
+    account.description = view["description"].get_utf8().value;
     for (auto&& user : view["users"].get_array().value) {
-      account.users.push_back(user.get_utf8().value.to_string());
+      account.users.emplace_back(user.get_utf8().value);
     }
     for (auto&& acct : view["child_account"].get_array().value) {
-      account.child_account.emplace_back(acct.get_utf8().value.to_string());
+      account.child_account.emplace_back(acct.get_utf8().value);
     }
     for (auto&& partition : view["allowed_partition"].get_array().value) {
-      account.allowed_partition.emplace_back(
-          partition.get_utf8().value.to_string());
+      account.allowed_partition.emplace_back(partition.get_utf8().value);
     }
-    account.parent_account =
-        view["parent_account"].get_utf8().value.to_string();
-    account.qos = view["qos"].get_utf8().value.to_string();
+    account.parent_account = view["parent_account"].get_utf8().value;
+    account.qos = view["qos"].get_utf8().value;
     account_list.emplace_back(account);
   }
   return true;
@@ -728,8 +728,8 @@ bool MongodbClient::GetQosInfo(const std::string& name, CtlXd::Qos* qos) {
           document{} << "name" << name << bsoncxx::builder::stream::finalize);
   if (result) {
     bsoncxx::document::view user_view = result->view();
-    qos->name = user_view["name"].get_utf8().value.to_string();
-    qos->description = user_view["description"].get_utf8().value.to_string();
+    qos->name = user_view["name"].get_utf8().value;
+    qos->description = user_view["description"].get_utf8().value;
     qos->priority = user_view["priority"].get_int32();
     qos->max_jobs_per_user = user_view["max_jobs_per_user"].get_int32();
     std::cout << bsoncxx::to_json(*result) << "\n";
@@ -900,10 +900,10 @@ std::list<std::string> MongodbClient::GetUserAllowedPartition(
   if (result) {
     bsoncxx::document::view user_view = result->view();
     for (auto&& partition : user_view["allowed_partition"].get_array().value) {
-      allowed_partition.emplace_back(partition.get_utf8().value.to_string());
+      allowed_partition.emplace_back(partition.get_utf8().value);
     }
     if (allowed_partition.empty()) {
-      std::string parent = user_view["account"].get_utf8().value.to_string();
+      std::string parent{user_view["account"].get_utf8().value};
       if (!parent.empty()) {
         allowed_partition = GetAccountAllowedPartition(parent);
       }

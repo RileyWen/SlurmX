@@ -123,7 +123,6 @@ cd ..
 cd libuv-1.42.0
 mkdir build
 cd build/
-cmake -DCMAKE_INSTALL_PREFIX=/nfs/home/testCrane/Crane/dependencies/online/libuv -DCMAKE_CXX_STANDARD=17 -G Ninja ..
 ninja install
 
 # 运行安装脚本
@@ -301,18 +300,24 @@ tar xzf mongo-c-driver-1.21.1.tar.gz
 cd mongo-c-driver-1.21.1
 mkdir cmake-build
 cd cmake-build
-cmake -DENABLE_AUTOMATIC_INIT_AND_CLEANUP=OFF -DCMAKE_INSTALL_PREFIX=/nfs/home/liulinxing/Crane/dependencies/online/mongo-c-driver ..
-sudo make && make install
+cmake -G Ninja -DENABLE_AUTOMATIC_INIT_AND_CLEANUP=OFF \
+  -DCMAKE_INSTALL_PREFIX=../../../online/mongo-c-driver ..
+ninja install
 ```
 
 安装mongo-cxx-driver
+
 ```shell
-curl -OL https://github.com/mongodb/mongo-cxx-driver/archive/r3.6.5.tar.gz
+wget -O mongo-cxx-driver-r3.6.5.tar.gz https://github.com/mongodb/mongo-cxx-driver/archive/r3.6.5.tar.gz
+tar xzf mongo-cxx-driver-r3.6.5.tar.gz
 cd mongo-cxx-driver-r3.6.5/build/
-cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/nfs/home/liulinxing/Crane/dependencies/online/mongo-driver ..
-sudo make EP_mnmlstc_core
-make
-sudo make install
+cmake -G Ninja -DCMAKE_PREFIX_PATH=<absolute path prefix>/online/mongo-c-driver/ \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CXX_STANDARD=17 \
+  -DBUILD_SHARED_AND_STATIC_LIBS=ON \
+  -DBUILD_SHARED_LIBS_WITH_STATIC_MONGOC=ON \
+  -DCMAKE_INSTALL_PREFIX=../../../online/mongo-cxx-driver ..
+ninja install
 ```
 
 ## 6.编译程序
@@ -323,7 +328,7 @@ mkdir build
 cd build/
 
 cmake -DCMAKE_CXX_STANDARD=17 -G Ninja ..
-cmake --build .
+ninja
 ```
 
 ## 7.Pam模块

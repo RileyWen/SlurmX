@@ -135,7 +135,7 @@ class MongodbClient {
                                   SlurmxGrpc::ModifyEntityRequest::Type type);
 
  private:
-  const std::string m_db_name{"slurmx_db"};
+  const std::string m_db_name{"Crane_db"};
   const std::string m_account_collection_name{"acct_table"};
   const std::string m_user_collection_name{"user_table"};
   const std::string m_qos_collection_name{"qos_table"};
