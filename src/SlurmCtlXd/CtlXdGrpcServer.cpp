@@ -79,16 +79,18 @@ grpc::Status SlurmCtlXdServiceImpl::SubmitBatchTask(
 
   task->task_to_ctlxd = request->task();
 
-  std::list<std::string> allowed_partition =
-      g_mongodb_client->GetUserAllowedPartition(getpwuid(task->uid)->pw_name);
-  auto it = std::find(allowed_partition.begin(), allowed_partition.end(),
-                      task->partition_name);
-  if (it == allowed_partition.end()) {
-    response->set_ok(false);
-    response->set_reason(fmt::format(
-        "The user:{} don't have access to submit task in partition:{}",
-        task->uid, task->partition_name));
-    return grpc::Status::OK;
+  if (task->uid) {
+    std::list<std::string> allowed_partition =
+        g_mongodb_client->GetUserAllowedPartition(getpwuid(task->uid)->pw_name);
+    auto it = std::find(allowed_partition.begin(), allowed_partition.end(),
+                        task->partition_name);
+    if (it == allowed_partition.end()) {
+      response->set_ok(false);
+      response->set_reason(fmt::format(
+          "The user:{} don't have access to submit task in partition:{}",
+          task->uid, task->partition_name));
+      return grpc::Status::OK;
+    }
   }
 
   uint32_t task_id;
@@ -233,6 +235,63 @@ grpc::Status SlurmCtlXdServiceImpl::QueryJobsInPartition(
       partition_id, QueryBriefTaskMetaFieldControl{true, true, true, true},
       response);
 
+  return grpc::Status::OK;
+}
+
+grpc::Status SlurmCtlXdServiceImpl::QueryJobsInfo(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryJobsInfoRequest *request,
+    SlurmxGrpc::QueryJobsInfoReply *response) {
+  std::list<TaskInCtlXd> task_list;
+  g_db_client->FetchJobRecordsWithStates(
+      &task_list,
+      {SlurmxGrpc::Pending, SlurmxGrpc::Running, SlurmxGrpc::Finished});
+
+  if (request->find_all()) {
+    auto *task_info_list = response->mutable_task_info_list();
+
+    for (auto &&task : task_list) {
+      if (task.status == SlurmxGrpc::Finished &&
+          absl::ToInt64Seconds(absl::Now() - task.end_time) > 300)
+        continue;
+      auto *task_it = task_info_list->Add();
+
+      task_it->mutable_submit_info()->CopyFrom(task.task_to_ctlxd);
+      task_it->set_task_id(task.task_id);
+      task_it->set_gid(task.gid);
+      task_it->set_account(task.account);
+      task_it->set_status(task.status);
+      task_it->set_node_list(task.allocated_nodes_regex);
+
+      task_it->mutable_start_time()->CopyFrom(
+          google::protobuf::util::TimeUtil::SecondsToTimestamp(
+              ToUnixSeconds(task.start_time)));
+      task_it->mutable_end_time()->CopyFrom(
+          google::protobuf::util::TimeUtil::SecondsToTimestamp(
+              ToUnixSeconds(task.end_time)));
+    }
+  } else {
+    auto *task_info_list = response->mutable_task_info_list();
+
+    for (auto &&task : task_list) {
+      if (task.task_id == request->job_id()) {
+        auto *task_it = task_info_list->Add();
+        task_it->mutable_submit_info()->CopyFrom(task.task_to_ctlxd);
+        task_it->set_task_id(task.task_id);
+        task_it->set_gid(task.gid);
+        task_it->set_account(task.account);
+        task_it->set_status(task.status);
+        task_it->set_node_list(task.allocated_nodes_regex);
+
+        task_it->mutable_start_time()->CopyFrom(
+            google::protobuf::util::TimeUtil::SecondsToTimestamp(
+                ToUnixSeconds(task.start_time)));
+        task_it->mutable_end_time()->CopyFrom(
+            google::protobuf::util::TimeUtil::SecondsToTimestamp(
+                ToUnixSeconds(task.end_time)));
+      }
+    }
+  }
   return grpc::Status::OK;
 }
 

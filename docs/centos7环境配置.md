@@ -76,12 +76,12 @@ wget https://github.com/Kitware/CMake/releases/download/v3.21.3/cmake-3.21.3.tar
 解压编译安装
 ```shell
 unzip ninja-linux.zip
-cp ninja /usr/bin/
+cp ninja /usr/local/bin/
 
 yum install openssl-devel
 
 tar -zxvf cmake-3.21.3.tar.gz
-cd cmake-3.12.4
+cd cmake-3.21.3
 ./bootstrap
 gmake
 gmake install
@@ -205,7 +205,7 @@ exit;
 systemctl restart mariadb
 ```
 
-## 4.安装mongobd
+## 4.安装mongodb
 
 ```shell
 # 下载并解压安装包

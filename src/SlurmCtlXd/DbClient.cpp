@@ -208,12 +208,12 @@ bool MariadbClient::FetchJobRecordsWithStates(
   uint32_t num_fields = mysql_num_fields(result);
 
   MYSQL_ROW row;
-  // 0  job_db_inx     mod_time       deleted       account     cpus_req
-  // 5  mem_req        job_name       env           id_job      id_user
-  // 10 id_group       nodelist       nodes_alloc   node_inx    partition_name
-  // 15 priority       time_submit    time_eligible time_start  time_end
-  // 20 time_suspended script         state         timelimit   work_dir
-  // 25 submit_line    task_to_ctlxd
+  // 0  job_db_inx    mod_time       deleted       account     cpus_req
+  // 5  mem_req       job_name       env           id_job      id_user
+  // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
+  // 15 priority      time_eligible  time_start    time_end    time_suspended
+  // 20 script        state          timelimit     time_submit work_dir
+  // 25 submit_line   task_to_ctlxd
 
   while ((row = mysql_fetch_row(result))) {
     size_t* lengths = mysql_fetch_lengths(result);
@@ -230,13 +230,16 @@ bool MariadbClient::FetchJobRecordsWithStates(
     task.task_id = std::strtoul(row[8], nullptr, 10);
     task.uid = std::strtoul(row[9], nullptr, 10);
     task.gid = std::strtoul(row[10], nullptr, 10);
+    if (row[11]) task.allocated_nodes_regex = row[11];
     task.partition_name = row[14];
+    task.start_time = absl::FromUnixSeconds(std::strtol(row[17], nullptr, 10));
+    task.end_time = absl::FromUnixSeconds(std::strtol(row[18], nullptr, 10));
 
     task.meta = CtlXd::BatchMetaInTask{};
     auto& batch_meta = std::get<CtlXd::BatchMetaInTask>(task.meta);
-    batch_meta.sh_script = row[21];
-    task.status = SlurmxGrpc::Pending;
-    task.time_limit = absl::Seconds(std::strtol(row[23], nullptr, 10));
+    batch_meta.sh_script = row[20];
+    task.status = SlurmxGrpc::TaskStatus(std::stoi(row[21]));
+    task.time_limit = absl::Seconds(std::strtol(row[22], nullptr, 10));
     task.cwd = row[24];
 
     if (row[25]) task.cmd_line = row[25];
@@ -311,9 +314,10 @@ MongodbClient::~MongodbClient() {
 bool MongodbClient::Connect() {
 #warning "Do not hardcode port and db name!"
   // default port 27017
-  mongocxx::uri uri{fmt::format("mongodb://{}:{}@localhost:27017/Crane_db",
-                                g_config.MongodbUser,
-                                g_config.MongodbPassword)};
+  mongocxx::uri uri{fmt::format("mongodb://{}:{}@{}:{}/{}",
+                                g_config.MongodbUser, g_config.MongodbPassword,
+                                g_config.MongodbHost, g_config.MongodbPort,
+                                m_db_name)};
   m_dbInstance = new (std::nothrow) mongocxx::instance();
   m_client = new (std::nothrow) mongocxx::client(uri);
 
@@ -326,6 +330,12 @@ bool MongodbClient::Connect() {
 
 void MongodbClient::Init() {
   m_database = new mongocxx::database(m_client->database(m_db_name));
+
+  if (!m_database->has_collection(m_job_collection_name)) {
+    m_database->create_collection(m_job_collection_name);
+  }
+  m_job_collection =
+      new mongocxx::collection(m_database->collection(m_job_collection_name));
 
   if (!m_database->has_collection(m_account_collection_name)) {
     m_database->create_collection(m_account_collection_name);
@@ -345,10 +355,182 @@ void MongodbClient::Init() {
   m_qos_collection =
       new mongocxx::collection(m_database->collection(m_qos_collection_name));
 
-  if (!m_account_collection || !m_user_collection || !m_qos_collection) {
+  if (!m_account_collection || !m_user_collection || !m_qos_collection ||
+      !m_job_collection) {
     SLURMX_ERROR("Mongodb Error: can't get instance of slurmx_db tables");
     std::exit(1);
   }
+}
+
+bool MongodbClient::GetMaxExistingJobId(uint64_t* job_id) {
+  mongocxx::cursor cursor = m_job_collection->find({});
+  *job_id = 0;
+  if (cursor.begin() == cursor.end()) return false;
+  for (auto view : cursor) {
+    int id = view["id_job"].get_int32().value;
+    if (id > *job_id) *job_id = id;
+  }
+  return true;
+}
+
+bool MongodbClient::GetLastInsertId(uint64_t* id) {
+  *id = m_job_collection->count_documents({});
+  return true;
+}
+
+bool MongodbClient::InsertJob(
+    uint64_t* job_db_inx, uint64_t mod_timestamp, const std::string& account,
+    uint32_t cpu, uint64_t memory_bytes, const std::string& job_name,
+    const std::string& env, uint32_t id_job, uid_t id_user, uid_t id_group,
+    const std::string& nodelist, uint32_t nodes_alloc,
+    const std::string& node_inx, const std::string& partition_name,
+    uint32_t priority, uint64_t submit_timestamp, const std::string& script,
+    uint32_t state, uint32_t timelimit, const std::string& work_dir,
+    const SlurmxGrpc::TaskToCtlXd& task_to_ctlxd) {
+  uint64_t last_id;
+  if (!GetLastInsertId(&last_id)) {
+    PrintError_("Failed to GetLastInsertId");
+    return false;
+  }
+  *job_db_inx = last_id + 1;
+
+  //  size_t blob_size = task_to_ctlxd.ByteSizeLong();
+  //  constexpr size_t blob_max_size = 8192;
+  //
+  //  static char blob[blob_max_size];
+  //  static char query[blob_max_size * 2];
+  //  task_to_ctlxd.SerializeToArray(blob, blob_max_size);
+
+  auto builder = bsoncxx::builder::stream::document{};
+  bsoncxx::document::value doc_value =
+      builder << "job_db_inx" << std::to_string(last_id + 1) << "mod_time"
+              << std::to_string(mod_timestamp) << "deleted" << false
+              << "account" << account << "cpus_req" << std::to_string(cpu)
+              << "mem_req" << std::to_string(memory_bytes) << "job_name"
+              << job_name << "env" << env << "id_job" << std::to_string(id_job)
+              << "id_user" << std::to_string(id_user) << "id_group"
+              << std::to_string(id_group) << "nodelist" << nodelist
+              << "nodes_alloc" << std::to_string(nodes_alloc) << "node_inx"
+              << node_inx << "partition_name" << partition_name << "priority"
+              << std::to_string(priority) << "time_eligible" << 0
+              << "time_start" << 0 << "time_end" << 0 << "time_suspended" << 0
+              << "script" << script << "state" << std::to_string(state)
+              << "timelimit" << std::to_string(timelimit) << "time_submit"
+              << std::to_string(submit_timestamp) << "work_dir" << work_dir
+              << bsoncxx::builder::stream::finalize;
+
+  if (m_dbInstance && m_client) {
+    stdx::optional<result::insert_one> ret;
+    ret = m_job_collection->insert_one(doc_value.view());
+
+    if (ret == stdx::nullopt) {
+      PrintError_("Failed to insert job record");
+      return false;
+    }
+  } else {
+    PrintError_("Database init failed");
+    return false;
+  }
+  return true;
+}
+
+bool MongodbClient::FetchJobRecordsWithStates(
+    std::list<CtlXd::TaskInCtlXd>* task_list,
+    const std::list<SlurmxGrpc::TaskStatus>& states) {
+  auto array_context = document{} << "state"
+                                  << bsoncxx::builder::stream::open_array;
+
+  for (auto state : states) {
+    array_context << state;
+  }
+  bsoncxx::document::value doc_value = array_context
+                                       << bsoncxx::builder::stream::close_array
+                                       << bsoncxx::builder::stream::finalize;
+
+  mongocxx::cursor cursor = m_job_collection->find({doc_value.view()});
+
+  // 0  job_db_inx    mod_time       deleted       account     cpus_req
+  // 5  mem_req       job_name       env           id_job      id_user
+  // 10 id_group      nodelist       nodes_alloc   node_inx    partition_name
+  // 15 priority      time_eligible  time_start    time_end    time_suspended
+  // 20 script        state          timelimit     time_submit work_dir
+  // 25 submit_line   task_to_ctlxd
+
+  for (auto view : cursor) {
+    CtlXd::TaskInCtlXd task;
+    task.job_db_inx =
+        std::stoi(std::string(view["job_db_inx"].get_utf8().value));
+    task.resources.allocatable_resource.cpu_count =
+        std::stoi(std::string(view["cpus_req"].get_utf8().value));
+
+    task.resources.allocatable_resource.memory_bytes =
+        task.resources.allocatable_resource.memory_sw_bytes =
+            std::stoi(std::string(view["mem_req"].get_utf8().value));
+    task.name = view["job_name"].get_utf8().value;
+    task.env = view["env"].get_utf8().value;
+    task.task_id = std::stoi(std::string(view["id_job"].get_utf8().value));
+    task.uid = std::stoi(std::string(view["id_user"].get_utf8().value));
+    task.gid = std::stoi(std::string(view["id_group"].get_utf8().value));
+    task.partition_name = view["partition_name"].get_utf8().value;
+    task.start_time = absl::FromUnixSeconds(
+        std::stoi(std::string(view["time_start"].get_utf8().value)));
+    task.end_time = absl::FromUnixSeconds(
+        std::stoi(std::string(view["time_end"].get_utf8().value)));
+
+    task.meta = CtlXd::BatchMetaInTask{};
+    auto& batch_meta = std::get<CtlXd::BatchMetaInTask>(task.meta);
+    batch_meta.sh_script = view["script"].get_utf8().value;
+    task.status = SlurmxGrpc::TaskStatus(
+        std::stoi(std::string(view["state"].get_utf8().value)));
+    task.time_limit = absl::Seconds(
+        std::stoi(std::string(view["timelimit"].get_utf8().value)));
+    task.cwd = view["work_dir"].get_utf8().value;
+    task.cmd_line = view["submit_line"].get_utf8().value;
+
+    task_list->emplace_back(std::move(task));
+  }
+
+  return true;
+}
+
+bool MongodbClient::UpdateJobRecordField(uint64_t job_db_inx,
+                                         const std::string& field_name,
+                                         const std::string& val) {
+  uint64_t timestamp = ToUnixSeconds(absl::Now());
+
+  bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+      m_job_collection->update_one(
+          document{} << "job_db_inx" << std::to_string(job_db_inx)
+                     << bsoncxx::builder::stream::finalize,
+          document{} << "set" << bsoncxx::builder::stream::open_document
+                     << "mod_time" << std::to_string(timestamp) << field_name
+                     << val << bsoncxx::builder::stream::close_document
+                     << bsoncxx::builder::stream::finalize);
+  return true;
+}
+
+bool MongodbClient::UpdateJobRecordFields(
+    uint64_t job_db_inx, const std::list<std::string>& field_names,
+    const std::list<std::string>& values) {
+  SLURMX_ASSERT(field_names.size() == values.size() && !field_names.empty());
+
+  auto array_context = document{} << "set"
+                                  << bsoncxx::builder::stream::open_array;
+
+  for (auto it_k = field_names.begin(), it_v = values.begin();
+       it_k != field_names.end() && it_v != values.end(); ++it_k, ++it_v) {
+    array_context << *it_k << *it_v;
+  }
+
+  bsoncxx::document::value doc_value = array_context
+                                       << bsoncxx::builder::stream::close_array
+                                       << bsoncxx::builder::stream::finalize;
+  bsoncxx::stdx::optional<mongocxx::result::update> update_result =
+      m_job_collection->update_one(
+          document{} << "job_db_inx" << std::to_string(job_db_inx)
+                     << bsoncxx::builder::stream::finalize,
+          doc_value.view());
+  return true;
 }
 
 MongodbClient::MongodbResult MongodbClient::AddUser(
@@ -897,7 +1079,7 @@ std::list<std::string> MongodbClient::GetUserAllowedPartition(
       m_user_collection->find_one(
           document{} << "name" << name << bsoncxx::builder::stream::finalize);
   std::list<std::string> allowed_partition;
-  if (result) {
+  if (result && !result->view()["deleted"].get_bool()) {
     bsoncxx::document::view user_view = result->view();
     for (auto&& partition : user_view["allowed_partition"].get_array().value) {
       allowed_partition.emplace_back(partition.get_utf8().value);

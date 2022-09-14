@@ -71,6 +71,10 @@ class SlurmCtlXdServiceImpl final : public SlurmxGrpc::SlurmCtlXd::Service {
       const SlurmxGrpc::QueryJobsInPartitionRequest *request,
       SlurmxGrpc::QueryJobsInPartitionReply *response) override;
 
+  grpc::Status QueryJobsInfo(grpc::ServerContext *context,
+                             const SlurmxGrpc::QueryJobsInfoRequest *request,
+                             SlurmxGrpc::QueryJobsInfoReply *response) override;
+
   grpc::Status QueryNodeInfo(grpc::ServerContext *context,
                              const SlurmxGrpc::QueryNodeInfoRequest *request,
                              SlurmxGrpc::QueryNodeInfoReply *response) override;

@@ -106,6 +106,19 @@ message InteractiveTaskAdditionalMeta{
   bytes resource_uuid = 1;
 }
 
+message TaskInfo {
+  TaskToCtlXd submit_info = 1;
+  uint32 task_id = 2;
+  uint32 gid = 3;
+  //  uint32 priority = 4;
+  string account = 5;
+  TaskStatus status = 6;
+  string node_list = 7;
+
+  google.protobuf.Timestamp start_time = 8;
+  google.protobuf.Timestamp end_time = 9;
+}
+
 message PartitionInfo {
   enum PartitionState {
     UP = 0;

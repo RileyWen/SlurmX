@@ -289,6 +289,16 @@ int main(int argc, char** argv) {
       else
         std::exit(1);
 
+      if (config["MongodbHost"])
+        g_config.MongodbHost = config["MongodbHost"].as<std::string>();
+      else
+        std::exit(1);
+
+      if (config["MongodbPort"])
+        g_config.MongodbPort = config["MongodbPort"].as<std::string>();
+      else
+        std::exit(1);
+
       if (config["MongodbUser"])
         g_config.MongodbUser = config["MongodbUser"].as<std::string>();
       else
