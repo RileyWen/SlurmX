@@ -10,7 +10,7 @@ target_link_libraries(craned_test
         spdlog::spdlog
         libevent::core
         libevent::pthreads
-        cxxopts::cxxopts
+        cxxopts
         bs_thread_pool
 
         Threads::Threads
@@ -18,7 +18,7 @@ target_link_libraries(craned_test
         Utility_cgroup
         Utility_PublicHeader
         Utility_AnonymousPipe
-        proto
+        crane_proto_lib
 
         test_proto
         shared_test_impl_lib

@@ -19,7 +19,7 @@ target_link_libraries(craned
         Utility_cgroup
         Utility_PublicHeader
 
-        proto
+        crane_proto_lib
         Boost::boost
         Boost::filesystem
 
@@ -28,7 +28,7 @@ target_link_libraries(craned
 
         bs_thread_pool
 
-        cxxopts::cxxopts
+        cxxopts
         Threads::Threads
         nlohmann_json::nlohmann_json
 

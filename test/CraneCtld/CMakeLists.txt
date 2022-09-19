@@ -48,7 +48,7 @@ target_link_libraries(cranectld_test
         concurrentqueue
         Threads::Threads
         libevent::core
-        cxxopts::cxxopts
+        cxxopts
         Boost::boost
         Boost::thread
         Boost::fiber
@@ -61,7 +61,7 @@ target_link_libraries(cranectld_test
         Utility_cgroup
         Utility_PublicHeader
         Utility_AnonymousPipe
-        proto
+        crane_proto_lib
 
         test_proto
         shared_test_impl_lib

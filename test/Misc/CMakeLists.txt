@@ -25,7 +25,7 @@ target_link_libraries(misc_test
         libevent::core
         libevent::pthreads
 
-        PkgConfig::libuv-static
+        uv::uv-static
 
         Threads::Threads
 

@@ -33,7 +33,30 @@ if (${FORCE_COLORED_OUTPUT})
     endif ()
 endif ()
 
+# The following two variables are used in dependency/cmake files.
+set(DEPENDENCIES_PRE_INSTALLED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/pre_installed)
+set(DEPENDENCIES_ONLINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/online)
+
 project(Crane)
+
+find_package(Threads REQUIRED)
+
+# Some content are downloaded and built inside cmake folder.
+# This line must be place before any find_package() command.
+# Independently built projects are installed to ${DEPENDENCIES_ONLINE_DIR}
+#
+# Since find_package needs to be in the top scope, we append the paths of installed
+# projects at top-level CMakeLists.txt
+add_subdirectory(dependencies/cmake)
+
+list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/mongo-c-driver")
+list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/mongo-cxx-driver")
+find_package(mongocxx REQUIRED)
+
+# Link libevent as a static lib
+set(LIBEVENT_STATIC_LINK ON)
+list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/libevent")
+find_package(Libevent REQUIRED)
 
 # Notify CMake that we have module files to find packages/libs.
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModule/")
@@ -46,94 +69,32 @@ if (NOT PAM_FOUND)
 endif ()
 
 # Find third-party libraries
-set(DEPENDENCIES_PRE_INSTALLED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/pre_installed)
-set(DEPENDENCIES_ONLINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/online)
-
-find_package(Threads REQUIRED)
-find_package(fmt 7.1.3 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/fmt)
-
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost 1.67 REQUIRED COMPONENTS thread fiber system filesystem)
 add_definitions(-DBoost_MINOR_VERSION=${Boost_MINOR_VERSION})
 
-find_package(GTest CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/google-test)
-
-find_package(spdlog 1.8.2 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/spdlog)
-add_definitions(-DSPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_TRACE)
-
-# Link libevent as a static lib
-set(LIBEVENT_STATIC_LINK TRUE)
-find_package(Libevent REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/libevent)
-
-find_package(cxxopts 2.2.0 REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/cxxopts)
-
-find_package(absl CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/abseil)
-find_package(Protobuf CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/grpc)
-find_package(gRPC CONFIG REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/grpc)
-get_target_property(GRPC_CPP_PLUGIN_LOCATION gRPC::grpc_cpp_plugin LOCATION)
+# Needed by grpc
+set(_PROTOBUF_LIBPROTOBUF libprotobuf)
+set(_REFLECTION grpc++_reflection)
+set(_PROTOBUF_PROTOC $<TARGET_FILE:protoc>)
+set(_GRPC_GRPCPP grpc++)
+set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:grpc_cpp_plugin>)
 
 find_package(PkgConfig REQUIRED)
-
 pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
-
-list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/libuv")
-pkg_check_modules(libuv-static IMPORTED_TARGET libuv-static>=1.40.0)
-
-list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/mongo-c-driver")
-list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/mongo-cxx-driver")
-
-find_package(mongocxx REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/mongo-cxx-driver)
 
 # concurrent queue has no cmake config files. Add it manually as a header-only library.
 add_library(concurrentqueue INTERFACE)
 target_include_directories(concurrentqueue INTERFACE ${DEPENDENCIES_PRE_INSTALLED_DIR}/concurrentqueue/include)
 
-
-# Enable SubDirList macro
-include(${CMAKE_SOURCE_DIR}/CMakeModule/CMakeMacros.cmake)
-
-add_subdirectory(dependencies/cmake)
+# Proto
+add_subdirectory(protos)
 
 # Source Code
 add_subdirectory(src)
 
 # Tests
 add_subdirectory(test)
-
-# Generate proto files
-add_library(proto protos/PublicDefs.proto protos/Crane.proto protos/CraneSubprocess.proto)
-target_link_libraries(proto
-        protobuf::libprotobuf
-        gRPC::grpc
-        gRPC::grpc++)
-
-set(GENERATED_FILE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/generated)
-file(MAKE_DIRECTORY ${GENERATED_FILE_PATH})
-
-target_include_directories(proto PUBLIC ${GENERATED_FILE_PATH})
-set_property(DIRECTORY PROPERTY ADDITIONAL_MAKE_CLEAN_FILES
-        "${CMAKE_CURRENT_SOURCE_DIR}/generated/*")
-
-# This generates the proto part of .proto file
-protobuf_generate(
-        TARGET proto
-        LANGUAGE cpp
-        PROTOC_OUT_DIR ${GENERATED_FILE_PATH}/protos
-        IMPORT_DIRS protos
-)
-
-# This generates the grpc part of .proto file
-protobuf_generate(
-        TARGET proto
-        LANGUAGE grpc
-        PROTOC_OUT_DIR ${GENERATED_FILE_PATH}/protos
-        PLUGIN "protoc-gen-grpc=${GRPC_CPP_PLUGIN_LOCATION}"
-        GENERATE_EXTENSIONS .grpc.pb.h .grpc.pb.cc
-        IMPORT_DIRS protos
-)
-
-target_link_libraries(proto absl::base absl::synchronization)
-set_property(TARGET proto PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 # install script
 install(TARGETS cranectld craned

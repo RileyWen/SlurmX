@@ -11,7 +11,7 @@ target_include_directories(pam_crane PUBLIC ${PAM_INCLUDE_DIR})
 
 target_link_libraries(pam_crane PUBLIC
         ${PAM_LIBRARIES}
-        proto
+        crane_proto_lib
         Boost::boost
         spdlog::spdlog
         Utility_PublicHeader

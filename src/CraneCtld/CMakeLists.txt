@@ -29,14 +29,14 @@ target_link_libraries(cranectld
         libevent::core
         libevent::pthreads
 
-        cxxopts::cxxopts
+        cxxopts
         Threads::Threads
 
         absl::btree
         absl::synchronization
         absl::flat_hash_map
 
-        proto
+        crane_proto_lib
 
         yaml-cpp
         mariadbclient
