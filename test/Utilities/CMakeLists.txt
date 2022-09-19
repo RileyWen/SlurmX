@@ -5,14 +5,14 @@ target_link_libraries(utility_test
         concurrentqueue
         Threads::Threads
         libevent::core
-        cxxopts::cxxopts
+        cxxopts
         absl::synchronization
 
         Utility_cgroup
         Utility_PublicHeader
         Utility_AnonymousPipe
         Utility_TimerSet
-        proto
+        crane_proto_lib
 
         test_proto
         shared_test_impl_lib

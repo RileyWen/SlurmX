@@ -304,7 +304,7 @@ Status CranedServiceImpl::SrunXStream(
       }
 
       default:
-        CRANE_ERROR("Unexpected CranedServer State: {}", state);
+        CRANE_ERROR("Unexpected CranedServer State: {}", uint(state));
         return Status::CANCELLED;
     }
   }
