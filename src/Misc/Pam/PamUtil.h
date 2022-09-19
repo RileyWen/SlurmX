@@ -8,6 +8,8 @@
 #include <cstdint>
 #include <string>
 
+bool PamGetUserName(pam_handle_t *pamh, std::string *username);
+
 void PamSendMsgToClient(pam_handle_t *pamh, const char *mesg);
 
 bool PamGetRemoteUid(pam_handle_t *pamh, const char *user_name, uid_t *uid);

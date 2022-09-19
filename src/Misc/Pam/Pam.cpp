@@ -21,19 +21,22 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
                      const char **argv) {
   int rc;
   bool ok;
-  char *user_name = nullptr;
   uid_t uid;
+  std::string username;
 
   /* Asking the application for a username */
-  rc = pam_get_item(pamh, PAM_USER, (const void **)&user_name);
-  if (user_name == nullptr || rc != PAM_SUCCESS) {
-    pam_syslog(pamh, LOG_ERR, "[SlurmX] No username in PAM_USER? Fail!");
+  ok = PamGetUserName(pamh, &username);
+  if (!ok) {
+    pam_syslog(pamh, LOG_ERR, "[SlurmX] Failed to get username");
     return PAM_SESSION_ERR;
-  } else {
-    pam_syslog(pamh, LOG_ERR, "[SlurmX] Checking user: %s", user_name);
   }
 
-  ok = PamGetRemoteUid(pamh, user_name, &uid);
+  if (username == "root") {
+    pam_syslog(pamh, LOG_ERR, "[SlurmX] Allow root to log in");
+    return PAM_SUCCESS;
+  }
+
+  ok = PamGetRemoteUid(pamh, username.c_str(), &uid);
   if (!ok) {
     return PAM_USER_UNKNOWN;
   }
@@ -90,7 +93,23 @@ int pam_sm_open_session(pam_handle_t *pamh, int flags, int argc,
   char *auth_result;
   char *task_id_str;
   char *cgroup_path_str;
+
   bool ok;
+  std::string username;
+
+  /* Asking the application for a username */
+  ok = PamGetUserName(pamh, &username);
+  if (!ok) {
+    pam_syslog(pamh, LOG_ERR, "[SlurmX] Failed to get username");
+    return PAM_SESSION_ERR;
+  }
+
+  if (username == "root") {
+    pam_syslog(
+        pamh, LOG_ERR,
+        "[SlurmX] Allow root to open a session without resource restriction");
+    return PAM_SUCCESS;
+  }
 
   pam_get_data(pamh, PAM_ITEM_AUTH_RESULT, (const void **)&auth_result);
   if (strcmp(auth_result, PAM_STR_TRUE) == 0) {

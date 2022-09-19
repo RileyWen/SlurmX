@@ -1,6 +1,8 @@
 #include "CtlXdGrpcServer.h"
 
+#include <absl/strings/str_split.h>
 #include <google/protobuf/util/time_util.h>
+#include <pwd.h>
 
 #include <csignal>
 #include <limits>
@@ -76,6 +78,20 @@ grpc::Status SlurmCtlXdServiceImpl::SubmitBatchTask(
   task->cwd = request->task().cwd();
 
   task->task_to_ctlxd = request->task();
+
+  if (task->uid) {
+    std::list<std::string> allowed_partition =
+        g_mongodb_client->GetUserAllowedPartition(getpwuid(task->uid)->pw_name);
+    auto it = std::find(allowed_partition.begin(), allowed_partition.end(),
+                        task->partition_name);
+    if (it == allowed_partition.end()) {
+      response->set_ok(false);
+      response->set_reason(fmt::format(
+          "The user:{} don't have access to submit task in partition:{}",
+          task->uid, task->partition_name));
+      return grpc::Status::OK;
+    }
+  }
 
   uint32_t task_id;
   err = g_task_scheduler->SubmitTask(std::move(task), false, &task_id);
@@ -222,6 +238,63 @@ grpc::Status SlurmCtlXdServiceImpl::QueryJobsInPartition(
   return grpc::Status::OK;
 }
 
+grpc::Status SlurmCtlXdServiceImpl::QueryJobsInfo(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryJobsInfoRequest *request,
+    SlurmxGrpc::QueryJobsInfoReply *response) {
+  std::list<TaskInCtlXd> task_list;
+  g_db_client->FetchJobRecordsWithStates(
+      &task_list,
+      {SlurmxGrpc::Pending, SlurmxGrpc::Running, SlurmxGrpc::Finished});
+
+  if (request->find_all()) {
+    auto *task_info_list = response->mutable_task_info_list();
+
+    for (auto &&task : task_list) {
+      if (task.status == SlurmxGrpc::Finished &&
+          absl::ToInt64Seconds(absl::Now() - task.end_time) > 300)
+        continue;
+      auto *task_it = task_info_list->Add();
+
+      task_it->mutable_submit_info()->CopyFrom(task.task_to_ctlxd);
+      task_it->set_task_id(task.task_id);
+      task_it->set_gid(task.gid);
+      task_it->set_account(task.account);
+      task_it->set_status(task.status);
+      task_it->set_node_list(task.allocated_nodes_regex);
+
+      task_it->mutable_start_time()->CopyFrom(
+          google::protobuf::util::TimeUtil::SecondsToTimestamp(
+              ToUnixSeconds(task.start_time)));
+      task_it->mutable_end_time()->CopyFrom(
+          google::protobuf::util::TimeUtil::SecondsToTimestamp(
+              ToUnixSeconds(task.end_time)));
+    }
+  } else {
+    auto *task_info_list = response->mutable_task_info_list();
+
+    for (auto &&task : task_list) {
+      if (task.task_id == request->job_id()) {
+        auto *task_it = task_info_list->Add();
+        task_it->mutable_submit_info()->CopyFrom(task.task_to_ctlxd);
+        task_it->set_task_id(task.task_id);
+        task_it->set_gid(task.gid);
+        task_it->set_account(task.account);
+        task_it->set_status(task.status);
+        task_it->set_node_list(task.allocated_nodes_regex);
+
+        task_it->mutable_start_time()->CopyFrom(
+            google::protobuf::util::TimeUtil::SecondsToTimestamp(
+                ToUnixSeconds(task.start_time)));
+        task_it->mutable_end_time()->CopyFrom(
+            google::protobuf::util::TimeUtil::SecondsToTimestamp(
+                ToUnixSeconds(task.end_time)));
+      }
+    }
+  }
+  return grpc::Status::OK;
+}
+
 grpc::Status SlurmCtlXdServiceImpl::QueryNodeListFromTaskId(
     grpc::ServerContext *context,
     const SlurmxGrpc::QueryNodeListFromTaskIdRequest *request,
@@ -234,6 +307,248 @@ grpc::Status SlurmCtlXdServiceImpl::QueryNodeListFromTaskId(
   } else {
     response->set_ok(false);
   }
+  return grpc::Status::OK;
+}
+
+grpc::Status SlurmCtlXdServiceImpl::AddAccount(
+    grpc::ServerContext *context, const SlurmxGrpc::AddAccountRequest *request,
+    SlurmxGrpc::AddAccountReply *response) {
+  Account account;
+  const SlurmxGrpc::AccountInfo *account_info = &request->account();
+  account.name = account_info->name();
+  account.parent_account = account_info->parent_account();
+  account.description = account_info->description();
+  account.qos = account_info->qos();
+  for (auto &p : account_info->allowed_partition()) {
+    account.allowed_partition.emplace_back(p);
+  }
+
+  MongodbClient::MongodbResult result = g_mongodb_client->AddAccount(account);
+  if (result.ok) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason(result.reason.value());
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status SlurmCtlXdServiceImpl::AddUser(
+    grpc::ServerContext *context, const SlurmxGrpc::AddUserRequest *request,
+    SlurmxGrpc::AddUserReply *response) {
+  User user;
+  const SlurmxGrpc::UserInfo *user_info = &request->user();
+  user.name = user_info->name();
+  user.uid = user_info->uid();
+  user.account = user_info->account();
+  user.admin_level = User::AdminLevel(user_info->admin_level());
+
+  MongodbClient::MongodbResult result = g_mongodb_client->AddUser(user);
+  if (result.ok) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason(result.reason.value());
+  }
+
+  return grpc::Status::OK;
+}
+
+grpc::Status SlurmCtlXdServiceImpl::ModifyEntity(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::ModifyEntityRequest *request,
+    SlurmxGrpc::ModifyEntityReply *response) {
+  MongodbClient::MongodbResult res;
+
+  if (request->NewEntity_case() == request->kNewAccount) {
+    const SlurmxGrpc::AccountInfo *new_account = &request->new_account();
+    if (!new_account->allowed_partition().empty()) {
+      std::list<std::string> partitions;
+      for (auto &p : new_account->allowed_partition()) {
+        partitions.emplace_back(p);
+      }
+      if (!g_mongodb_client->SetAccountAllowedPartition(
+              new_account->name(), partitions, request->type())) {
+        response->set_ok(false);
+        response->set_reason("can't update the allowed partitions");
+        return grpc::Status::OK;
+      }
+    }
+    Account account;
+    account.name = new_account->name();
+    account.parent_account = new_account->parent_account();
+    account.description = new_account->description();
+    account.qos = new_account->qos();
+    res = g_mongodb_client->SetAccount(account);
+    if (!res.ok) {
+      response->set_ok(false);
+      response->set_reason(res.reason.value());
+      return grpc::Status::OK;
+    }
+  } else {
+    const SlurmxGrpc::UserInfo *new_user = &request->new_user();
+    if (!new_user->allowed_partition().empty()) {
+      std::list<std::string> partitions;
+      for (auto &p : new_user->allowed_partition()) {
+        partitions.emplace_back(p);
+      }
+      if (!g_mongodb_client->SetUserAllowedPartition(
+              new_user->name(), partitions, request->type())) {
+        response->set_ok(false);
+        response->set_reason("can't update the allowed partitions");
+        return grpc::Status::OK;
+      }
+    }
+    User user;
+    user.name = new_user->name();
+    user.uid = new_user->uid();
+    user.account = new_user->account();
+    user.admin_level = User::AdminLevel(new_user->admin_level());
+    res = g_mongodb_client->SetUser(user);
+    if (!res.ok) {
+      response->set_ok(false);
+      response->set_reason(res.reason.value());
+      return grpc::Status::OK;
+    }
+  }
+  response->set_ok(true);
+  return grpc::Status::OK;
+}
+
+grpc::Status SlurmCtlXdServiceImpl::QueryEntityInfo(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryEntityInfoRequest *request,
+    SlurmxGrpc::QueryEntityInfoReply *response) {
+  switch (request->entity_type()) {
+    case SlurmxGrpc::Account:
+      if (request->name() == "All") {
+        std::list<Account> account_list;
+        g_mongodb_client->GetAllAccountInfo(account_list);
+
+        auto *list = response->mutable_account_list();
+        for (auto &&account : account_list) {
+          if (account.deleted) {
+            continue;
+          }
+          auto *account_info = list->Add();
+          account_info->set_name(account.name);
+          account_info->set_description(account.description);
+          auto *user_list = account_info->mutable_users();
+          for (auto &&user : account.users) {
+            user_list->Add()->assign(user);
+          }
+          auto *child_list = account_info->mutable_child_account();
+          for (auto &&child : account.child_account) {
+            child_list->Add()->assign(child);
+          }
+          account_info->set_parent_account(account.parent_account);
+          auto *partition_list = account_info->mutable_allowed_partition();
+          for (auto &&partition : account.allowed_partition) {
+            partition_list->Add()->assign(partition);
+          }
+          account_info->set_qos(account.qos);
+        }
+        response->set_ok(true);
+      } else {
+        Account account;
+        if (g_mongodb_client->GetAccountInfo(request->name(), &account)) {
+          auto *account_info = response->mutable_account_list()->Add();
+          account_info->set_name(account.name);
+          account_info->set_description(account.description);
+          auto *user_list = account_info->mutable_users();
+          for (auto &&user : account.users) {
+            user_list->Add()->assign(user);
+          }
+          auto *child_list = account_info->mutable_child_account();
+          for (auto &&child : account.child_account) {
+            child_list->Add()->assign(child);
+          }
+          account_info->set_parent_account(account.parent_account);
+          auto *partition_list = account_info->mutable_allowed_partition();
+          for (auto &&partition : account.allowed_partition) {
+            partition_list->Add()->assign(partition);
+          }
+          account_info->set_qos(account.qos);
+          response->set_ok(true);
+        } else {
+          response->set_ok(false);
+        }
+      }
+      break;
+    case SlurmxGrpc::User:
+      if (request->name() == "All") {
+        std::list<User> user_list;
+        g_mongodb_client->GetAllUserInfo(user_list);
+
+        auto *list = response->mutable_user_list();
+        for (auto &&user : user_list) {
+          if (user.deleted) {
+            continue;
+          }
+          auto *user_info = list->Add();
+          user_info->set_name(user.name);
+          user_info->set_uid(user.uid);
+          user_info->set_account(user.account);
+          user_info->set_admin_level(
+              (SlurmxGrpc::UserInfo_AdminLevel)user.admin_level);
+          auto *partition_list = user_info->mutable_allowed_partition();
+          for (auto &&partition : user.allowed_partition) {
+            partition_list->Add()->assign(partition);
+          }
+        }
+        response->set_ok(true);
+      } else {
+        User user;
+        if (g_mongodb_client->GetUserInfo(request->name(), &user)) {
+          auto *user_info = response->mutable_user_list()->Add();
+          user_info->set_name(user.name);
+          user_info->set_uid(user.uid);
+          user_info->set_account(user.account);
+          user_info->set_admin_level(
+              (SlurmxGrpc::UserInfo_AdminLevel)user.admin_level);
+          auto *partition_list = user_info->mutable_allowed_partition();
+          for (auto &&partition : user.allowed_partition) {
+            partition_list->Add()->assign(partition);
+          }
+          response->set_ok(true);
+        } else {
+          response->set_ok(false);
+        }
+      }
+      break;
+    case SlurmxGrpc::Qos:
+      break;
+    default:
+      break;
+  }
+  return grpc::Status::OK;
+}
+
+grpc::Status SlurmCtlXdServiceImpl::DeleteEntity(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::DeleteEntityRequest *request,
+    SlurmxGrpc::DeleteEntityReply *response) {
+  MongodbClient::MongodbResult res = g_mongodb_client->DeleteEntity(
+      (MongodbClient::EntityType)request->entity_type(), request->name());
+  if (res.ok) {
+    response->set_ok(true);
+  } else {
+    response->set_ok(false);
+    response->set_reason(res.reason.value());
+  }
+  return grpc::Status::OK;
+}
+
+grpc::Status SlurmCtlXdServiceImpl::QueryClusterInfo(
+    grpc::ServerContext *context,
+    const SlurmxGrpc::QueryClusterInfoRequest *request,
+    SlurmxGrpc::QueryClusterInfoReply *response) {
+  SlurmxGrpc::QueryClusterInfoReply *reply;
+  reply = g_meta_container->QueryClusterInfo();
+  response->Swap(reply);
+  delete reply;
+
   return grpc::Status::OK;
 }
 

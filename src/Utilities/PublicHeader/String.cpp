@@ -106,7 +106,7 @@ bool ParseHostList(const std::string &host_str,
 
   for (auto &&str : str_list) {
     std::string str_s{absl::StripAsciiWhitespace(str)};
-    std::regex regex(R"(.*\[(.*)\]$)");
+    std::regex regex(R"(.*\[(.*)\](\..*)*$)");
     if (!std::regex_match(str_s, regex)) {
       hostlist->emplace_back(str_s);
     } else {

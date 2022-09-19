@@ -15,6 +15,19 @@
 #include "protos/slurmx.grpc.pb.h"
 #include "slurmx/PublicHeader.h"
 
+bool PamGetUserName(pam_handle_t *pamh, std::string *username) {
+  int rc;
+  char *p_username = nullptr;
+  rc = pam_get_item(pamh, PAM_USER, (const void **)&p_username);
+  if (p_username == nullptr || rc != PAM_SUCCESS) {
+    pam_syslog(pamh, LOG_ERR, "[SlurmX] No username in PAM_USER? Fail!");
+    return false;
+  } else {
+    username->assign(p_username);
+    return true;
+  }
+}
+
 void PamSendMsgToClient(pam_handle_t *pamh, const char *mesg) {
   int rc;
   struct pam_conv *conv;

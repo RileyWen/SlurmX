@@ -425,4 +425,69 @@ XdNodeMetaContainerSimpleImpl::QueryPartitionInfo(
   return reply;
 }
 
+SlurmxGrpc::QueryClusterInfoReply*
+XdNodeMetaContainerSimpleImpl::QueryClusterInfo() {
+  LockGuard guard(mtx_);
+  auto* reply = new SlurmxGrpc::QueryClusterInfoReply;
+  auto* partition_node_list = reply->mutable_partition_node();
+
+  for (auto&& [part_name, part_meta] : partition_metas_map_) {
+    auto* part_node_info = partition_node_list->Add();
+    part_node_info->set_name(part_meta.partition_global_meta.name);
+    if (part_meta.partition_global_meta.alive_node_cnt > 0)
+      part_node_info->set_state(SlurmxGrpc::PartitionInfo_PartitionState_UP);
+    else
+      part_node_info->set_state(SlurmxGrpc::PartitionInfo_PartitionState_DOWN);
+
+    auto* common_node_state_list =
+        part_node_info->mutable_common_node_state_list();
+
+    auto* idle_node_list = common_node_state_list->Add();
+    idle_node_list->set_state("idle");
+    auto* mix_node_list = common_node_state_list->Add();
+    mix_node_list->set_state("mix");
+    auto* alloc_node_list = common_node_state_list->Add();
+    alloc_node_list->set_state("alloc");
+    auto* down_node_list = common_node_state_list->Add();
+    down_node_list->set_state("down");
+
+    std::list<std::string> idle_node_name_list, mix_node_name_list,
+        alloc_node_name_list, down_node_name_list;
+
+    for (auto&& [node_name, node_meta] : part_meta.xd_node_meta_map) {
+      auto& alloc_res_total = node_meta.res_total.allocatable_resource;
+      auto& alloc_res_in_use = node_meta.res_in_use.allocatable_resource;
+      auto& alloc_res_avail = node_meta.res_avail.allocatable_resource;
+
+      if (node_meta.alive) {
+        if (alloc_res_in_use.cpu_count == 0 &&
+            alloc_res_in_use.memory_bytes == 0) {
+          idle_node_list->set_nodes_num(idle_node_list->nodes_num() + 1);
+          idle_node_name_list.emplace_back(node_meta.static_meta.hostname);
+        } else if (alloc_res_avail.cpu_count == 0 &&
+                   alloc_res_avail.memory_bytes == 0) {
+          alloc_node_list->set_nodes_num(alloc_node_list->nodes_num() + 1);
+          alloc_node_name_list.emplace_back(node_meta.static_meta.hostname);
+        } else {
+          mix_node_list->set_nodes_num(mix_node_list->nodes_num() + 1);
+          mix_node_name_list.emplace_back(node_meta.static_meta.hostname);
+        }
+      } else {
+        down_node_list->set_nodes_num(down_node_list->nodes_num() + 1);
+        down_node_name_list.emplace_back(node_meta.static_meta.hostname);
+      }
+    }
+
+    idle_node_list->set_nodes_list(
+        util::HostNameListToStr(idle_node_name_list));
+    mix_node_list->set_nodes_list(util::HostNameListToStr(mix_node_name_list));
+    alloc_node_list->set_nodes_list(
+        util::HostNameListToStr(alloc_node_name_list));
+    down_node_list->set_nodes_list(
+        util::HostNameListToStr(down_node_name_list));
+  }
+
+  return reply;
+}
+
 }  // namespace CtlXd

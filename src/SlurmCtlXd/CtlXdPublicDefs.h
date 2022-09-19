@@ -152,6 +152,35 @@ struct TaskInCtlXd {
   std::variant<InteractiveMetaInTask, BatchMetaInTask> meta;
 };
 
+struct Qos {
+  std::string name;
+  std::string description;
+  int priority;
+  int max_jobs_per_user;
+};
+
+struct Account {
+  bool deleted;
+  std::string name;
+  std::string description;
+  std::list<std::string> users;
+  std::list<std::string> child_account;
+  std::string parent_account;
+  std::list<std::string> allowed_partition;
+  std::string qos;
+};
+
+struct User {
+  enum AdminLevel { None, Operator, Admin };
+
+  bool deleted;
+  uid_t uid;
+  std::string name;
+  std::string account;
+  std::list<std::string> allowed_partition;
+  AdminLevel admin_level;
+};
+
 struct Config {
   struct Node {
     uint32_t cpu;
@@ -189,6 +218,10 @@ struct Config {
 
   std::string DbUser;
   std::string DbPassword;
+  std::string MongodbUser;
+  std::string MongodbPassword;
+  std::string MongodbHost;
+  std::string MongodbPort;
 };
 
 }  // namespace CtlXd

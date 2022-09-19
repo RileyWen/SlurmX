@@ -80,6 +80,11 @@ pkg_check_modules(libcgroup REQUIRED IMPORTED_TARGET libcgroup>=0.41)
 list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/libuv")
 pkg_check_modules(libuv-static IMPORTED_TARGET libuv-static>=1.40.0)
 
+list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/mongo-c-driver")
+list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/mongo-cxx-driver")
+
+find_package(mongocxx REQUIRED HINTS ${DEPENDENCIES_ONLINE_DIR}/mongo-cxx-driver)
+
 # concurrent queue has no cmake config files. Add it manually as a header-only library.
 add_library(concurrentqueue INTERFACE)
 target_include_directories(concurrentqueue INTERFACE ${DEPENDENCIES_PRE_INSTALLED_DIR}/concurrentqueue/include)

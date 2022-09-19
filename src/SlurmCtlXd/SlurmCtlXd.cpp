@@ -89,6 +89,17 @@ void InitializeCtlXdGlobalVariables() {
     std::exit(1);
   }
 
+  g_mongodb_client = std::make_unique<MongodbClient>();
+  if (!g_mongodb_client) {
+    SLURMX_ERROR("Error: MongoDb client Init failed");
+    std::exit(1);
+  }
+  if (!g_mongodb_client->Connect()) {
+    SLURMX_ERROR("Error: MongoDb client connect fail");
+    std::exit(1);
+  }
+  g_mongodb_client->Init();
+
   g_meta_container = std::make_unique<XdNodeMetaContainerSimpleImpl>();
   g_meta_container->InitFromConfig(g_config);
 
@@ -275,6 +286,26 @@ int main(int argc, char** argv) {
 
       if (config["DbPassword"])
         g_config.DbPassword = config["DbPassword"].as<std::string>();
+      else
+        std::exit(1);
+
+      if (config["MongodbHost"])
+        g_config.MongodbHost = config["MongodbHost"].as<std::string>();
+      else
+        std::exit(1);
+
+      if (config["MongodbPort"])
+        g_config.MongodbPort = config["MongodbPort"].as<std::string>();
+      else
+        std::exit(1);
+
+      if (config["MongodbUser"])
+        g_config.MongodbUser = config["MongodbUser"].as<std::string>();
+      else
+        std::exit(1);
+
+      if (config["MongodbPassword"])
+        g_config.MongodbPassword = config["MongodbPassword"].as<std::string>();
       else
         std::exit(1);
 

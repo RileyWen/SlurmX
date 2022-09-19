@@ -71,6 +71,10 @@ class SlurmCtlXdServiceImpl final : public SlurmxGrpc::SlurmCtlXd::Service {
       const SlurmxGrpc::QueryJobsInPartitionRequest *request,
       SlurmxGrpc::QueryJobsInPartitionReply *response) override;
 
+  grpc::Status QueryJobsInfo(grpc::ServerContext *context,
+                             const SlurmxGrpc::QueryJobsInfoRequest *request,
+                             SlurmxGrpc::QueryJobsInfoReply *response) override;
+
   grpc::Status QueryNodeInfo(grpc::ServerContext *context,
                              const SlurmxGrpc::QueryNodeInfoRequest *request,
                              SlurmxGrpc::QueryNodeInfoReply *response) override;
@@ -79,6 +83,32 @@ class SlurmCtlXdServiceImpl final : public SlurmxGrpc::SlurmCtlXd::Service {
       grpc::ServerContext *context,
       const SlurmxGrpc::QueryPartitionInfoRequest *request,
       SlurmxGrpc::QueryPartitionInfoReply *response) override;
+
+  grpc::Status AddAccount(grpc::ServerContext *context,
+                          const SlurmxGrpc::AddAccountRequest *request,
+                          SlurmxGrpc::AddAccountReply *response) override;
+
+  grpc::Status AddUser(grpc::ServerContext *context,
+                       const SlurmxGrpc::AddUserRequest *request,
+                       SlurmxGrpc::AddUserReply *response) override;
+
+  grpc::Status ModifyEntity(grpc::ServerContext *context,
+                            const SlurmxGrpc::ModifyEntityRequest *request,
+                            SlurmxGrpc::ModifyEntityReply *response) override;
+
+  grpc::Status QueryEntityInfo(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::QueryEntityInfoRequest *request,
+      SlurmxGrpc::QueryEntityInfoReply *response) override;
+
+  grpc::Status DeleteEntity(grpc::ServerContext *context,
+                            const SlurmxGrpc::DeleteEntityRequest *request,
+                            SlurmxGrpc::DeleteEntityReply *response) override;
+
+  grpc::Status QueryClusterInfo(
+      grpc::ServerContext *context,
+      const SlurmxGrpc::QueryClusterInfoRequest *request,
+      SlurmxGrpc::QueryClusterInfoReply *response) override;
 
  private:
   CtlXdServer *m_ctlxd_server_;
