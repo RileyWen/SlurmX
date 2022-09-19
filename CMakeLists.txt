@@ -1,9 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
-project(SlurmX)
-
-set(CMAKE_CXX_STANDARD 17)
 
 #set(CMAKE_VERBOSE_MAKEFILE ON)
+set(CMAKE_CXX_STANDARD 17)
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     # Check LTO support
@@ -35,6 +33,7 @@ if (${FORCE_COLORED_OUTPUT})
     endif ()
 endif ()
 
+project(Crane)
 
 # Notify CMake that we have module files to find packages/libs.
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModule/")
@@ -102,7 +101,7 @@ add_subdirectory(src)
 add_subdirectory(test)
 
 # Generate proto files
-add_library(proto protos/PublicDefs.proto protos/slurmx.proto protos/XdSubprocess.proto)
+add_library(proto protos/PublicDefs.proto protos/Crane.proto protos/CraneSubprocess.proto)
 target_link_libraries(proto
         protobuf::libprotobuf
         gRPC::grpc
@@ -137,7 +136,7 @@ target_link_libraries(proto absl::base absl::synchronization)
 set_property(TARGET proto PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 # install script
-install(TARGETS slurmctlxd slurmxd
+install(TARGETS cranectld craned
         EXPORT ${PROJECT_NAME}Targets
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib
@@ -145,9 +144,9 @@ install(TARGETS slurmctlxd slurmxd
         PUBLIC_HEADER DESTINATION include)
 
 set(bindir ${CMAKE_INSTALL_PREFIX}/bin)
-configure_file(./etc/slurmctlxd.service.in ${PROJECT_BINARY_DIR}/etc/slurmctlxd.service)
-configure_file(./etc/slurmxd.service.in ${PROJECT_BINARY_DIR}/etc/slurmxd.service)
+configure_file(./etc/cranectld.service.in ${PROJECT_BINARY_DIR}/etc/cranectld.service)
+configure_file(./etc/craned.service.in ${PROJECT_BINARY_DIR}/etc/craned.service)
 
-install(FILES ${PROJECT_BINARY_DIR}/etc/slurmctlxd.service ${PROJECT_BINARY_DIR}/etc/slurmxd.service DESTINATION /etc/systemd/system/)
-install(FILES ./etc/config.yaml.example DESTINATION /etc/slurmx/)
-install(FILES README.md DESTINATION share/doc/slurmx/)
+install(FILES ${PROJECT_BINARY_DIR}/etc/cranectld.service ${PROJECT_BINARY_DIR}/etc/craned.service DESTINATION /etc/systemd/system/)
+install(FILES ./etc/config.yaml.example DESTINATION /etc/crane/)
+install(FILES README.md DESTINATION share/doc/crane/)

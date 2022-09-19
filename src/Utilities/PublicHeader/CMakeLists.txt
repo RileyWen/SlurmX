@@ -1,12 +1,12 @@
 add_library(Utility_PublicHeader
         String.cpp Network.cpp FdFunctions.cpp PublicHeader.cpp
-        include/slurmx/String.h
-        include/slurmx/Network.h
-        include/slurmx/FdFunctions.h
-        include/slurmx/PublicHeader.h
-        include/slurmx/BoostInterprocessBarrier.h
-        include/slurmx/Lock.h
-        include/slurmx/Pointer.h
+        include/crane/String.h
+        include/crane/Network.h
+        include/crane/FdFunctions.h
+        include/crane/PublicHeader.h
+        include/crane/BoostInterprocessBarrier.h
+        include/crane/Lock.h
+        include/crane/Pointer.h
         )
 target_include_directories(Utility_PublicHeader PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} include)
 target_link_libraries(Utility_PublicHeader PUBLIC spdlog::spdlog proto)

@@ -2,7 +2,7 @@
 
 #include <thread>
 
-#include "slurmx/PublicHeader.h"
+#include "crane/PublicHeader.h"
 
 grpc::Status GreeterServiceImpl::SayHello(
     grpc::ServerContext* context, const grpc_example::HelloRequest* request,
@@ -32,5 +32,5 @@ GreeterSyncServer::GreeterSyncServer(const std::string& server_address) {
   // Finally assemble the server.
   m_server_ = builder.BuildAndStart();
 
-  SLURMX_INFO("Server listening on {}", server_address);
+  CRANE_INFO("Server listening on {}", server_address);
 }

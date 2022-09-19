@@ -1,7 +1,7 @@
 #include <absl/strings/str_join.h>
 #include <gtest/gtest.h>
 
-#include "slurmx/String.h"
+#include "crane/String.h"
 
 TEST(String, ParseNodeList) {
   using util::ParseHostList;

@@ -8,7 +8,7 @@ add_executable(misc_test
         yaml_cpp_test.cpp
         )
 
-target_include_directories(misc_test PRIVATE ${CMAKE_SOURCE_DIR}/src/SlurmCtlXd)
+target_include_directories(misc_test PRIVATE ${CMAKE_SOURCE_DIR}/src/CraneCtld)
 
 target_link_libraries(misc_test
         GTest::gtest
@@ -30,7 +30,7 @@ target_link_libraries(misc_test
         Threads::Threads
 
         mariadbclient
-        mongo::mongocxx_shared
+        mongo::mongocxx_static
         yaml-cpp
         )
 

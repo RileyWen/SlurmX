@@ -1,10 +1,10 @@
-#include "slurmx/String.h"
+#include "crane/String.h"
 
 #include <absl/strings/strip.h>
 
 #include <queue>
 
-#include "slurmx/PublicHeader.h"
+#include "crane/PublicHeader.h"
 
 namespace util {
 
@@ -74,12 +74,12 @@ bool ParseHostList(const std::string &host_str,
       if (char_queue.empty()) {
         char_queue.push(c);
       } else {
-        SLURMX_ERROR("Illegal node name string format: duplicate brackets");
+        CRANE_ERROR("Illegal node name string format: duplicate brackets");
         return false;
       }
     } else if (c == ']') {
       if (char_queue.empty()) {
-        SLURMX_ERROR("Illegal node name string format: isolated bracket");
+        CRANE_ERROR("Illegal node name string format: isolated bracket");
         return false;
       } else {
         while (!char_queue.empty()) {

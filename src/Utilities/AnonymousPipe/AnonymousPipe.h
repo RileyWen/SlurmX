@@ -3,7 +3,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "slurmx/PublicHeader.h"
+#include "crane/PublicHeader.h"
 
 class AnonymousPipe {
  public:
@@ -11,7 +11,7 @@ class AnonymousPipe {
       : m_fd_(), m_child_end_invalid_(false), m_parent_end_invalid_(false) {
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, m_fd_) != 0) {
       m_child_end_invalid_ = m_parent_end_invalid_ = true;
-      SLURMX_ERROR("Failed to create AnonymousPipe: {}", strerror(errno));
+      CRANE_ERROR("Failed to create AnonymousPipe: {}", strerror(errno));
     }
   }
 
@@ -73,8 +73,8 @@ class AnonymousPipe {
     if (!m_parent_end_invalid_) {
       m_parent_end_invalid_ = true;
       if (close(m_fd_[0]) != 0) {
-        SLURMX_ERROR("Failed to close the parent end of AnonymousPipe: {}",
-                     strerror(errno));
+        CRANE_ERROR("Failed to close the parent end of AnonymousPipe: {}",
+                    strerror(errno));
         return false;
       }
       return true;
@@ -86,8 +86,8 @@ class AnonymousPipe {
     if (!m_child_end_invalid_) {
       m_child_end_invalid_ = true;
       if (close(m_fd_[1]) != 0) {
-        SLURMX_ERROR("Failed to close the child end of AnonymousPipe: {}",
-                     strerror(errno));
+        CRANE_ERROR("Failed to close the child end of AnonymousPipe: {}",
+                    strerror(errno));
         return false;
       } else
         return true;

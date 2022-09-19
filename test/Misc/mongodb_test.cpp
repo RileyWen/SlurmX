@@ -6,7 +6,7 @@
 #include <mongocxx/cursor.hpp>
 #include <mongocxx/instance.hpp>
 
-#include "CtlXdPublicDefs.h"
+#include "CtldPublicDefs.h"
 
 using namespace mongocxx;
 using namespace mongocxx::options;
@@ -24,18 +24,18 @@ class MongodbClient {
 
   void Init();
 
-  bool AddUser(const CtlXd::User& new_user);
-  bool AddAccount(const CtlXd::Account& new_account);
-  bool AddQos(const CtlXd::Qos& new_qos);
+  bool AddUser(const Ctld::User& new_user);
+  bool AddAccount(const Ctld::Account& new_account);
+  bool AddQos(const Ctld::Qos& new_qos);
 
   bool DeleteUser(uid_t uid);
 
-  bool GetUserInfo(uid_t uid, CtlXd::User* user);
-  bool GetAccountInfo(const std::string& name, CtlXd::Account* account);
-  bool GetQosInfo(const std::string& name, CtlXd::Qos* qos);
+  bool GetUserInfo(uid_t uid, Ctld::User* user);
+  bool GetAccountInfo(const std::string& name, Ctld::Account* account);
+  bool GetQosInfo(const std::string& name, Ctld::Qos* qos);
 
  private:
-  const std::string m_db_name{"slurmx_db"};
+  const std::string m_db_name{"crane_db"};
   const std::string m_account_collection_name{"acct_table"};
   const std::string m_user_collection_name{"user_table"};
   const std::string m_qos_collection_name{"qos_table"};
@@ -88,7 +88,7 @@ bool MongodbClient::Connect() {
   m_client = new (std::nothrow) mongocxx::client(uri);
 
   if (!m_client) {
-    SLURMX_ERROR("Mongodb error: can't connect to localhost:27017");
+    CRANE_ERROR("Mongodb error: can't connect to localhost:27017");
     return false;
   }
   return true;
@@ -116,7 +116,7 @@ void MongodbClient::Init() {
       new mongocxx::collection(m_database->collection(m_qos_collection_name));
 
   if (!m_account_collection || !m_user_collection || !m_qos_collection) {
-    SLURMX_ERROR("Mongodb Error: can't get instance of slurmx_db tables");
+    CRANE_ERROR("Mongodb Error: can't get instance of crane_db tables");
     std::exit(1);
   }
 }
@@ -207,7 +207,7 @@ std::int64_t MongodbClient::countDocument(mongocxx::collection* coll,
   return coll->count_documents(filter.view(), option);
 }
 
-bool MongodbClient::AddUser(const CtlXd::User& new_user) {
+bool MongodbClient::AddUser(const Ctld::User& new_user) {
   // Avoid duplicate insertion
   bsoncxx::stdx::optional<bsoncxx::document::value> find_result =
       m_user_collection->find_one(document{}
@@ -260,7 +260,7 @@ bool MongodbClient::AddUser(const CtlXd::User& new_user) {
   return true;
 }
 
-bool MongodbClient::AddAccount(const CtlXd::Account& new_account) {
+bool MongodbClient::AddAccount(const Ctld::Account& new_account) {
   // Avoid duplicate insertion
   bsoncxx::stdx::optional<bsoncxx::document::value> find_result =
       m_account_collection->find_one(document{}
@@ -315,7 +315,7 @@ bool MongodbClient::AddAccount(const CtlXd::Account& new_account) {
   return true;
 }
 
-bool MongodbClient::AddQos(const CtlXd::Qos& new_qos) {
+bool MongodbClient::AddQos(const Ctld::Qos& new_qos) {
   auto builder = bsoncxx::builder::stream::document{};
   bsoncxx::document::value doc_value =
       builder << "name" << new_qos.name << "description" << new_qos.description
@@ -332,7 +332,7 @@ bool MongodbClient::AddQos(const CtlXd::Qos& new_qos) {
   return true;
 }
 
-bool MongodbClient::GetUserInfo(uid_t uid, CtlXd::User* user) {
+bool MongodbClient::GetUserInfo(uid_t uid, Ctld::User* user) {
   bsoncxx::stdx::optional<bsoncxx::document::value> result =
       m_user_collection->find_one(document{}
                                   << "uid" << std::to_string(uid)
@@ -340,14 +340,13 @@ bool MongodbClient::GetUserInfo(uid_t uid, CtlXd::User* user) {
   if (result) {
     bsoncxx::document::view user_view = result->view();
     user->deleted = user_view["deleted"].get_bool();
-    user->uid = std::stoi(user_view["uid"].get_utf8().value.to_string());
-    user->name = user_view["name"].get_utf8().value.to_string();
-    user->account = user_view["account"].get_utf8().value.to_string();
+    user->uid = std::stoi(std::string(user_view["uid"].get_utf8().value));
+    user->name = user_view["name"].get_utf8().value;
+    user->account = user_view["account"].get_utf8().value;
     user->admin_level =
-        (CtlXd::User::AdminLevel)user_view["admin_level"].get_int32().value;
+        (Ctld::User::AdminLevel)user_view["admin_level"].get_int32().value;
     for (auto&& partition : user_view["allowed_partition"].get_array().value) {
-      user->allowed_partition.emplace_back(
-          partition.get_utf8().value.to_string());
+      user->allowed_partition.emplace_back(partition.get_utf8().value);
     }
     std::cout << bsoncxx::to_json(*result) << "\n";
     return true;
@@ -356,44 +355,40 @@ bool MongodbClient::GetUserInfo(uid_t uid, CtlXd::User* user) {
 }
 
 bool MongodbClient::GetAccountInfo(const std::string& name,
-                                   CtlXd::Account* account) {
+                                   Ctld::Account* account) {
   bsoncxx::stdx::optional<bsoncxx::document::value> result =
       m_account_collection->find_one(
           document{} << "name" << name << bsoncxx::builder::stream::finalize);
   if (result) {
     bsoncxx::document::view account_view = result->view();
     account->deleted = account_view["deleted"].get_bool().value;
-    account->name = account_view["name"].get_utf8().value.to_string();
-    account->description =
-        account_view["description"].get_utf8().value.to_string();
+    account->name = account_view["name"].get_utf8().value;
+    account->description = account_view["description"].get_utf8().value;
     for (auto&& user : account_view["users"].get_array().value) {
-      account->users.push_back(
-          (uid_t)std::stoi(user.get_utf8().value.to_string()));
+      account->users.emplace_back(user.get_utf8().value);
     }
     for (auto&& acct : account_view["child_account"].get_array().value) {
-      account->child_account.emplace_back(acct.get_utf8().value.to_string());
+      account->child_account.emplace_back(acct.get_utf8().value);
     }
     for (auto&& partition :
          account_view["allowed_partition"].get_array().value) {
-      account->allowed_partition.emplace_back(
-          partition.get_utf8().value.to_string());
+      account->allowed_partition.emplace_back(partition.get_utf8().value);
     }
-    account->parent_account =
-        account_view["parent_account"].get_utf8().value.to_string();
-    account->qos = account_view["qos"].get_utf8().value.to_string();
+    account->parent_account = account_view["parent_account"].get_utf8().value;
+    account->qos = account_view["qos"].get_utf8().value;
     return true;
   }
   return false;
 }
 
-bool MongodbClient::GetQosInfo(const std::string& name, CtlXd::Qos* qos) {
+bool MongodbClient::GetQosInfo(const std::string& name, Ctld::Qos* qos) {
   bsoncxx::stdx::optional<bsoncxx::document::value> result =
       m_qos_collection->find_one(
           document{} << "name" << name << bsoncxx::builder::stream::finalize);
   if (result) {
     bsoncxx::document::view user_view = result->view();
-    qos->name = user_view["name"].get_utf8().value.to_string();
-    qos->description = user_view["description"].get_utf8().value.to_string();
+    qos->name = user_view["name"].get_utf8().value;
+    qos->description = user_view["description"].get_utf8().value;
     qos->priority = user_view["priority"].get_int32();
     qos->max_jobs_per_user = user_view["max_jobs_per_user"].get_int32();
     std::cout << bsoncxx::to_json(*result) << "\n";
@@ -423,7 +418,7 @@ TEST(MongodbConnector, Simple) {
   ASSERT_TRUE(client.Connect());
   client.Init();
 
-  CtlXd::Account root_account;
+  Ctld::Account root_account;
   root_account.name = "China";
   root_account.description = "motherland";
   root_account.qos = "normal";
@@ -432,7 +427,7 @@ TEST(MongodbConnector, Simple) {
   root_account.allowed_partition.emplace_back("GPU");
   client.AddAccount(root_account);
 
-  CtlXd::Account child_account1, child_account2;
+  Ctld::Account child_account1, child_account2;
   child_account1.name = "Hunan";
   child_account1.parent_account = "China";
   child_account2.name = "CSU";
@@ -440,17 +435,17 @@ TEST(MongodbConnector, Simple) {
   client.AddAccount(child_account1);
   client.AddAccount(child_account2);
 
-  CtlXd::Account res_account;
+  Ctld::Account res_account;
   ASSERT_TRUE(client.GetAccountInfo("China", &res_account));
   ASSERT_TRUE(std::find(res_account.child_account.begin(),
                         res_account.child_account.end(), child_account1.name) !=
               res_account.child_account.end());
 
-  CtlXd::User user;
+  Ctld::User user;
   user.uid = 888;
   user.account = "CSU";
   user.name = "test";
-  user.admin_level = CtlXd::User::Admin;
+  user.admin_level = Ctld::User::Admin;
   user.allowed_partition.emplace_back("CPU");
 
   if (client.GetUserInfo(user.uid, &user))

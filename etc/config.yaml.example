@@ -1,13 +1,13 @@
 # the ip address of control machine
-SlurmCtlXdListenAddr: 0.0.0.0
+CraneCtldListenAddr: 0.0.0.0
 # the port of control machine to listen
-SlurmCtlXdListenPort: 10011
+CraneCtldListenPort: 10011
 # debug level of cranectld
-SlurmCtlXdDebugLevel: trace
+CraneCtldDebugLevel: trace
 # file path of cranectld log file
-SlurmCtlXdLogFile: /tmp/slurmctlxd/slurmctlxd.log
+CraneCtldLogFile: /tmp/cranectld/cranectld.log
 # Determines whether the cranectld is running in the background
-SlurmCtlXdForeground: true
+CraneCtldForeground: true
 
 # username and password of mysql
 DbUser: root
@@ -18,11 +18,11 @@ MongodbUser: crane
 MongodbPassword: 123456!!
 
 # debug level of craned
-SlurmXdDebugLevel: trace
+CranedDebugLevel: trace
 # file path of craned log file
-SlurmXdLogFile: /tmp/slurmxd/slurmxd.log
+CranedLogFile: /tmp/craned/craned.log
 # Determines whether the craned is running in the background
-SlurmXdForeground: true
+CranedForeground: true
 
 # list of configuration information of the computing machine
 Nodes:

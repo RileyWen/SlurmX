@@ -2,7 +2,7 @@
 #include <gtest/gtest.h>
 #include <netdb.h>
 
-#include "slurmx/Network.h"
+#include "crane/Network.h"
 
 TEST(NetworkFunc, ResolveHostName) {
   struct sockaddr_in sa; /* input */
@@ -25,7 +25,7 @@ TEST(NetworkFunc, ResolveHostName) {
 }
 
 TEST(NetworkFunc, ResolveIpv4FromHostname) {
-  using slurmx::ResolveIpv4FromHostname;
+  using crane::ResolveIpv4FromHostname;
 
   std::string hostname{"123.123.123.123"};
   std::string ipv4;
@@ -38,7 +38,7 @@ TEST(NetworkFunc, ResolveIpv4FromHostname) {
 }
 
 TEST(NetworkFunc, IsAValidIpv4Address) {
-  using slurmx::IsAValidIpv4Address;
+  using crane::IsAValidIpv4Address;
 
   std::string ip1{"1.2.3.4"};
   std::string ip2{"2.3.4.777"};

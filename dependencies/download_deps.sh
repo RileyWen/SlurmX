@@ -105,3 +105,6 @@ pushd $LIB_DIR/spdlog-1.8.5 &&
   cmake -DCMAKE_INSTALL_PREFIX=$ONLINE_DIR/spdlog -DCMAKE_POSITION_INDEPENDENT_CODE=ON "${CMAKE_DEFS[@]}" .. &&
   ninja install &&
   popd
+
+# libuv
+# cmake -DCMAKE_CXX_STANDARD=17 -G Ninja -DCMAKE_INSTALL_PREFIX=../../../online/libuv -DBUILD_TESTING=OFF ..

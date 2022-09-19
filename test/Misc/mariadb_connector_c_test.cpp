@@ -3,7 +3,7 @@
 #include <mysql.h>
 #include <spdlog/fmt/fmt.h>
 
-#include "CtlXdPublicDefs.h"
+#include "CtldPublicDefs.h"
 
 const char* mysql_user = "";
 const char* mysql_password = "";
@@ -31,13 +31,13 @@ class MariadbClient {
       return false;
     }
 
-    if (mysql_query(conn, "CREATE DATABASE IF NOT EXISTS slurmx_db;")) {
-      PrintError_("Cannot check the existence of slurmx_db");
+    if (mysql_query(conn, "CREATE DATABASE IF NOT EXISTS crane_db;")) {
+      PrintError_("Cannot check the existence of crane_db");
       return false;
     }
 
     if (mysql_select_db(conn, m_db_name.c_str()) != 0) {
-      PrintError_("Cannot select slurmx_db");
+      PrintError_("Cannot select crane_db");
       return false;
     }
 
@@ -70,7 +70,7 @@ class MariadbClient {
             "time_submit     bigint unsigned default 0 not null,"
             "work_dir        text                      not null default '',"
             "submit_line     text,"
-            "task_to_ctlxd   blob                      not null"
+            "task_to_ctld   blob                      not null"
             ");")) {
       PrintError_("Cannot check the existence of job_table");
       return false;
@@ -144,11 +144,11 @@ class MariadbClient {
                  uint64_t submit_timestamp, const std::string& script,
                  uint32_t state, uint32_t timelimit,
                  const std::string& work_dir,
-                 const SlurmxGrpc::TaskToCtlXd& task_to_ctlxd) {
-    size_t blob_size = task_to_ctlxd.ByteSizeLong();
+                 const crane::grpc::TaskToCtld& task_to_ctld) {
+    size_t blob_size = task_to_ctld.ByteSizeLong();
     char blob[1024];
     char query[2048];
-    task_to_ctlxd.SerializeToArray(blob, 1024);
+    task_to_ctld.SerializeToArray(blob, 1024);
 
     GTEST_LOG_(INFO) << "blob size: " << blob_size << "\n";
 
@@ -157,7 +157,7 @@ class MariadbClient {
         "mod_time, deleted, account, cpus_req, mem_req, job_name, env, "
         "id_job, id_user, id_group, nodelist, nodes_alloc, node_inx, "
         "partition_name, priority, time_submit, script, state, timelimit, "
-        " work_dir, task_to_ctlxd) "
+        " work_dir, task_to_ctld) "
         " VALUES({}, 0, '{}', {}, {}, '{}', '{}', {}, {}, {}, "
         "'{}', {}, '{}', '{}', {}, {}, '{}', {}, {}, "
         "'{}', '",
@@ -204,8 +204,8 @@ class MariadbClient {
   }
 
   bool FetchJobRecordsWithStates(
-      std::list<CtlXd::TaskInCtlXd>* task_list,
-      const std::list<SlurmxGrpc::TaskStatus>& states) {
+      std::list<Ctld::TaskInCtld>* task_list,
+      const std::list<crane::grpc::TaskStatus>& states) {
     std::vector<std::string> state_piece;
     for (auto state : states) {
       state_piece.emplace_back(fmt::format("state = {}", state));
@@ -235,12 +235,12 @@ class MariadbClient {
     // 10 id_group       nodelist       nodes_alloc   node_inx    partition_name
     // 15 priority       time_submit    time_eligible time_start  time_end
     // 20 time_suspended script         state         timelimit   work_dir
-    // 25 submit_line    task_to_ctlxd
+    // 25 submit_line    task_to_ctld
 
     while ((row = mysql_fetch_row(result))) {
       size_t* lengths = mysql_fetch_lengths(result);
 
-      CtlXd::TaskInCtlXd task;
+      Ctld::TaskInCtld task;
       task.resources.allocatable_resource.cpu_count =
           std::strtoul(row[4], nullptr, 10);
       task.resources.allocatable_resource.memory_bytes =
@@ -253,19 +253,19 @@ class MariadbClient {
       task.gid = std::strtoul(row[10], nullptr, 10);
       task.partition_name = row[14];
 
-      task.meta = CtlXd::BatchMetaInTask{};
-      auto& batch_meta = std::get<CtlXd::BatchMetaInTask>(task.meta);
+      task.meta = Ctld::BatchMetaInTask{};
+      auto& batch_meta = std::get<Ctld::BatchMetaInTask>(task.meta);
       batch_meta.sh_script = row[21];
-      task.status = SlurmxGrpc::Pending;
+      task.status = crane::grpc::Pending;
       task.time_limit = absl::Seconds(std::strtol(row[23], nullptr, 10));
       task.cwd = row[24];
 
       if (row[25]) task.cmd_line = row[25];
 
       GTEST_LOG_(INFO) << "row[26] length: " << lengths[26];
-      bool ok = task.task_to_ctlxd.ParseFromArray(row[26], lengths[26]);
+      bool ok = task.task_to_ctld.ParseFromArray(row[26], lengths[26]);
       GTEST_LOG_(INFO) << "Parse result: " << ok;
-      GTEST_LOG_(INFO) << "task_to_ctlxd.name " << task.task_to_ctlxd.name();
+      GTEST_LOG_(INFO) << "task_to_ctld.name " << task.task_to_ctld.name();
 
       task_list->emplace_back(std::move(task));
     }
@@ -284,7 +284,7 @@ class MariadbClient {
   }
 
   MYSQL* conn{nullptr};
-  const std::string m_db_name{"slurmx_db"};
+  const std::string m_db_name{"crane_db"};
 };
 
 TEST(MariadbConnector, Simple) {
@@ -292,15 +292,15 @@ TEST(MariadbConnector, Simple) {
   ASSERT_TRUE(client.Init());
   ASSERT_TRUE(client.Connect(mysql_user, mysql_password));
 
-  SlurmxGrpc::TaskToCtlXd task_to_ctlxd;
-  task_to_ctlxd.set_name("riley_job_2");
-  task_to_ctlxd.set_uid(1000);
-  task_to_ctlxd.set_type(SlurmxGrpc::Batch);
-  task_to_ctlxd.set_task_per_node(2);
-  task_to_ctlxd.set_cmd_line("cmd_line");
-  task_to_ctlxd.set_cwd("cwd");
-  task_to_ctlxd.mutable_time_limit()->set_seconds(360);
-  task_to_ctlxd.mutable_batch_meta()->set_sh_script("#sbatch");
+  crane::grpc::TaskToCtld task_to_ctld;
+  task_to_ctld.set_name("riley_job_2");
+  task_to_ctld.set_uid(1000);
+  task_to_ctld.set_type(crane::grpc::Batch);
+  task_to_ctld.set_ntasks_per_node(2);
+  task_to_ctld.set_cmd_line("cmd_line");
+  task_to_ctld.set_cwd("cwd");
+  task_to_ctld.mutable_time_limit()->set_seconds(360);
+  task_to_ctld.mutable_batch_meta()->set_sh_script("#sbatch");
 
   uint64_t job_id;
   uint64_t job_db_inx;
@@ -309,14 +309,14 @@ TEST(MariadbConnector, Simple) {
       &job_db_inx, 0, std::string("Riley"), 2, 20480000,
       std::string("test_job"), std::string("PATH=XXXX"), 3, 1000, 1000,
       std::string("1"), 1, std::string("1"), std::string("CPU"), 0, 12312321,
-      std::string("script"), 0, 1000, std::string("/"), task_to_ctlxd));
+      std::string("script"), 0, 1000, std::string("/"), task_to_ctld));
 
   ASSERT_TRUE(client.UpdateJobRecordField(job_db_inx, std::string("env"),
                                           std::string("PATH=ABDASDAS")));
 
-  std::list<CtlXd::TaskInCtlXd> task_list;
+  std::list<Ctld::TaskInCtld> task_list;
   client.FetchJobRecordsWithStates(
       &task_list,
-      {SlurmxGrpc::TaskStatus::Pending, SlurmxGrpc::TaskStatus::Running});
+      {crane::grpc::TaskStatus::Pending, crane::grpc::TaskStatus::Running});
   GTEST_LOG_(INFO) << "End of Test\n";
 }
