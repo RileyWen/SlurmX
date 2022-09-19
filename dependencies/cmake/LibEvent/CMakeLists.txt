@@ -14,7 +14,7 @@ if (NOT libevent_repo_POPULATED)
             OR NOT EXISTS ${libevent_repo_SOURCE_DIR}/cmake-build/CMakeCache.txt)
         execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory "${libevent_repo_SOURCE_DIR}/cmake-build")
         execute_process(
-                COMMAND ${CMAKE_COMMAND} -Wno-dev -G Ninja -DEVENT__DISABLE_TESTS=ON -DEVENT__DISABLE_BENCHMARK=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${DEPENDENCIES_ONLINE_DIR}/libevent ..
+                COMMAND ${CMAKE_COMMAND} -Wno-dev -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER} -G Ninja -DEVENT__DISABLE_TESTS=ON -DEVENT__DISABLE_BENCHMARK=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${DEPENDENCIES_ONLINE_DIR}/libevent ..
                 WORKING_DIRECTORY ${libevent_repo_SOURCE_DIR}/cmake-build
         )
     endif ()
@@ -24,4 +24,3 @@ if (NOT libevent_repo_POPULATED)
     )
 endif ()
 
-list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/libevent")

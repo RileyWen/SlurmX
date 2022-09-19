@@ -43,12 +43,19 @@ find_package(Threads REQUIRED)
 
 # Some content are downloaded and built inside cmake folder.
 # This line must be place before any find_package() command.
+# Independently built projects are installed to ${DEPENDENCIES_ONLINE_DIR}
+#
+# Since find_package needs to be in the top scope, we append the paths of installed
+# projects at top-level CMakeLists.txt
 add_subdirectory(dependencies/cmake)
 
+list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/mongo-c-driver")
+list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/mongo-cxx-driver")
 find_package(mongocxx REQUIRED)
 
 # Link libevent as a static lib
 set(LIBEVENT_STATIC_LINK ON)
+list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/libevent")
 find_package(Libevent REQUIRED)
 
 # Notify CMake that we have module files to find packages/libs.

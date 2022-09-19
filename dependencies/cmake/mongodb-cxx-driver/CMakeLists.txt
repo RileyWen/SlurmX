@@ -19,7 +19,7 @@ if (NOT mongo_c_driver_repo_POPULATED)
             OR NOT EXISTS ${mongo_c_driver_repo_SOURCE_DIR}/cmake-build/CMakeCache.txt)
         execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory "${mongo_c_driver_repo_SOURCE_DIR}/cmake-build")
         execute_process(
-                COMMAND ${CMAKE_COMMAND} -Wno-dev -G Ninja -DBUILD_TESTING=OFF -DENABLE_UNINSTALL=OFF -DENABLE_HTML_DOCS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_AUTOMATIC_INIT_AND_CLEANUP=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${DEPENDENCIES_ONLINE_DIR}/mongo-c-driver ..
+                COMMAND ${CMAKE_COMMAND} -Wno-dev -G Ninja -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER} -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER} -DBUILD_TESTING=OFF -DENABLE_UNINSTALL=OFF -DENABLE_HTML_DOCS=OFF -DENABLE_EXAMPLES=OFF -DENABLE_AUTOMATIC_INIT_AND_CLEANUP=OFF -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=${DEPENDENCIES_ONLINE_DIR}/mongo-c-driver ..
                 WORKING_DIRECTORY ${mongo_c_driver_repo_SOURCE_DIR}/cmake-build
         )
     endif ()
@@ -39,7 +39,7 @@ if (NOT mongo_cxx_driver_repo_POPULATED)
             OR NOT EXISTS ${mongo_cxx_driver_repo_SOURCE_DIR}/cmake-build/CMakeCache.txt)
         execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${mongo_cxx_driver_repo_SOURCE_DIR}/cmake-build)
         execute_process(
-                COMMAND ${CMAKE_COMMAND} -Wno-dev -G Ninja -DCMAKE_PREFIX_PATH=${DEPENDENCIES_ONLINE_DIR}/mongo-c-driver -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 -DBUILD_SHARED_AND_STATIC_LIBS=ON -DBUILD_SHARED_LIBS_WITH_STATIC_MONGOC=ON -DENABLE_TESTS=OFF -DCMAKE_INSTALL_PREFIX=${DEPENDENCIES_ONLINE_DIR}/mongo-cxx-driver ..
+                COMMAND ${CMAKE_COMMAND} -Wno-dev -G Ninja -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER} -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER} -DCMAKE_PREFIX_PATH=${DEPENDENCIES_ONLINE_DIR}/mongo-c-driver -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 -DBUILD_SHARED_AND_STATIC_LIBS=ON -DBUILD_SHARED_LIBS_WITH_STATIC_MONGOC=ON -DENABLE_TESTS=OFF -DCMAKE_INSTALL_PREFIX=${DEPENDENCIES_ONLINE_DIR}/mongo-cxx-driver ..
                 WORKING_DIRECTORY ${mongo_cxx_driver_repo_SOURCE_DIR}/cmake-build
         )
     endif ()
@@ -48,6 +48,3 @@ if (NOT mongo_cxx_driver_repo_POPULATED)
             WORKING_DIRECTORY ${mongo_cxx_driver_repo_SOURCE_DIR}/cmake-build
     )
 endif ()
-
-list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/mongo-c-driver")
-list(APPEND CMAKE_PREFIX_PATH "${DEPENDENCIES_ONLINE_DIR}/mongo-cxx-driver")
