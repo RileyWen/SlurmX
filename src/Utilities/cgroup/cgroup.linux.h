@@ -21,8 +21,8 @@
 #include <optional>
 #include <string_view>
 
-#include "slurmx/Lock.h"
-#include "slurmx/PublicHeader.h"
+#include "crane/Lock.h"
+#include "crane/PublicHeader.h"
 
 namespace util {
 

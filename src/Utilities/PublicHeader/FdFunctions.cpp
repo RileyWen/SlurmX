@@ -1,4 +1,4 @@
-#include "slurmx/FdFunctions.h"
+#include "crane/FdFunctions.h"
 
 #include <fcntl.h>
 #include <unistd.h>
@@ -47,4 +47,4 @@ void SetCloseOnExecFromFd(int fd_begin) {
   }
 }
 
-}  // namespace slurmx
+}  // namespace util

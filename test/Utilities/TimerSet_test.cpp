@@ -1,4 +1,4 @@
-#include "slurmx/TimerSet.h"
+#include "crane/TimerSet.h"
 
 #include <absl/synchronization/mutex.h>
 #include <event2/thread.h>
@@ -7,16 +7,16 @@
 TEST(TimerSet, simple) {
   evthread_use_pthreads();
 
-  slurmx::TimerSet timer_set;
+  crane::TimerSet timer_set;
 
   absl::Mutex mtx;
   bool stop = false;
 
   timer_set.AddTimer(std::chrono::seconds(2),
-                     [] { SLURMX_INFO("Timer after 2s is triggered!"); });
+                     [] { CRANE_INFO("Timer after 2s is triggered!"); });
 
   timer_set.AddTimer(std::chrono::seconds(3), [&] {
-    SLURMX_INFO("Timer after 3s is triggered!");
+    CRANE_INFO("Timer after 3s is triggered!");
     mtx.Lock();
     stop = true;
     mtx.Unlock();

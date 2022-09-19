@@ -5,14 +5,7 @@
 #include <string>
 
 TEST(YAML, Sample) {
-  std::string config_yaml_path = "/etc/slurmx/config.yaml";
-
-  // ControlMachine
-  // ClusterName
-  // SlurmctlxdLogFile
-  // SlurmxdLogFile
-  // NodeName
-  // PartitionName
+  std::string config_yaml_path = "/etc/crane/config.yaml";
 
   try {
     YAML::Node node = YAML::LoadFile(config_yaml_path);

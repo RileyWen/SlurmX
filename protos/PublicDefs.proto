@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package SlurmxGrpc;
+package crane.grpc;
 option go_package = "/protos";
 
 import "google/protobuf/timestamp.proto";
@@ -9,9 +9,9 @@ import "google/protobuf/duration.proto";
 // All the definitions in this proto file can be found in PublicHeader.h
 // They are just protobuf version definitions.
 
-message XdNodeId {
+message CranedId {
   uint32 partition_id = 1;
-  uint32 node_index = 2;
+  uint32 craned_index = 2;
 }
 
 message AllocatableResource {
@@ -40,7 +40,7 @@ enum TaskType {
   Batch = 1;
 }
 
-message TaskToCtlXd {
+message TaskToCtld {
   /* -------- Fields that are set at the submission time. ------- */
   google.protobuf.Duration time_limit = 1;
 
@@ -67,7 +67,7 @@ message TaskToCtlXd {
   string env = 33;
 }
 
-message TaskToXd {
+message TaskToD {
   uint32 task_id = 1;
   TaskType type = 2;
   uint32 partition_id = 3;
@@ -77,7 +77,7 @@ message TaskToXd {
   // If this task is PENDING, start_time is either not set (default constructed)
   // or an estimated start time.
   // If this task is RUNNING, start_time is the actual starting time.
-  google.protobuf.Timestamp start_time = 5; // Currently Only used in SlurmCtlXd
+  google.protobuf.Timestamp start_time = 5; // Currently Only used in CraneCtld
   google.protobuf.Duration time_limit = 6;
 
   uint32 uid = 9;
@@ -107,13 +107,13 @@ message InteractiveTaskAdditionalMeta{
 }
 
 message TaskInfo {
-  TaskToCtlXd submit_info = 1;
+  TaskToCtld submit_info = 1;
   uint32 task_id = 2;
   uint32 gid = 3;
   //  uint32 priority = 4;
   string account = 5;
   TaskStatus status = 6;
-  string node_list = 7;
+  string craned_list = 7;
 
   google.protobuf.Timestamp start_time = 8;
   google.protobuf.Timestamp end_time = 9;
@@ -141,14 +141,14 @@ message PartitionInfo {
   uint64 free_mem = 13;
 }
 
-message NodeInfo {
-  enum NodeState {
+message CranedInfo {
+  enum CranedState {
     IDLE = 0;
     DOWN = 1;
   }
 
   string hostname = 1;
-  NodeState state = 2;
+  CranedState state = 2;
   uint32 cpus = 3;
   uint32 alloc_cpus = 4;
   uint32 free_cpus = 5;
@@ -159,15 +159,15 @@ message NodeInfo {
   uint32 running_task_num = 10;
 }
 
-message PartitionNodeInfo {
-  message CommonNodeStateList {
+message PartitionCranedInfo {
+  message CommonCranedState {
     string state = 1;
-    uint32 nodes_num = 2;
-    string nodes_list = 3;
+    uint32 craned_num = 2;
+    string craned_list = 3;
   }
   string name = 1;
   PartitionInfo.PartitionState state = 2;
-  repeated CommonNodeStateList common_node_state_list = 3;
+  repeated CommonCranedState common_craned_state_list = 3;
 }
 
 enum EntityType {

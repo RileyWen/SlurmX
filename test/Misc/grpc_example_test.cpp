@@ -17,7 +17,7 @@
 #include "concurrentqueue/concurrentqueue.h"
 #include "protos/math.grpc.pb.h"
 #include "protos/math.pb.h"
-#include "slurmx/PublicHeader.h"
+#include "crane/PublicHeader.h"
 
 using grpc::Server;
 using grpc::ServerBuilder;
@@ -672,10 +672,10 @@ TEST(Protobuf, InterprocessPipe) {
 }
 
 TEST(GrpcExample, UnixSocket) {
-  std::filesystem::create_directories(kDefaultSlurmXTempDir);
+  std::filesystem::create_directories(kDefaultCraneTempDir);
 
   std::string server_address =
-      fmt::format("{}{}", "unix://", kDefaultSlurmXdUnixSockPath);
+      fmt::format("{}{}", "unix://", kDefaultCranedUnixSockPath);
   SPDLOG_INFO("Unix Server Address: {}", server_address);
 
   GreeterSyncServer server(server_address);

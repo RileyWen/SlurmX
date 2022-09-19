@@ -30,7 +30,7 @@ CgroupManager &CgroupManager::Instance() {
  */
 int CgroupManager::initialize() {
   // Initialize library and data structures
-  SLURMX_DEBUG("Initializing cgroup library.");
+  CRANE_DEBUG("Initializing cgroup library.");
   cgroup_init();
 
   // cgroup_set_loglevel(CGROUP_LOG_DEBUG);
@@ -88,26 +88,26 @@ int CgroupManager::initialize() {
   }
 
   if (!Mounted(Controller::BLOCK_CONTROLLER)) {
-    SLURMX_WARN("Cgroup controller for I/O statistics is not available.\n");
+    CRANE_WARN("Cgroup controller for I/O statistics is not available.\n");
   }
   if (!Mounted(Controller::FREEZE_CONTROLLER)) {
-    SLURMX_WARN("Cgroup controller for process management is not available.\n");
+    CRANE_WARN("Cgroup controller for process management is not available.\n");
   }
   if (!Mounted(Controller::CPUACCT_CONTROLLER)) {
-    SLURMX_WARN("Cgroup controller for CPU accounting is not available.\n");
+    CRANE_WARN("Cgroup controller for CPU accounting is not available.\n");
   }
   if (!Mounted(Controller::MEMORY_CONTROLLER)) {
-    SLURMX_WARN("Cgroup controller for memory accounting is not available.\n");
+    CRANE_WARN("Cgroup controller for memory accounting is not available.\n");
   }
   if (!Mounted(Controller::CPU_CONTROLLER)) {
-    SLURMX_WARN("Cgroup controller for CPU is not available.\n");
+    CRANE_WARN("Cgroup controller for CPU is not available.\n");
   }
   if (!Mounted(Controller::DEVICES_CONTROLLER)) {
-    SLURMX_WARN("Cgroup controller for DEVICES is not available.\n");
+    CRANE_WARN("Cgroup controller for DEVICES is not available.\n");
   }
   if (ret != ECGEOF) {
-    SLURMX_WARN("Error iterating through cgroups mount information: {}\n",
-                cgroup_strerror(ret));
+    CRANE_WARN("Error iterating through cgroups mount information: {}\n",
+               cgroup_strerror(ret));
     return -1;
   }
 
@@ -128,8 +128,8 @@ int CgroupManager::initialize_controller(
 
   if (!Mounted(controller)) {
     if (required) {
-      SLURMX_WARN("Error - cgroup controller {} not mounted, but required.\n",
-                  CgroupConstant::GetControllerStringView(controller));
+      CRANE_WARN("Error - cgroup controller {} not mounted, but required.\n",
+                 CgroupConstant::GetControllerStringView(controller));
       return 1;
     } else {
       fmt::print("cgroup controller {} is already mounted");
@@ -141,8 +141,8 @@ int CgroupManager::initialize_controller(
       (cgroup_get_controller(&cgroup, controller_str.data()) == nullptr)) {
     changed_cgroup = true;
     if (cgroup_add_controller(&cgroup, controller_str.data()) == nullptr) {
-      SLURMX_WARN("Unable to initialize cgroup {} controller.\n",
-                  controller_str);
+      CRANE_WARN("Unable to initialize cgroup {} controller.\n",
+                 controller_str);
       return required ? 1 : 0;
     }
   }
@@ -184,7 +184,7 @@ Cgroup *CgroupManager::CreateOrOpen(const std::string &cgroup_string,
   bool created_cgroup = false, changed_cgroup = false;
   struct cgroup *native_cgroup = cgroup_new_cgroup(cgroup_string.c_str());
   if (native_cgroup == NULL) {
-    SLURMX_WARN("Unable to construct new cgroup object.\n");
+    CRANE_WARN("Unable to construct new cgroup object.\n");
     return nullptr;
   }
 
@@ -243,7 +243,7 @@ Cgroup *CgroupManager::CreateOrOpen(const std::string &cgroup_string,
   if (!has_cgroup) {
     if ((err = cgroup_create_cgroup(native_cgroup, 0))) {
       // Only record at D_ALWAYS if any cgroup mounts are available.
-      SLURMX_WARN(
+      CRANE_WARN(
           "Unable to create cgroup {}."
           " Cgroup functionality will not work: {}\n",
           cgroup_string.c_str(), cgroup_strerror(err));
@@ -253,7 +253,7 @@ Cgroup *CgroupManager::CreateOrOpen(const std::string &cgroup_string,
     }
   } else if (has_cgroup && changed_cgroup &&
              (err = cgroup_modify_cgroup(native_cgroup))) {
-    SLURMX_WARN(
+    CRANE_WARN(
         "Unable to modify cgroup {}."
         "  Some cgroup functionality may not work: {} {}\n",
         cgroup_string.c_str(), err, cgroup_strerror(err));
@@ -268,11 +268,11 @@ Cgroup *CgroupManager::CreateOrOpen(const std::string &cgroup_string,
     // Todo: What's memory.use_hierarchy? Try to eliminate `retrieve`.
     if ((err = cgroup_add_value_bool(mem_controller, "memory.use_hierarchy",
                                      true))) {
-      SLURMX_WARN("Unable to set hierarchical memory settings for {}: {} {}\n",
-                  cgroup_string.c_str(), err, cgroup_strerror(err));
+      CRANE_WARN("Unable to set hierarchical memory settings for {}: {} {}\n",
+                 cgroup_string.c_str(), err, cgroup_strerror(err));
     } else {
       if ((err = cgroup_modify_cgroup(native_cgroup))) {
-        SLURMX_WARN(
+        CRANE_WARN(
             "Unable to enable hierarchical memory accounting for {} "
             ": {} {}\n",
             cgroup_string.c_str(), err, cgroup_strerror(err));
@@ -294,7 +294,7 @@ bool CgroupManager::Release(const std::string &cgroup_path) {
 
   auto it = m_cgroup_ref_count_map_.find(cgroup_path);
   if (it == m_cgroup_ref_count_map_.end()) {
-    SLURMX_WARN("Destroying an unknown cgroup.");
+    CRANE_WARN("Destroying an unknown cgroup.");
     return false;
   }
 
@@ -308,8 +308,8 @@ bool CgroupManager::Release(const std::string &cgroup_path) {
     struct cgroup *dcg = cgroup_new_cgroup(cgroup_path.c_str());
     assert(dcg != nullptr);
     if ((err = cgroup_get_cgroup(dcg))) {
-      SLURMX_WARN("Unable to read cgroup {} for deletion: {} {}\n",
-                  cgroup_path.c_str(), err, cgroup_strerror(err));
+      CRANE_WARN("Unable to read cgroup {} for deletion: {} {}\n",
+                 cgroup_path.c_str(), err, cgroup_strerror(err));
       cgroup_free(&dcg);
       return false;
     }
@@ -321,10 +321,10 @@ bool CgroupManager::Release(const std::string &cgroup_path) {
     // Todo: Test this part when cgroup is not empty!
     if ((err = cgroup_delete_cgroup_ext(
              dcg, CGFLAG_DELETE_EMPTY_ONLY | CGFLAG_DELETE_IGNORE_MIGRATION))) {
-      SLURMX_WARN("Unable to completely remove cgroup {}: {} {}\n",
-                  cgroup_path.c_str(), err, cgroup_strerror(err));
+      CRANE_WARN("Unable to completely remove cgroup {}: {} {}\n",
+                 cgroup_path.c_str(), err, cgroup_strerror(err));
     } else {
-      SLURMX_TRACE("Deleted cgroup {}.", cgroup_path.c_str());
+      CRANE_TRACE("Deleted cgroup {}.", cgroup_path.c_str());
     }
 
     // Notice the cgroup struct freed here is not the one held by Cgroup class.
@@ -346,7 +346,7 @@ bool CgroupManager::MigrateProcTo(pid_t pid, const std::string &cgroup_path) {
   // process is already in the cgroup
   auto iter = m_cgroup_ref_count_map_.find(cgroup_path);
   if (iter == m_cgroup_ref_count_map_.end()) {
-    SLURMX_WARN(cgroup_path);
+    CRANE_WARN(cgroup_path);
     return false;
   }
 
@@ -368,7 +368,7 @@ bool CgroupManager::MigrateProcTo(pid_t pid, const std::string &cgroup_path) {
 //      (err = cgroup_get_current_controller_path(
 //           pid, GetControllerStringView(Controller::MEMORY_CONTROLLER).data(),
 //           &orig_cgroup_path))) {
-//    SLURMX_WARN(
+//    CRANE_WARN(
 //        "Unable to determine current memory cgroup for PID {}. Error {}:
 //        {}\n", pid, err, cgroup_strerror(err));
 //    return false;
@@ -384,7 +384,7 @@ bool CgroupManager::MigrateProcTo(pid_t pid, const std::string &cgroup_path) {
 //    orig_cgroup = cgroup_new_cgroup(orig_cgroup_path);
 //    assert(orig_cgroup != nullptr);
 //    if ((err = cgroup_get_cgroup(orig_cgroup))) {
-//      SLURMX_WARN("Unable to read original cgroup {}. Error {}: {}\n",
+//      CRANE_WARN("Unable to read original cgroup {}. Error {}: {}\n",
 //                  orig_cgroup_path, err, cgroup_strerror(err));
 //      cgroup_free(&orig_cgroup);
 //      goto after_migrate;
@@ -394,7 +394,7 @@ bool CgroupManager::MigrateProcTo(pid_t pid, const std::string &cgroup_path) {
 //             GetControllerStringView(Controller::MEMORY_CONTROLLER).data()))
 //             ==
 //        nullptr) {
-//      SLURMX_WARN(
+//      CRANE_WARN(
 //          "Unable to get memory controller of cgroup {}. Error {}: {}\n",
 //          orig_cgroup_path, err, cgroup_strerror(err));
 //      cgroup_free(&orig_cgroup);
@@ -406,13 +406,13 @@ bool CgroupManager::MigrateProcTo(pid_t pid, const std::string &cgroup_path) {
 //      if (err == ECGROUPVALUENOTEXIST) {
 //        // Older kernels don't have the ability to migrate memory accounting
 //        // to the new cgroup.
-//        SLURMX_WARN(
+//        CRANE_WARN(
 //            "This kernel does not support memory usage migration; cgroup "
 //            "{} memory statistics"
 //            " will be slightly incorrect.\n",
 //            cgroup_path.c_str());
 //      } else {
-//        SLURMX_WARN(
+//        CRANE_WARN(
 //            "Unable to read cgroup {} memory controller settings for "
 //            "migration: {} {}\n",
 //            orig_cgroup_path, err, cgroup_strerror(err));
@@ -432,7 +432,7 @@ bool CgroupManager::MigrateProcTo(pid_t pid, const std::string &cgroup_path) {
 //                              "memory.move_charge_at_immigrate", 3);
 //      if ((err = cgroup_modify_cgroup(orig_cgroup))) {
 //        // Not allowed to change settings
-//        SLURMX_WARN(
+//        CRANE_WARN(
 //            "Unable to change cgroup {} memory controller settings for "
 //            "migration. "
 //            "Some memory accounting will be inaccurate: {} "
@@ -451,8 +451,8 @@ after_migrate:
   struct cgroup *pcg = iter->second.first->m_cgroup_;
   err = cgroup_attach_task_pid(pcg, pid);
   if (err != 0) {
-    SLURMX_WARN("Cannot attach pid {} to cgroup {}: {} {}\n", pid,
-                cgroup_path.c_str(), err, cgroup_strerror(err));
+    CRANE_WARN("Cannot attach pid {} to cgroup {}: {} {}\n", pid,
+               cgroup_path.c_str(), err, cgroup_strerror(err));
   }
 
 //  std::string cpu_cg_path =
@@ -463,34 +463,34 @@ after_migrate:
 //
 //  FILE *cpu_cg_f = fopen(cpu_cg_path.c_str(), "ae");
 //  if (cpu_cg_f == nullptr) {
-//    SLURMX_ERROR("fopen failed: {}", strerror(errno));
+//    CRANE_ERROR("fopen failed: {}", strerror(errno));
 //    err = 1;
 //    goto end;
 //  } else {
-//    SLURMX_TRACE("Open {} succeeded.", cpu_cg_path);
+//    CRANE_TRACE("Open {} succeeded.", cpu_cg_path);
 //  }
 //
 //  err = fprintf(cpu_cg_f, "%d", pid);
 //  if (err < 0) {
-//    SLURMX_ERROR("fprintf failed: {}", strerror(errno));
+//    CRANE_ERROR("fprintf failed: {}", strerror(errno));
 //    goto end;
 //  } else {
-//    SLURMX_TRACE("fprintf {} bytes succeeded.", err);
+//    CRANE_TRACE("fprintf {} bytes succeeded.", err);
 //  }
 //
 //  err = fflush(cpu_cg_f);
 //  if (err < 0) {
-//    SLURMX_ERROR("fflush failed: {}", strerror(errno));
+//    CRANE_ERROR("fflush failed: {}", strerror(errno));
 //    goto end;
 //  } else {
-//    SLURMX_TRACE("fflush succeeded.");
+//    CRANE_TRACE("fflush succeeded.");
 //  }
 //
 //  fclose(cpu_cg_f);
 //
 //  if (cpu_cg_content.is_open()) {
 //    while (std::getline(cpu_cg_content, line)) {
-//      SLURMX_TRACE("Pid in {}: {}", cgroup_path, line);
+//      CRANE_TRACE("Pid in {}: {}", cgroup_path, line);
 //    }
 //    cpu_cg_content.close();
 //  }
@@ -508,7 +508,7 @@ after_migrate:
 //                                  "memory.move_charge_at_immigrate",
 //                                  orig_migrate))) {
 //      if ((err = cgroup_modify_cgroup(orig_cgroup))) {
-//        SLURMX_WARN(
+//        CRANE_WARN(
 //            "Unable to change cgroup {} memory controller settings for "
 //            "migration. "
 //            "Some memory accounting will be inaccurate: {} "
@@ -595,9 +595,9 @@ bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
   CgroupManager &cm = CgroupManager::Instance();
 
   if (!cm.Mounted(controller)) {
-    SLURMX_WARN("Unable to set {} because cgroup {} is not mounted.\n",
-                CgroupConstant::GetControllerFileStringView(controller_file),
-                CgroupConstant::GetControllerStringView(controller));
+    CRANE_WARN("Unable to set {} because cgroup {} is not mounted.\n",
+               CgroupConstant::GetControllerFileStringView(controller_file),
+               CgroupConstant::GetControllerStringView(controller));
     return false;
   }
 
@@ -609,9 +609,9 @@ bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
            m_cgroup_,
            CgroupConstant::GetControllerStringView(controller).data())) ==
       nullptr) {
-    SLURMX_WARN("Unable to get cgroup {} controller for {}.\n",
-                CgroupConstant::GetControllerStringView(controller),
-                m_cgroup_path_);
+    CRANE_WARN("Unable to get cgroup {} controller for {}.\n",
+               CgroupConstant::GetControllerStringView(controller),
+               m_cgroup_path_);
     return false;
   }
 
@@ -619,16 +619,16 @@ bool Cgroup::SetControllerValue(CgroupConstant::Controller controller,
            cg_controller,
            CgroupConstant::GetControllerFileStringView(controller_file).data(),
            value))) {
-    SLURMX_WARN("Unable to set uint64 value for {}: {} {}\n", m_cgroup_path_,
-                err, cgroup_strerror(err));
+    CRANE_WARN("Unable to set uint64 value for {}: {} {}\n", m_cgroup_path_,
+               err, cgroup_strerror(err));
     return false;
   }
 
   // Commit cgroup modifications.
   if ((err = cgroup_modify_cgroup(m_cgroup_))) {
-    SLURMX_WARN("Unable to commit {} for cgroup {}: {} {}",
-                CgroupConstant::GetControllerFileStringView(controller_file),
-                m_cgroup_path_, err, cgroup_strerror(err));
+    CRANE_WARN("Unable to commit {} for cgroup {}: {} {}",
+               CgroupConstant::GetControllerFileStringView(controller_file),
+               m_cgroup_path_, err, cgroup_strerror(err));
     return false;
   }
 
@@ -641,9 +641,9 @@ bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
   CgroupManager &cm = CgroupManager::Instance();
 
   if (!cm.Mounted(controller)) {
-    SLURMX_WARN("Unable to set {} because cgroup {} is not mounted.\n",
-                CgroupConstant::GetControllerFileStringView(controller_file),
-                CgroupConstant::GetControllerStringView(controller));
+    CRANE_WARN("Unable to set {} because cgroup {} is not mounted.\n",
+               CgroupConstant::GetControllerFileStringView(controller_file),
+               CgroupConstant::GetControllerStringView(controller));
     return false;
   }
 
@@ -655,9 +655,9 @@ bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
            m_cgroup_,
            CgroupConstant::GetControllerStringView(controller).data())) ==
       nullptr) {
-    SLURMX_WARN("Unable to get cgroup {} controller for {}.\n",
-                CgroupConstant::GetControllerStringView(controller),
-                m_cgroup_path_);
+    CRANE_WARN("Unable to get cgroup {} controller for {}.\n",
+               CgroupConstant::GetControllerStringView(controller),
+               m_cgroup_path_);
     return false;
   }
 
@@ -665,16 +665,16 @@ bool Cgroup::SetControllerStr(CgroupConstant::Controller controller,
            cg_controller,
            CgroupConstant::GetControllerFileStringView(controller_file).data(),
            str.c_str()))) {
-    SLURMX_WARN("Unable to set string for {}: {} {}\n", m_cgroup_path_, err,
-                cgroup_strerror(err));
+    CRANE_WARN("Unable to set string for {}: {} {}\n", m_cgroup_path_, err,
+               cgroup_strerror(err));
     return false;
   }
 
   // Commit cgroup modifications.
   if ((err = cgroup_modify_cgroup(m_cgroup_))) {
-    SLURMX_WARN("Unable to commit {} for cgroup {}: {} {}\n",
-                CgroupConstant::GetControllerFileStringView(controller_file),
-                m_cgroup_path_, err, cgroup_strerror(err));
+    CRANE_WARN("Unable to commit {} for cgroup {}: {} {}\n",
+               CgroupConstant::GetControllerFileStringView(controller_file),
+               m_cgroup_path_, err, cgroup_strerror(err));
     return false;
   }
 
@@ -703,8 +703,8 @@ bool Cgroup::KillAllProcesses() {
     free(pids);
     return true;
   } else {
-    SLURMX_ERROR("cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
-                 cgroup_strerror(rc));
+    CRANE_ERROR("cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
+                cgroup_strerror(rc));
     return false;
   }
 }
@@ -727,8 +727,8 @@ bool Cgroup::Empty() {
     free(pids);
     return size == 0;
   } else {
-    SLURMX_ERROR("cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
-                 cgroup_strerror(rc));
+    CRANE_ERROR("cgroup_get_procs error on cgroup \"{}\": {}", cg_name,
+                cgroup_strerror(rc));
     return false;
   }
 }

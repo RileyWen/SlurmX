@@ -3,7 +3,7 @@
 #include <cstdint>
 
 #include "PamUtil.h"
-#include "slurmx/PublicHeader.h"
+#include "crane/PublicHeader.h"
 
 #define PAM_STR_TRUE ("T")
 #define PAM_STR_FALSE ("F")
@@ -27,12 +27,12 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
   /* Asking the application for a username */
   ok = PamGetUserName(pamh, &username);
   if (!ok) {
-    pam_syslog(pamh, LOG_ERR, "[SlurmX] Failed to get username");
+    pam_syslog(pamh, LOG_ERR, "[Crane] Failed to get username");
     return PAM_SESSION_ERR;
   }
 
   if (username == "root") {
-    pam_syslog(pamh, LOG_ERR, "[SlurmX] Allow root to log in");
+    pam_syslog(pamh, LOG_ERR, "[Crane] Allow root to log in");
     return PAM_SUCCESS;
   }
 
@@ -47,7 +47,7 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
 
   if (!ok) {
     PamSendMsgToClient(
-        pamh, "SlurmX: Cannot resolve src address and port in pam module.");
+        pamh, "Crane: Cannot resolve src address and port in pam module.");
     return PAM_AUTH_ERR;
   }
 
@@ -57,15 +57,15 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
   std::string server_address =
       fmt::format("{}.{}.{}.{}", addr[0], addr[1], addr[2], addr[3]);
 
-  pam_syslog(pamh, LOG_ERR, "[SlurmX] Try to query %s for remote port %hu",
+  pam_syslog(pamh, LOG_ERR, "[Crane] Try to query %s for remote port %hu",
              server_address.c_str(), port);
 
-  ok = GrpcQueryPortFromSlurmXd(pamh, uid, server_address, kXdDefaultPort, port,
-                                &task_id, &cgroup_path);
+  ok = GrpcQueryPortFromCraned(pamh, uid, server_address, kCranedDefaultPort,
+                               port, &task_id, &cgroup_path);
 
   if (ok) {
     pam_syslog(pamh, LOG_ERR,
-               "[SlurmX] Accepted ssh connection with remote port %hu ", port);
+               "[Crane] Accepted ssh connection with remote port %hu ", port);
 
     char *auth_result = strdup(PAM_STR_TRUE);
     char *task_id_str = strdup(std::to_string(task_id).c_str());
@@ -81,7 +81,7 @@ int pam_sm_acct_mgmt(pam_handle_t *pamh, int flags, int argc,
     pam_set_data(pamh, PAM_ITEM_AUTH_RESULT, auth_result, clean_up_cb);
 
     pam_syslog(pamh, LOG_ERR,
-               "[SlurmX] Rejected ssh connection with remote port %hu ", port);
+               "[Crane] Rejected ssh connection with remote port %hu ", port);
     PamSendMsgToClient(pamh, "Rejected by CraneD PAM Module.");
     return PAM_PERM_DENIED;
   }
@@ -100,14 +100,14 @@ int pam_sm_open_session(pam_handle_t *pamh, int flags, int argc,
   /* Asking the application for a username */
   ok = PamGetUserName(pamh, &username);
   if (!ok) {
-    pam_syslog(pamh, LOG_ERR, "[SlurmX] Failed to get username");
+    pam_syslog(pamh, LOG_ERR, "[Crane] Failed to get username");
     return PAM_SESSION_ERR;
   }
 
   if (username == "root") {
     pam_syslog(
         pamh, LOG_ERR,
-        "[SlurmX] Allow root to open a session without resource restriction");
+        "[Crane] Allow root to open a session without resource restriction");
     return PAM_SUCCESS;
   }
 
@@ -117,7 +117,7 @@ int pam_sm_open_session(pam_handle_t *pamh, int flags, int argc,
     pam_get_data(pamh, PAM_ITEM_CG_PATH, (const void **)&cgroup_path_str);
 
     pam_syslog(pamh, LOG_ERR,
-               "[SlurmX] open_session retrieved task_id: %s, cg_path: %s",
+               "[Crane] open_session retrieved task_id: %s, cg_path: %s",
                task_id_str, cgroup_path_str);
 
     task_id = std::atoi(task_id_str);

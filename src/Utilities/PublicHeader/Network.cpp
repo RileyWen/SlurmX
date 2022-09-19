@@ -1,11 +1,11 @@
-#include "slurmx/Network.h"
+#include "crane/Network.h"
 
 #include <cstring>
 #include <regex>
 
-#include "slurmx/PublicHeader.h"
+#include "crane/PublicHeader.h"
 
-namespace slurmx {
+namespace crane {
 
 bool ResolveHostnameFromIpv4(const std::string& addr, std::string* hostname) {
   struct sockaddr_in sa; /* input */
@@ -22,8 +22,8 @@ bool ResolveHostnameFromIpv4(const std::string& addr, std::string* hostname) {
   int r;
   if ((r = getnameinfo((struct sockaddr*)&sa, len, hbuf, sizeof(hbuf), nullptr,
                        0, NI_NAMEREQD))) {
-    SLURMX_TRACE("Error in getnameinfo when resolving hostname for {}: {}",
-                 addr.c_str(), gai_strerror(r));
+    CRANE_TRACE("Error in getnameinfo when resolving hostname for {}: {}",
+                addr.c_str(), gai_strerror(r));
     return false;
   } else {
     hostname->assign(hbuf);
@@ -49,8 +49,8 @@ bool ResolveHostnameFromIpv6(const std::string& addr, std::string* hostname) {
   int r;
   if ((r = getnameinfo((struct sockaddr*)&sa6, len, hbuf, sizeof(hbuf), nullptr,
                        0, NI_NAMEREQD))) {
-    SLURMX_TRACE("Error in getnameinfo when resolving hostname for {}: {}",
-                 addr.c_str(), gai_strerror(r));
+    CRANE_TRACE("Error in getnameinfo when resolving hostname for {}: {}",
+                addr.c_str(), gai_strerror(r));
     return false;
   } else {
     hostname->assign(hbuf);
@@ -67,8 +67,8 @@ bool ResolveIpv4FromHostname(const std::string& hostname, std::string* addr) {
 
   int ret = getaddrinfo(hostname.c_str(), nullptr, &hints, &res);
   if (ret != 0) {
-    SLURMX_WARN("Error in getaddrinfo when resolving hostname {}: {}",
-                hostname.c_str(), gai_strerror(ret));
+    CRANE_WARN("Error in getaddrinfo when resolving hostname {}: {}",
+               hostname.c_str(), gai_strerror(ret));
     return false;
   }
 
@@ -91,4 +91,4 @@ bool IsAValidIpv4Address(const std::string& ipv4) {
   return true;
 }
 
-}  // namespace slurmx
+}  // namespace crane
