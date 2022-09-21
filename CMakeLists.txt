@@ -1,26 +1,69 @@
 cmake_minimum_required(VERSION 3.16)
 
-#set(CMAKE_VERBOSE_MAKEFILE ON)
-set(CMAKE_CXX_STANDARD 17)
+# Let cmake apply IPO flags for all compilers and do not output warnings.
+set(CMAKE_POLICY_DEFAULT_CMP0069 NEW)
 
-if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    # Check LTO support
-    include(CheckIPOSupported)
-    check_ipo_supported(RESULT supported OUTPUT error)
-    if (supported)
+# Set a default build type if none was specified
+if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+    message(STATUS "Setting build type to 'Debug' as none was specified.")
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Choose the type of build." FORCE)
+    # Set the possible values of build type for cmake-gui
+    set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release"
+            "MinSizeRel" "RelWithDebInfo")
+endif ()
+
+set(PREVIOUS_BUILD_TYPE_FILE ${CMAKE_BINARY_DIR}/PreviousBuildType.txt)
+if (NOT EXISTS ${PREVIOUS_BUILD_TYPE_FILE})
+    message(STATUS "No previous build found. Write build type to ${PREVIOUS_BUILD_TYPE_FILE}")
+    file(WRITE ${PREVIOUS_BUILD_TYPE_FILE} "${CMAKE_BUILD_TYPE}")
+    set(RECONFIGURATION_NEEDED TRUE)
+else ()
+    file(READ ${PREVIOUS_BUILD_TYPE_FILE} PREVIOUS_BUILD_TYPE)
+    if (CMAKE_BUILD_TYPE STREQUAL PREVIOUS_BUILD_TYPE)
+        message(STATUS "Previous build type found: ${PREVIOUS_BUILD_TYPE}. Build type is not changed. No reconfiguration for third-party libraries is needed.")
+        set(RECONFIGURATION_NEEDED FALSE)
+    else ()
+        message(STATUS "Previous build type found: ${PREVIOUS_BUILD_TYPE}. Build type is changed to ${CMAKE_BUILD_TYPE}. Reconfiguration for third-party libraries is needed.")
+        set(RECONFIGURATION_NEEDED TRUE)
+        file(WRITE ${PREVIOUS_BUILD_TYPE_FILE} "${CMAKE_BUILD_TYPE}")
+    endif ()
+endif ()
+
+
+project(Crane C CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# Check LTO support
+include(CheckIPOSupported)
+check_ipo_supported(RESULT supported OUTPUT error)
+if (supported)
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_BUILD_TYPE STREQUAL "Release")
+        # IPO/LTO is disabled in g++ under Debug mode since it's quite slow.
         message(STATUS "IPO / LTO enabled")
         set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
-    else ()
-        message(STATUS "IPO / LTO not supported: <${error}>")
     endif ()
+else ()
+    message(STATUS "IPO / LTO not supported: <${error}>")
+endif ()
+
+set(CLANG_LLD_LINKER_FLAGS "-fuse-ld=lld")
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    # Linker flags passed to manually built third party libraries
+    set(CRANE_LINKER_FLAGS_INIT "-DCMAKE_SHARED_LINKER_FLAGS_INIT=${CLANG_LLD_LINKER_FLAGS}")
+
+    # static link on c++ libs
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++ ${CLANG_LLD_LINKER_FLAGS}")
+    # ld doesn't recognize clang object files with IPO / LTO enabled. Use lld here
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++ ${CLANG_LLD_LINKER_FLAGS}")
+else ()
+    # Linker flags passed to manually built third party libraries
+    set(CRANE_LINKER_FLAGS_INIT "\"\"")
 
     # static link on c++ libs
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libstdc++")
-
-elseif (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    message(STATUS "IPO / LTO disabled due to gcc bugs.")
-else ()
-    message(STATUS "IPO / LTO disabled for all untested compilers.")
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -static-libstdc++")
 endif ()
 
 # Set colorized output when ninja build system is used.
@@ -37,7 +80,6 @@ endif ()
 set(DEPENDENCIES_PRE_INSTALLED_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/pre_installed)
 set(DEPENDENCIES_ONLINE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dependencies/online)
 
-project(Crane)
 
 find_package(Threads REQUIRED)
 

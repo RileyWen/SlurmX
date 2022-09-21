@@ -50,8 +50,8 @@
   do {                                       \
   } while (false)
 
-#define CRANE_ASSERT_MSG(condition) \
-  do {                              \
+#define CRANE_ASSERT(condition) \
+  do {                          \
   } while (false)
 #endif
 

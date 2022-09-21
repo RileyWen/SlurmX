@@ -96,14 +96,14 @@ void ParseConfig(int argc, char** argv) {
       } else
         std::exit(1);
 
-      if (config["CranedDebugLevel "])
+      if (config["CranedDebugLevel"])
         g_config.CranedDebugLevel =
-            config["CranedDebugLevel "].as<std::string>();
+            config["CranedDebugLevel"].as<std::string>();
       else
         std::exit(1);
 
-      if (config["CranedLogFile "])
-        g_config.CranedLogFile = config["CranedLogFile "].as<std::string>();
+      if (config["CranedLogFile"])
+        g_config.CranedLogFile = config["CranedLogFile"].as<std::string>();
       else
         g_config.CranedLogFile = "/tmp/crane/craned.log";
 
@@ -213,8 +213,8 @@ void ParseConfig(int argc, char** argv) {
           g_config.Partitions.emplace(std::move(name), std::move(part));
         }
 
-        if (config["CranedForeground "]) {
-          auto val = config["CranedForeground "].as<std::string>();
+        if (config["CranedForeground"]) {
+          auto val = config["CranedForeground"].as<std::string>();
           if (val == "true")
             g_config.CranedForeground = true;
           else
