@@ -208,15 +208,15 @@ int main(int argc, char** argv) {
     try {
       YAML::Node config = YAML::LoadFile(kDefaultConfigPath);
 
-      if (config["CraneCtldListenAddr "])
+      if (config["CraneCtldListenAddr"])
         g_config.ListenConf.CraneCtldListenAddr =
-            config["CraneCtldListenAddr "].as<std::string>();
+            config["CraneCtldListenAddr"].as<std::string>();
       else
         g_config.ListenConf.CraneCtldListenAddr = "0.0.0.0";
 
-      if (config["CraneCtldListenPort "])
+      if (config["CraneCtldListenPort"])
         g_config.ListenConf.CraneCtldListenPort =
-            config["CraneCtldListenPort "].as<std::string>();
+            config["CraneCtldListenPort"].as<std::string>();
       else
         g_config.ListenConf.CraneCtldListenPort = kCtldDefaultPort;
 
@@ -267,15 +267,15 @@ int main(int argc, char** argv) {
         g_config.ListenConf.UseTls = false;
       }
 
-      if (config["CraneCtldDebugLevel "])
+      if (config["CraneCtldDebugLevel"])
         g_config.CraneCtldDebugLevel =
-            config["CraneCtldDebugLevel "].as<std::string>();
+            config["CraneCtldDebugLevel"].as<std::string>();
       else
         std::exit(1);
 
-      if (config["CraneCtldLogFile "])
+      if (config["CraneCtldLogFile"])
         g_config.CraneCtldLogFile =
-            config["CraneCtldLogFile "].as<std::string>();
+            config["CraneCtldLogFile"].as<std::string>();
       else
         g_config.CraneCtldLogFile = "/tmp/cranectld/cranectld.log";
 

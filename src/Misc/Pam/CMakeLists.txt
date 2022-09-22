@@ -13,7 +13,7 @@ target_link_libraries(pam_crane PUBLIC
         ${PAM_LIBRARIES}
         crane_proto_lib
         Boost::boost
-        spdlog::spdlog
+        fmt::fmt
         Utility_PublicHeader
         )
 

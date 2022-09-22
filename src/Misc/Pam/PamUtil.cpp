@@ -2,7 +2,7 @@
 
 #include <grpc++/grpc++.h>
 #include <pwd.h>
-#include <spdlog/fmt/fmt.h>
+#include <fmt/format.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
