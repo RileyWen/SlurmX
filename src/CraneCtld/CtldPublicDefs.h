@@ -218,10 +218,8 @@ struct Config {
 
   std::string DbUser;
   std::string DbPassword;
-  std::string MongodbUser;
-  std::string MongodbPassword;
-  std::string MongodbHost;
-  std::string MongodbPort;
+  std::string DbHost;
+  std::string DbPort;
 };
 
 }  // namespace Ctld
