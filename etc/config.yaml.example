@@ -18,6 +18,7 @@ DbUser: admin
 DbPassword: "123456"
 DbHost: localhost
 DbPort: 27017
+DbName: crane_db
 
 # debug level of craned
 CranedDebugLevel: trace

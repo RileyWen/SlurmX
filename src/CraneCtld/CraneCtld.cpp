@@ -283,6 +283,11 @@ int main(int argc, char** argv) {
       else
         g_config.DbPort = "27017";  // default port 27017
 
+      if (config["DbName"])
+        g_config.DbName = config["DbName"].as<std::string>();
+      else
+        g_config.DbName = "crane_db";
+
       if (config["CraneCtldForeground"]) {
         auto val = config["CraneCtldForeground"].as<std::string>();
         if (val == "true")

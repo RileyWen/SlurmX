@@ -111,7 +111,7 @@ class MongodbClient {
     CRANE_ERROR("MongodbError: {}\n", msg);
   }
 
-  const std::string m_db_name{"crane_db"};
+  std::string m_db_name;
   const std::string m_job_collection_name{"job_table"};
   const std::string m_account_collection_name{"acct_table"};
   const std::string m_user_collection_name{"user_table"};

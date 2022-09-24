@@ -8,6 +8,7 @@ namespace Ctld {
 
 bool MongodbClient::Connect() {
   m_dbInstance = std::make_unique<mongocxx::instance>();
+  m_db_name = g_config.DbName;
   std::string uri_str;
 
   if (!g_config.DbUser.empty()) {

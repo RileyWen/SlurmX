@@ -220,6 +220,7 @@ struct Config {
   std::string DbPassword;
   std::string DbHost;
   std::string DbPort;
+  std::string DbName;
 };
 
 }  // namespace Ctld
